@@ -1,0 +1,159 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="About" 
+  description="About Systems Explained - interactive visualizations for distributed systems"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "About", href: "/about/" }]}
+>
+  <section class="about">
+    <h1>About Systems Explained</h1>
+    
+    <div class="about-content">
+      <p class="lead">
+        Distributed systems are hard to understand from documentation alone. 
+        You can read about Raft consensus, LSM-trees, or partition rebalancing — 
+        but until you <em>see</em> them in action, the tradeoffs don't click.
+      </p>
+
+      <h2>The Problem</h2>
+      <p>
+        Most distributed systems education is either too theoretical (academic papers) 
+        or too practical (vendor docs that assume you already understand the concepts). 
+        There's a gap in the middle: interactive, visual explanations that let you 
+        <strong>play with the parameters</strong> and see what happens.
+      </p>
+
+      <h2>Our Approach</h2>
+      <p>
+        Every visualization on this site is designed around a simple principle: 
+        <strong>feel the tradeoffs, don't just read about them.</strong>
+      </p>
+      <ul>
+        <li>Drag a slider to change region size — watch parallelism, overhead, and recovery time respond</li>
+        <li>Click to add data — see it flow through LSM-tree levels and trigger compaction</li>
+        <li>Simulate a node failure — observe how the system recovers (or doesn't)</li>
+      </ul>
+
+      <h2>Who We Are</h2>
+      <p>
+        We're engineers who've spent years operating distributed databases, 
+        message queues, and compute clusters in production. We built these visualizations 
+        because they're the explanations we wished existed when we were learning.
+      </p>
+
+      <h2>Open Source</h2>
+      <p>
+        The visualizations on this site are open source. If you spot an error, 
+        want to add a feature, or have an idea for a new visualization, 
+        contributions are welcome on <a href="https://github.com/systeminternals" target="_blank">GitHub</a>.
+      </p>
+
+      <div class="cta-box">
+        <h3>Stay Updated</h3>
+        <p>New visualizations drop regularly. Follow along:</p>
+        <div class="cta-links">
+          <a href="https://twitter.com/systemsexplain" target="_blank" class="cta-link">𝕏 Twitter</a>
+          <a href="https://youtube.com/@systeminternals" target="_blank" class="cta-link">▶ YouTube</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .about {
+    max-width: 750px;
+    margin: 0 auto;
+  }
+
+  .about h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 32px;
+    color: #fff;
+  }
+
+  .about-content {
+    font-size: 1.1rem;
+    line-height: 1.8;
+  }
+
+  .lead {
+    font-size: 1.25rem;
+    color: #ccc;
+    margin-bottom: 40px;
+  }
+
+  .lead em {
+    color: #00d4ff;
+    font-style: normal;
+  }
+
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  p {
+    color: #aaa;
+    margin-bottom: 16px;
+  }
+
+  ul {
+    margin: 16px 0;
+    padding-left: 24px;
+    color: #aaa;
+  }
+
+  li {
+    margin-bottom: 8px;
+  }
+
+  strong {
+    color: #fff;
+  }
+
+  .cta-box {
+    margin-top: 60px;
+    padding: 32px;
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(124, 58, 237, 0.1));
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 16px;
+    text-align: center;
+  }
+
+  .cta-box h3 {
+    font-size: 1.3rem;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .cta-box p {
+    margin-bottom: 20px;
+  }
+
+  .cta-links {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+  }
+
+  .cta-link {
+    padding: 12px 24px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-weight: 500;
+    transition: background 0.2s;
+  }
+
+  .cta-link:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+</style>

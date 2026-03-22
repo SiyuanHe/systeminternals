@@ -1,0 +1,732 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Raft Region Size: The Invisible Lever" 
+  description="Interactive visualization showing how Raft region size affects parallelism, overhead, and recovery time in TiDB/TiKV"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "TiDB", href: "/tidb/" },
+    { label: "Raft Region Size", href: "/tidb/raft-region-size/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🎚️ Raft Region Size</h1>
+      <p class="subtitle">The Invisible Lever for Distributed Database Performance</p>
+    </header>
+
+    <!-- Main Slider -->
+    <section class="slider-section">
+      <div class="region-size-display">
+        <span class="region-size-value" id="sizeValue">256</span>
+        <span class="region-size-unit" id="sizeUnit">MB</span>
+        <div class="zone-indicator zone-optimal" id="zoneIndicator">✓ Optimal Zone</div>
+      </div>
+      
+      <div class="slider-label">
+        <span>🐜 Tiny (1 MB)</span>
+        <span>📦 Standard</span>
+        <span>🏔️ Massive (10+ GB)</span>
+      </div>
+      
+      <div class="slider-container">
+        <div class="slider-track"></div>
+        <input type="range" id="regionSlider" min="0" max="100" value="55">
+      </div>
+      
+      <div class="zone-markers">
+        <span>1 MB</span>
+        <span>48 MB</span>
+        <span>96 MB</span>
+        <span>256 MB</span>
+        <span>1 GB</span>
+        <span>10 GB</span>
+        <span>1 PB</span>
+      </div>
+    </section>
+
+    <!-- Three Forces -->
+    <section class="forces-section">
+      <div class="force-card force-parallelism">
+        <h3><span class="force-icon">⚡</span> Parallelism</h3>
+        <div class="force-meter">
+          <div class="force-meter-fill" id="parallelismMeter" style="width: 50%"></div>
+        </div>
+        <p class="force-description" id="parallelismDesc">More regions = more leaders = more parallel operations. Like checkout lanes in a store.</p>
+      </div>
+      
+      <div class="force-card force-overhead">
+        <h3><span class="force-icon">📊</span> Overhead</h3>
+        <div class="force-meter">
+          <div class="force-meter-fill" id="overheadMeter" style="width: 50%"></div>
+        </div>
+        <p class="force-description" id="overheadDesc">Each region needs heartbeats, elections, metadata. Too many regions = drowning in coordination.</p>
+      </div>
+      
+      <div class="force-card force-recovery">
+        <h3><span class="force-icon">🔄</span> Recovery Speed</h3>
+        <div class="force-meter">
+          <div class="force-meter-fill" id="recoveryMeter" style="width: 50%"></div>
+        </div>
+        <p class="force-description" id="recoveryDesc">Regions are the unit of failover. Large regions = slow, risky recovery.</p>
+      </div>
+    </section>
+
+    <!-- Visual Demonstrations -->
+    <section class="visual-section">
+      <div class="visual-card">
+        <h3>📦 Region Distribution (Your Data)</h3>
+        <div class="region-grid" id="regionGrid"></div>
+        <p style="margin-top: 15px; font-size: 0.85rem; color: #666;">
+          <span id="regionCount">16</span> regions | <span id="leaderCount">16</span> leaders
+        </p>
+      </div>
+      
+      <div class="visual-card">
+        <h3>🚢 Shipping Container Analogy</h3>
+        <div class="shipping-viz" id="shippingViz"></div>
+        <div class="recovery-demo">
+          <p style="font-size: 0.85rem; color: #aaa; margin-bottom: 10px;">
+            ⏱️ Failover Recovery Time
+          </p>
+          <div class="recovery-bar">
+            <div class="recovery-progress" id="recoveryProgress" style="width: 0%"></div>
+          </div>
+          <div class="recovery-label">
+            <span>0s</span>
+            <span id="recoveryTime">~2s (fast)</span>
+            <span>60s+</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Symptoms -->
+    <section class="symptoms-section">
+      <h2>⚠️ What Breaks at Each Extreme</h2>
+      <div class="symptoms-grid">
+        <div class="symptom small-trap" id="sym1">
+          <div class="symptom-title">🔥 High PD CPU/Memory</div>
+          <div class="symptom-desc">PD tracks millions of regions, drowning in metadata</div>
+        </div>
+        <div class="symptom large-trap" id="sym5">
+          <div class="symptom-title">🐌 Snapshot Transfers Timeout</div>
+          <div class="symptom-desc">Moving GB+ regions over network becomes infeasible</div>
+        </div>
+        <div class="symptom small-trap" id="sym2">
+          <div class="symptom-title">⚡ Leader Election Storms</div>
+          <div class="symptom-desc">Too many Raft groups = constant election overhead</div>
+        </div>
+        <div class="symptom large-trap" id="sym6">
+          <div class="symptom-title">🎯 Hotspots Can't Be Isolated</div>
+          <div class="symptom-desc">Giant regions can't split to spread load</div>
+        </div>
+        <div class="symptom small-trap" id="sym3">
+          <div class="symptom-title">📡 Heartbeat Traffic Explosion</div>
+          <div class="symptom-desc">Every region reports to PD - millions of messages</div>
+        </div>
+        <div class="symptom large-trap" id="sym7">
+          <div class="symptom-title">⏰ Ballooning Failover Times</div>
+          <div class="symptom-desc">Recovery takes minutes instead of seconds</div>
+        </div>
+        <div class="symptom small-trap" id="sym4">
+          <div class="symptom-title">🔄 TiFlash Ingestion Churn</div>
+          <div class="symptom-desc">Excessive replication fan-out, more managing than analyzing</div>
+        </div>
+        <div class="symptom large-trap" id="sym8">
+          <div class="symptom-title">📉 Low TiFlash CPU Utilization</div>
+          <div class="symptom-desc">Too few regions to parallelize analytical scans</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mental Model -->
+    <section class="mental-model">
+      <h2>🧠 The Mental Model</h2>
+      <p>
+        Region size is <span class="highlight">not about storage</span>. 
+        It's about <span class="highlight">movement</span> — how fast data can move between nodes, 
+        during failures, during rebalancing, during growth.
+        <br><br>
+        <em>The best region size is the one that lets your data move as fast as your problems appear.</em>
+      </p>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Visualization based on <a href="https://www.pingcap.com/blog/understanding-raft-region-size-tidb-performance-recovery/" target="_blank">PingCAP's Raft Region Size blog</a></p>
+      <p style="margin-top: 8px; font-size: 0.8rem;">TiDB default: 256 MB | Recommended range: 48 MB – 256 MB</p>
+    </footer>
+
+    <!-- Share buttons -->
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Raft%20Region%20Size%20tradeoffs%20in%20TiDB&url=https://systeminternals.dev/tidb/raft-region-size/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/raft-region-size/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #00d4ff, #7c3aed, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  /* Main Slider Section */
+  .slider-section {
+    background: rgba(255,255,255,0.03);
+    border-radius: 20px;
+    padding: 40px;
+    margin-bottom: 40px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .slider-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
+    color: #666;
+  }
+
+  .region-size-display {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+
+  .region-size-value {
+    font-size: 4rem;
+    font-weight: 700;
+    color: #00d4ff;
+    transition: color 0.3s;
+  }
+
+  .region-size-unit {
+    font-size: 1.5rem;
+    color: #666;
+  }
+
+  .zone-indicator {
+    font-size: 1.2rem;
+    padding: 8px 20px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-top: 10px;
+    font-weight: 600;
+    transition: all 0.3s;
+  }
+
+  .zone-danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .zone-warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+  .zone-optimal { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+
+  /* Custom Slider */
+  .slider-container {
+    position: relative;
+    height: 60px;
+    margin: 20px 0;
+  }
+
+  .slider-track {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, 
+      #ef4444 0%, 
+      #f59e0b 15%,
+      #22c55e 25%,
+      #22c55e 45%,
+      #f59e0b 60%,
+      #ef4444 80%,
+      #7f1d1d 100%
+    );
+  }
+
+  input[type="range"] {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 12px;
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+    z-index: 10;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 20px rgba(0,212,255,0.5), 0 4px 15px rgba(0,0,0,0.3);
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+  }
+
+  .zone-markers {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: #666;
+  }
+
+  /* Three Forces */
+  .forces-section {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 40px;
+  }
+
+  .force-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 25px;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+  }
+
+  .force-card h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    color: #fff;
+  }
+
+  .force-icon {
+    font-size: 1.5rem;
+  }
+
+  .force-meter {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 15px 0;
+  }
+
+  .force-meter-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease-out;
+  }
+
+  .force-parallelism .force-meter-fill { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .force-overhead .force-meter-fill { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .force-recovery .force-meter-fill { background: linear-gradient(90deg, #22c55e, #4ade80); }
+
+  .force-description {
+    font-size: 0.9rem;
+    color: #888;
+    line-height: 1.5;
+  }
+
+  /* Visual Demo */
+  .visual-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 40px;
+  }
+
+  .visual-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 25px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .visual-card h3 {
+    margin-bottom: 20px;
+    font-size: 1rem;
+    color: #aaa;
+  }
+
+  /* Region Grid Visualization */
+  .region-grid {
+    display: grid;
+    gap: 4px;
+    min-height: 200px;
+    transition: all 0.5s;
+  }
+
+  :global(.region-box) {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.7);
+    transition: all 0.3s;
+    min-height: 30px;
+  }
+
+  :global(.region-box.leader) {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  }
+
+  /* Shipping Container Analogy */
+  .shipping-viz {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 200px;
+    align-content: flex-start;
+  }
+
+  :global(.container-box) {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    border-radius: 3px;
+    transition: all 0.5s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.8);
+  }
+
+  /* Recovery Demo */
+  .recovery-demo {
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+  }
+
+  .recovery-bar {
+    height: 20px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .recovery-progress {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #4ade80);
+    border-radius: 10px;
+    transition: width 2s ease-out;
+  }
+
+  .recovery-label {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 0.85rem;
+    color: #888;
+  }
+
+  /* Symptoms Panel */
+  .symptoms-section {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 40px;
+  }
+
+  .symptoms-section h2 {
+    margin-bottom: 20px;
+    font-size: 1.3rem;
+    color: #fff;
+  }
+
+  .symptoms-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+  }
+
+  .symptom {
+    padding: 15px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.02);
+    border-left: 3px solid;
+    opacity: 0.3;
+    transition: all 0.3s;
+  }
+
+  :global(.symptom.active) {
+    opacity: 1;
+  }
+
+  .symptom.small-trap {
+    border-color: #f59e0b;
+  }
+
+  .symptom.large-trap {
+    border-color: #ef4444;
+  }
+
+  .symptom-title {
+    font-weight: 600;
+    margin-bottom: 5px;
+    font-size: 0.95rem;
+    color: #fff;
+  }
+
+  .symptom-desc {
+    font-size: 0.85rem;
+    color: #888;
+  }
+
+  /* Mental Model */
+  .mental-model {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(0, 212, 255, 0.1) 100%);
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .mental-model h2 {
+    color: #a78bfa;
+    margin-bottom: 15px;
+  }
+
+  .mental-model p {
+    font-size: 1.2rem;
+    color: #e0e0e0;
+    max-width: 700px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  .mental-model .highlight {
+    color: #00d4ff;
+    font-weight: 600;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a {
+    color: #00d4ff;
+  }
+
+  /* Share buttons */
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span {
+    color: #666;
+  }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  @media (max-width: 768px) {
+    .forces-section,
+    .visual-section,
+    .symptoms-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .viz-header h1 {
+      font-size: 1.8rem;
+    }
+
+    .region-size-value {
+      font-size: 3rem;
+    }
+  }
+</style>
+
+<script>
+  const slider = document.getElementById('regionSlider') as HTMLInputElement;
+  const sizeValue = document.getElementById('sizeValue')!;
+  const sizeUnit = document.getElementById('sizeUnit')!;
+  const zoneIndicator = document.getElementById('zoneIndicator')!;
+  const regionGrid = document.getElementById('regionGrid')!;
+  const shippingViz = document.getElementById('shippingViz')!;
+  const recoveryProgress = document.getElementById('recoveryProgress')!;
+  const recoveryTime = document.getElementById('recoveryTime')!;
+
+  function sliderToSize(val: number): number {
+    if (val <= 25) return Math.round(1 + (47 * val / 25));
+    if (val <= 40) return Math.round(48 + (48 * (val - 25) / 15));
+    if (val <= 55) return Math.round(96 + (160 * (val - 40) / 15));
+    if (val <= 70) return Math.round(256 + (768 * (val - 55) / 15));
+    if (val <= 85) return Math.round(1024 + (9216 * (val - 70) / 15));
+    return Math.round(10240 + (1038336 * (val - 85) / 15));
+  }
+
+  function formatSize(mb: number): { val: string; unit: string } {
+    if (mb >= 1048576) return { val: (mb / 1048576).toFixed(0), unit: 'PB' };
+    if (mb >= 1024) return { val: (mb / 1024).toFixed(1), unit: 'GB' };
+    return { val: String(mb), unit: 'MB' };
+  }
+
+  function getZone(mb: number): { class: string; text: string } {
+    if (mb < 20) return { class: 'zone-danger', text: '🚨 DANGER: Small Region Trap' };
+    if (mb < 48) return { class: 'zone-warning', text: '⚠️ Warning: High Overhead' };
+    if (mb <= 256) return { class: 'zone-optimal', text: '✓ Optimal Zone' };
+    if (mb <= 1024) return { class: 'zone-warning', text: '⚠️ Warning: Getting Heavy' };
+    if (mb <= 10240) return { class: 'zone-danger', text: '🚨 DANGER: Large Region Trap' };
+    return { class: 'zone-danger', text: '💀 EXTREME DANGER ZONE' };
+  }
+
+  function updateVisuals(val: number) {
+    const sizeMB = sliderToSize(val);
+    const formatted = formatSize(sizeMB);
+    const zone = getZone(sizeMB);
+
+    sizeValue.textContent = formatted.val;
+    sizeUnit.textContent = formatted.unit;
+    (sizeValue as HTMLElement).style.color = zone.class === 'zone-optimal' ? '#22c55e' : 
+                                zone.class === 'zone-warning' ? '#f59e0b' : '#ef4444';
+
+    zoneIndicator.className = 'zone-indicator ' + zone.class;
+    zoneIndicator.textContent = zone.text;
+
+    let parallelism: number, overhead: number, recovery: number;
+
+    if (sizeMB < 48) {
+      parallelism = 90 - (sizeMB / 48 * 40);
+      overhead = 95 - (sizeMB / 48 * 45);
+      recovery = 95;
+    } else if (sizeMB <= 256) {
+      parallelism = 50 + ((256 - sizeMB) / 208 * 20);
+      overhead = 50 - ((sizeMB - 48) / 208 * 30);
+      recovery = 70 + ((256 - sizeMB) / 208 * 25);
+    } else if (sizeMB <= 1024) {
+      parallelism = 30 + ((1024 - sizeMB) / 768 * 20);
+      overhead = 20;
+      recovery = 40 + ((1024 - sizeMB) / 768 * 30);
+    } else {
+      parallelism = Math.max(5, 30 - (sizeMB / 10240 * 25));
+      overhead = 10;
+      recovery = Math.max(5, 40 - (sizeMB / 10240 * 35));
+    }
+
+    document.getElementById('parallelismMeter')!.style.width = parallelism + '%';
+    document.getElementById('overheadMeter')!.style.width = overhead + '%';
+    document.getElementById('recoveryMeter')!.style.width = recovery + '%';
+
+    let regionCount: number;
+    if (sizeMB <= 10) regionCount = 64;
+    else if (sizeMB <= 48) regionCount = 36;
+    else if (sizeMB <= 96) regionCount = 25;
+    else if (sizeMB <= 256) regionCount = 16;
+    else if (sizeMB <= 1024) regionCount = 9;
+    else if (sizeMB <= 10240) regionCount = 4;
+    else regionCount = 1;
+
+    const cols = Math.ceil(Math.sqrt(regionCount));
+    regionGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    regionGrid.innerHTML = '';
+
+    for (let i = 0; i < regionCount; i++) {
+      const box = document.createElement('div');
+      box.className = 'region-box' + (i % 3 === 0 ? ' leader' : '');
+      box.textContent = i % 3 === 0 ? 'L' : 'F';
+      regionGrid.appendChild(box);
+    }
+
+    document.getElementById('regionCount')!.textContent = String(regionCount);
+    document.getElementById('leaderCount')!.textContent = String(Math.ceil(regionCount / 3));
+
+    shippingViz.innerHTML = '';
+    const containerSize = Math.min(180, Math.max(20, sizeMB / 2));
+    const containerCount = Math.max(1, Math.floor(180 / containerSize));
+
+    for (let i = 0; i < containerCount * 2; i++) {
+      const container = document.createElement('div');
+      container.className = 'container-box';
+      container.style.width = containerSize + 'px';
+      container.style.height = (containerSize * 0.6) + 'px';
+      container.textContent = formatted.val + formatted.unit;
+      shippingViz.appendChild(container);
+    }
+
+    let recTime: number, recText: string;
+    if (sizeMB <= 256) {
+      recTime = 10 + (sizeMB / 256 * 20);
+      recText = '~' + Math.round(sizeMB / 100 + 1) + 's (fast)';
+    } else if (sizeMB <= 1024) {
+      recTime = 30 + ((sizeMB - 256) / 768 * 30);
+      recText = '~' + Math.round(sizeMB / 100) + 's';
+    } else {
+      recTime = 60 + Math.min(40, sizeMB / 10240 * 40);
+      recText = Math.round(sizeMB / 1024) + '+ minutes (slow!)';
+    }
+
+    recoveryProgress.style.width = '0%';
+    setTimeout(() => {
+      recoveryProgress.style.width = recTime + '%';
+    }, 100);
+    recoveryTime.textContent = recText;
+
+    const smallTraps = ['sym1', 'sym2', 'sym3', 'sym4'];
+    const largeTraps = ['sym5', 'sym6', 'sym7', 'sym8'];
+
+    smallTraps.forEach(id => {
+      document.getElementById(id)?.classList.toggle('active', sizeMB < 48);
+    });
+
+    largeTraps.forEach(id => {
+      document.getElementById(id)?.classList.toggle('active', sizeMB > 1024);
+    });
+  }
+
+  slider?.addEventListener('input', (e) => updateVisuals(Number((e.target as HTMLInputElement).value)));
+  updateVisuals(55);
+</script>

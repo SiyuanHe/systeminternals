@@ -1,0 +1,123 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Raft Region Size", description: "The invisible lever for performance & recovery", href: "/tidb/raft-region-size/", status: "live" },
+  { title: "LSM-Tree & Compaction", description: "How TiKV stores data and manages write amplification", href: "/tidb/lsm-tree/", status: "live" },
+  { title: "Distributed Transactions", description: "Percolate 2PC: prewrite, commit, and lock resolution", href: "#", status: "coming" },
+  { title: "Hot Regions & Load Balancing", description: "PD scheduler: splitting, scattering, and rebalancing", href: "#", status: "coming" },
+  { title: "TiFlash HTAP", description: "Row store vs column store, when to use each", href: "#", status: "coming" },
+  { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "#", status: "coming" },
+  { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "#", status: "coming" },
+  { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "#", status: "coming" },
+  { title: "SQL Execution Flow", description: "From SQL text to result set, step by step", href: "#", status: "coming" },
+  { title: "Placement Rules", description: "Control where your data lives across datacenters", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="TiDB Database Internals" 
+  description="Interactive visualizations for understanding TiDB architecture, performance tuning, and operational best practices"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "TiDB", href: "/tidb/" }]}
+>
+  <section class="section-header">
+    <h1>🔷 TiDB Database Internals</h1>
+    <p>
+      TiDB is a distributed SQL database that separates compute (TiDB) from storage (TiKV/TiFlash), 
+      coordinated by PD. These visualizations help you understand the internals and tune for your workload.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(0, 212, 255, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>
