@@ -1,0 +1,890 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+title="KafkaISR&Replication"
+description="InteractivevisualizationofKafka'sIn-SyncReplicas,replicationprotocol,highwatermark,acksdurabilitymodes,anduncleanleaderelection"
+breadcrumbs={[
+{label:"Home",href:"/"},
+{label:"Kafka",href:"/kafka/"},
+{label:"ISR&Replication",href:"/kafka/isr-replication/"}
+]}
+>
+<div class="viz-container">
+<header class="viz-header">
+<h1>🔄In-SyncReplicas&Replication</h1>
+<p class="subtitle">HowKafkaReplicatesData—andWhatKeepsItDurable</p>
+</header>
+
+<section class="overview-section">
+<div class="overview-card">
+<p>
+Kafkaachievesfaulttolerancethrough<strong>replication</strong>.Eachpartitionhasone<em>leader</em>and
+N−1<em>followers</em>(determinedbythereplicationfactor).Producersalwayswritetotheleader;
+followerscontinuouslyfetchandreplicatedata.Thesetofreplicasthatare"caughtup"formthe
+<strong>In-SyncReplicaset(ISR)</strong>.The<strong>highwatermark</strong>—theminimumoffset
+acrossallISRmembers—determineswhatconsumerscanread.Together,<code>acks</code>,
+<code>min.insync.replicas</code>,andISRmembershipdefineyourdurabilityguarantees.
+</p>
+</div>
+</section>
+
+<!--ReplicationBasics-->
+<section class="replication-section">
+<h2>📦ReplicationBasics</h2>
+<p class="section-desc">Eachpartitionisreplicatedacrossbrokers.Onereplicaistheleader;therestarefollowersthatfetchfromit.</p>
+
+<div class="cluster-viz" id="clusterViz"></div>
+
+<div class="cluster-legend">
+<span class="legend-item"><span class="legend-dot" style="background:#34d399"></span>Leader</span>
+<span class="legend-item"><span class="legend-dot" style="background:#60a5fa"></span>Follower(ISR)</span>
+<span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span>OutofSync</span>
+<span class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>BrokerDown</span>
+</div>
+
+<div class="cluster-controls">
+<div class="slider-group">
+<label>ReplicationFactor:<strong id="rfLabel">3</strong></label>
+<input type="range" id="rfSlider" min="1" max="3" value="3">
+</div>
+<div class="cluster-actions">
+<button id="produceBtn" class="action-btnprimary-btn">📤ProduceMessages</button>
+<button id="killBrokerBtn" class="action-btndanger-btn">💀KillBroker</button>
+<button id="restartBrokerBtn" class="action-btnsecondary-btn">🔄RestartBroker</button>
+<button id="resetClusterBtn" class="action-btnreset-btn">🔄ResetCluster</button>
+</div>
+</div>
+
+<div class="cluster-status" id="clusterStatus">All3brokershealthy.3partitions×RF=3=9replicastotal.</div>
+</section>
+
+<!--ISRDeepDive-->
+<section class="isr-section">
+<h2>🎯In-SyncReplicas(ISR)</h2>
+<p class="section-desc">AreplicastaysintheISRifit'scaughtupwithin<code>replica.lag.time.max.ms</code>.Fallbehind,andyou'reout.</p>
+
+<div class="slider-group">
+<label>replica.lag.time.max.ms:<strong id="lagThresholdLabel">10000</strong>ms</label>
+<input type="range" id="lagThresholdSlider" min="1000" max="30000" value="10000" step="1000">
+</div>
+
+<div class="isr-viz" id="isrViz"></div>
+
+<div class="isr-controls">
+<button id="isrProduceBtn" class="action-btnprimary-btn">📤ProduceBurst</button>
+<button id="slowFollowerBtn" class="action-btndanger-btn">🐌SlowDownFollower</button>
+<button id="healFollowerBtn" class="action-btnsecondary-btn">💚HealFollower</button>
+<button id="resetIsrBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="isr-info" id="isrInfo">Allreplicasinsync.ISR=&#123;Leader,Follower-1,Follower-2&#125;</div>
+</section>
+
+<!--HighWatermark&LEO-->
+<section class="hw-section">
+<h2>📏HighWatermark&LEO</h2>
+<p class="section-desc">LEO(LogEndOffset)iseachreplica'slatestoffset.HighWatermark=min(LEOofISRmembers).ConsumersreaduptotheHW.</p>
+
+<div class="hw-viz" id="hwViz"></div>
+
+<div class="hw-controls">
+<button id="hwProduceBtn" class="action-btnprimary-btn">📤ProduceMessage</button>
+<button id="hwReplicateBtn" class="action-btnsecondary-btn">🔄ReplicateStep</button>
+<button id="hwSlowReplicaBtn" class="action-btndanger-btn">🐌SlowReplica</button>
+<button id="hwResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="hw-info" id="hwInfo">Producemessagestotheleader,thenstepthroughreplicationtoseeHWadvance.</div>
+
+<div class="hw-consumer-read" id="hwConsumerRead">
+<span class="consumer-icon">👁️Consumercanreaduptooffset:<strong id="hwReadOffset">0</strong></span>
+</div>
+</section>
+
+<!--Acks&Durability-->
+<section class="acks-section">
+<h2>🛡️Acks&Durability</h2>
+<p class="section-desc">The<code>acks</code>settingcontrolshowmanyreplicasmustacknowledgeawritebeforetheproducerconsidersitsuccessful.</p>
+
+<div class="acks-mode-selector">
+<button class="acks-btnactive" data-acks="0">acks=0<span class="acks-sub">Fire&Forget</span></button>
+<button class="acks-btn" data-acks="1">acks=1<span class="acks-sub">LeaderOnly</span></button>
+<button class="acks-btn" data-acks="all">acks=all<span class="acks-sub">AllISR</span></button>
+</div>
+
+<div class="slider-group">
+<label>min.insync.replicas:<strong id="minIsrLabel">2</strong></label>
+<input type="range" id="minIsrSlider" min="1" max="3" value="2">
+</div>
+
+<div class="acks-viz" id="acksViz"></div>
+
+<div class="acks-controls">
+<button id="acksProduceBtn" class="action-btnprimary-btn">📤ProduceMessage</button>
+<button id="acksKillLeaderBtn" class="action-btndanger-btn">💀KillLeader</button>
+<button id="acksKillFollowerBtn" class="action-btndanger-btn">💀KillFollower</button>
+<button id="acksResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="acks-result" id="acksResult"></div>
+
+<div class="acks-comparison">
+<div class="acks-card">
+<h4>acks=0</h4>
+<div class="acks-meter"><div class="meter-fillspeed" style="width:95%"></div></div>
+<span class="meter-label">Latency:~1ms</span>
+<div class="acks-meter"><div class="meter-filldurability" style="width:10%"></div></div>
+<span class="meter-label">Durability:Low</span>
+</div>
+<div class="acks-card">
+<h4>acks=1</h4>
+<div class="acks-meter"><div class="meter-fillspeed" style="width:60%"></div></div>
+<span class="meter-label">Latency:~5ms</span>
+<div class="acks-meter"><div class="meter-filldurability" style="width:60%"></div></div>
+<span class="meter-label">Durability:Medium</span>
+</div>
+<div class="acks-card">
+<h4>acks=all</h4>
+<div class="acks-meter"><div class="meter-fillspeed" style="width:30%"></div></div>
+<span class="meter-label">Latency:~15ms</span>
+<div class="acks-meter"><div class="meter-filldurability" style="width:95%"></div></div>
+<span class="meter-label">Durability:High</span>
+</div>
+</div>
+</section>
+
+<!--UncleanLeaderElection-->
+<section class="unclean-section">
+<h2>⚠️UncleanLeaderElection</h2>
+<p class="section-desc">WhenallISRmembersaredown,shouldanout-of-syncreplicabecomeleader?Availabilityvs.consistency.</p>
+
+<div class="unclean-toggle">
+<button class="unclean-btnactive" data-mode="clean">unclean.leader.election.enable=false<span class="acks-sub">PreferConsistency</span></button>
+<button class="unclean-btn" data-mode="unclean">unclean.leader.election.enable=true<span class="acks-sub">PreferAvailability</span></button>
+</div>
+
+<div class="tradeoff-slider-group">
+<div class="tradeoff-labels">
+<span>🔒Consistency</span>
+<span>⚡Availability</span>
+</div>
+<div class="tradeoff-bar" id="tradeoffBar">
+<div class="tradeoff-indicator" id="tradeoffIndicator" style="left:20%"></div>
+</div>
+</div>
+
+<div class="unclean-viz" id="uncleanViz"></div>
+
+<div class="unclean-controls">
+<button id="uncleanKillAllIsrBtn" class="action-btndanger-btn">💀KillAllISRMembers</button>
+<button id="uncleanResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="unclean-result" id="uncleanResult"></div>
+</section>
+
+<!--Explanations-->
+<section class="explain-section">
+<div class="explain-grid">
+<div class="explain-cardhighlight-card">
+<h3>💡WhyDoesISRMatter?</h3>
+<p>
+ISRisKafka'sanswertotheCAPtheoremtradeoff.Byonlyrequiring<em>in-sync</em>replicas
+toacknowledgewrites(notallreplicas),Kafkaavoidsblockingonslowordeadnodeswhilestill
+providing<strong>strongdurabilityguarantees</strong>.Areplicathatfallsbehindisremoved
+fromtheISR—itcanrejoinonceitcatchesup.
+</p>
+</div>
+<div class="explain-card">
+<h3>⚡TheGoldenConfig</h3>
+<p>
+Formaximumdurabilitywithoutsacrificingtoomuchperformance:
+<code>replication.factor=3</code>,<code>acks=all</code>,
+<code>min.insync.replicas=2</code>.Thistolerates1brokerfailurewithzerodataloss.
+Youcanlose1replicaandstillacceptwrites.
+</p>
+</div>
+<div class="explain-card">
+<h3>🔑PreferredLeaderElection</h3>
+<p>
+Thefirstreplicainthereplicalististhe"preferredleader."Afterbrokerrecovery,
+Kafkacanauto-rebalanceleadershipvia<code>auto.leader.rebalance.enable=true</code>.
+Thispreventsallleadersfrompilingontosurvivingbrokersafterafailure.
+</p>
+</div>
+<div class="explain-card">
+<h3>📊MonitoringISR</h3>
+<p>
+Watch<code>UnderReplicatedPartitions</code>and<code>IsrShrinksPerSec</code>metrics.
+ISRshrinkssignalfollowerissues(slowdisk,network,GC).Frequentshrinkswithout
+recoveryindicateasystemicproblem.AlertwhenISRsizedropsbelow
+<code>min.insync.replicas</code>.
+</p>
+</div>
+</div>
+</section>
+
+<footer class="viz-footer">
+<p>Basedon<ahref="https://kafka.apache.org/documentation/#replication" target="_blank">ApacheKafkaReplicationDocumentation</a>and<ahref="https://kafka.apache.org/documentation/#producerconfigs_acks" target="_blank">ProducerAcksConfiguration</a></p>
+</footer>
+
+<div class="share-buttons">
+<span>Share:</span>
+<ahref="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20ISR%20%26%20Replication%20Visualizer&url=https://systeminternals.dev/kafka/isr-replication/" target="_blank" class="share-btn">𝕏Twitter</a>
+<ahref="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/isr-replication/" target="_blank" class="share-btn">inLinkedIn</a>
+<ahref="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/isr-replication/&t=Interactive%20Kafka%20ISR%20%26%20Replication%20Visualizer" target="_blank" class="share-btn">🟧HN</a>
+</div>
+</div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0auto;}
+.viz-header{text-align:center;margin-bottom:40px;}
+.viz-headerh1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#34d399,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.subtitle{color:#888;font-size:1.1rem;}
+h2{font-size:1.5rem;color:#fff;margin-bottom:12px;}
+.section-desc{color:#888;margin-bottom:24px;}
+.section-desccode{background:rgba(0,0,0,0.3);padding:2px6px;border-radius:4px;font-size:0.9rem;color:#34d399;}
+
+.overview-section{margin-bottom:50px;}
+.overview-card{background:linear-gradient(135deg,rgba(52,211,153,0.1),rgba(96,165,250,0.05));border:1pxsolidrgba(52,211,153,0.3);border-radius:16px;padding:24px28px;font-size:1.05rem;line-height:1.8;color:#ccc;}
+.overview-cardstrong{color:#fff;}
+.overview-cardem{color:#34d399;font-style:normal;font-weight:500;}
+.overview-cardcode{background:rgba(0,0,0,0.3);padding:2px6px;border-radius:4px;font-size:0.9rem;color:#34d399;}
+
+.action-btn{padding:10px20px;border:none;border-radius:10px;font-size:0.95rem;font-weight:600;cursor:pointer;transition:all0.2s;}
+.action-btn:disabled{opacity:0.4;cursor:not-allowed;}
+.primary-btn{background:linear-gradient(135deg,#34d399,#059669);color:white;}
+.primary-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:05px20pxrgba(52,211,153,0.4);}
+.secondary-btn{background:linear-gradient(135deg,#60a5fa,#3b82f6);color:white;}
+.secondary-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:05px20pxrgba(96,165,250,0.4);}
+.danger-btn{background:linear-gradient(135deg,#f87171,#ef4444);color:white;}
+.danger-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:05px20pxrgba(239,68,68,0.4);}
+.reset-btn{background:rgba(255,255,255,0.1);color:#aaa;}
+.reset-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+input[type="range"]{-webkit-appearance:none;height:8px;background:rgba(255,255,255,0.15);border-radius:4px;cursor:pointer;width:100%;}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#34d399;cursor:pointer;}
+
+.slider-group{margin-bottom:16px;}
+.slider-grouplabel{color:#ccc;font-size:0.95rem;display:block;margin-bottom:8px;}
+.slider-groupstrong{color:#34d399;}
+.slider-groupinput[type="range"]{max-width:400px;}
+
+/*ClusterViz*/
+.replication-section{margin-bottom:50px;}
+.cluster-viz{background:rgba(0,0,0,0.2);border-radius:14px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);margin-bottom:16px;min-height:200px;}
+.cluster-legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+:global(.legend-item){display:flex;align-items:center;gap:6px;font-size:0.8rem;color:#aaa;}
+:global(.legend-dot){width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.cluster-controls{display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;}
+.cluster-controls.slider-group{flex:1;min-width:200px;margin-bottom:0;}
+.cluster-actions{display:flex;gap:12px;flex-wrap:wrap;}
+.cluster-status{font-size:0.9rem;color:#888;padding:12px16px;background:rgba(255,255,255,0.03);border-radius:10px;border:1pxsolidrgba(255,255,255,0.1);}
+
+:global(.broker-box){background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:12px;padding:16px;min-width:180px;flex:1;}
+:global(.broker-box.down){opacity:0.4;border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.05);}
+:global(.broker-header){font-weight:700;font-size:0.95rem;color:#fff;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+:global(.broker-status-dot){width:10px;height:10px;border-radius:50%;}
+:global(.partition-chip){display:inline-flex;align-items:center;gap:4px;padding:4px10px;border-radius:6px;font-size:0.8rem;font-weight:600;margin:3px;}
+:global(.partition-chip.leader){background:rgba(52,211,153,0.2);border:1pxsolidrgba(52,211,153,0.4);color:#34d399;}
+:global(.partition-chip.follower){background:rgba(96,165,250,0.15);border:1pxsolidrgba(96,165,250,0.3);color:#60a5fa;}
+:global(.partition-chip.out-of-sync){background:rgba(239,68,68,0.15);border:1pxsolidrgba(239,68,68,0.3);color:#f87171;}
+:global(.repl-arrow){color:#34d399;font-size:0.7rem;animation:replFlow1.5sease-in-outinfinite;}
+@keyframesreplFlow{0%,100%{opacity:0.3;}50%{opacity:1;}}
+
+/*ISRSection*/
+.isr-section{margin-bottom:50px;}
+.isr-viz{background:rgba(0,0,0,0.2);border-radius:14px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);margin-bottom:16px;min-height:120px;}
+.isr-controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+.isr-info{font-size:0.9rem;color:#888;text-align:center;padding:8px;}
+
+:global(.isr-replica-row){display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+:global(.isr-replica-label){width:100px;font-size:0.85rem;font-weight:700;flex-shrink:0;}
+:global(.isr-replica-label.leader){color:#34d399;}
+:global(.isr-replica-label.in-sync){color:#60a5fa;}
+:global(.isr-replica-label.out-sync){color:#ef4444;}
+:global(.isr-log-track){flex:1;height:32px;background:rgba(255,255,255,0.05);border-radius:6px;position:relative;overflow:hidden;}
+:global(.isr-log-fill){position:absolute;top:0;left:0;height:100%;border-radius:6px;transition:width0.5sease;}
+:global(.isr-log-fill.leader-fill){background:rgba(52,211,153,0.4);}
+:global(.isr-log-fill.follower-fill){background:rgba(96,165,250,0.35);}
+:global(.isr-log-fill.out-fill){background:rgba(239,68,68,0.3);}
+:global(.isr-offset-label){width:80px;font-size:0.8rem;color:#888;font-family:'Monaco','Menlo',monospace;flex-shrink:0;text-align:right;}
+:global(.isr-badge){padding:2px8px;border-radius:10px;font-size:0.7rem;font-weight:600;margin-left:8px;}
+:global(.isr-badge.in){background:rgba(52,211,153,0.2);color:#34d399;}
+:global(.isr-badge.out){background:rgba(239,68,68,0.2);color:#f87171;}
+
+/*HWSection*/
+.hw-section{margin-bottom:50px;}
+.hw-viz{background:rgba(0,0,0,0.2);border-radius:14px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);margin-bottom:16px;min-height:150px;}
+.hw-controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+.hw-info{font-size:0.9rem;color:#888;text-align:center;padding:8px;margin-bottom:8px;}
+.hw-consumer-read{text-align:center;padding:12px;background:rgba(167,139,250,0.08);border:1pxsolidrgba(167,139,250,0.3);border-radius:10px;color:#c4b5fd;font-size:0.95rem;}
+.hw-consumer-readstrong{color:#a78bfa;font-size:1.1rem;}
+
+:global(.hw-row){display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+:global(.hw-label){width:100px;font-size:0.85rem;font-weight:700;flex-shrink:0;}
+:global(.hw-label.leader){color:#34d399;}
+:global(.hw-label.follower){color:#60a5fa;}
+:global(.hw-label.slow){color:#ef4444;}
+:global(.hw-track){flex:1;height:36px;background:rgba(255,255,255,0.05);border-radius:6px;position:relative;display:flex;align-items:center;}
+:global(.hw-segment){height:100%;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:600;color:rgba(255,255,255,0.8);min-width:28px;transition:width0.4sease;}
+:global(.hw-segment.committed){background:rgba(52,211,153,0.3);border-radius:6px006px;}
+:global(.hw-segment.uncommitted){background:rgba(251,191,36,0.25);}
+:global(.hw-segment.empty){background:transparent;}
+:global(.hw-offset){width:50px;font-size:0.8rem;color:#888;font-family:'Monaco','Menlo',monospace;flex-shrink:0;text-align:right;}
+:global(.hw-marker){position:absolute;height:100%;border-right:2pxdashed#a78bfa;top:0;transition:left0.4sease;z-index:2;}
+:global(.hw-marker-label){position:absolute;top:-18px;transform:translateX(-50%);font-size:0.65rem;color:#a78bfa;font-weight:700;white-space:nowrap;}
+
+/*AcksSection*/
+.acks-section{margin-bottom:50px;}
+.acks-mode-selector{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+.acks-btn{padding:12px20px;border:1pxsolidrgba(255,255,255,0.15);border-radius:10px;background:rgba(255,255,255,0.03);color:#ccc;font-size:0.95rem;font-weight:600;cursor:pointer;transition:all0.2s;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.acks-btn.active{border-color:#34d399;background:rgba(52,211,153,0.15);color:#34d399;}
+.acks-sub{font-size:0.75rem;font-weight:400;color:#888;}
+.acks-btn.active.acks-sub{color:rgba(52,211,153,0.7);}
+.acks-viz{background:rgba(0,0,0,0.2);border-radius:14px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);margin-bottom:16px;min-height:100px;}
+.acks-controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+.acks-result{min-height:50px;margin-bottom:20px;}
+
+:global(.acks-step){padding:8px12px;margin-bottom:8px;border-radius:8px;font-size:0.9rem;animation:eventAppear0.4sease-out;}
+@keyframeseventAppear{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}
+:global(.acks-step.info){background:rgba(96,165,250,0.1);color:#93c5fd;border-left:3pxsolid#60a5fa;}
+:global(.acks-step.success){background:rgba(52,211,153,0.1);color:#6ee7b7;border-left:3pxsolid#34d399;}
+:global(.acks-step.error){background:rgba(239,68,68,0.1);color:#fca5a5;border-left:3pxsolid#ef4444;}
+:global(.acks-step.warn){background:rgba(251,191,36,0.1);color:#fde68a;border-left:3pxsolid#fbbf24;}
+
+.acks-comparison{display:grid;grid-template-columns:1fr1fr1fr;gap:16px;}
+.acks-card{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.1);border-radius:12px;padding:16px;text-align:center;}
+.acks-cardh4{color:#fff;margin-bottom:12px;font-size:0.95rem;}
+.acks-meter{height:8px;background:rgba(255,255,255,0.08);border-radius:4px;margin-bottom:4px;overflow:hidden;}
+.meter-fill{height:100%;border-radius:4px;transition:width0.5s;}
+.meter-fill.speed{background:linear-gradient(90deg,#34d399,#fbbf24);}
+.meter-fill.durability{background:linear-gradient(90deg,#ef4444,#34d399);}
+.meter-label{font-size:0.75rem;color:#888;display:block;margin-bottom:10px;}
+
+/*UncleanSection*/
+.unclean-section{margin-bottom:50px;}
+.unclean-toggle{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+.unclean-btn{padding:12px20px;border:1pxsolidrgba(255,255,255,0.15);border-radius:10px;background:rgba(255,255,255,0.03);color:#ccc;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all0.2s;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.unclean-btn.active{border-color:#34d399;background:rgba(52,211,153,0.15);color:#34d399;}
+.unclean-btn.active.acks-sub{color:rgba(52,211,153,0.7);}
+
+.tradeoff-slider-group{margin-bottom:20px;}
+.tradeoff-labels{display:flex;justify-content:space-between;font-size:0.85rem;color:#888;margin-bottom:8px;}
+.tradeoff-bar{height:12px;background:linear-gradient(90deg,rgba(96,165,250,0.3),rgba(251,191,36,0.3),rgba(239,68,68,0.3));border-radius:6px;position:relative;}
+.tradeoff-indicator{position:absolute;top:-4px;width:20px;height:20px;background:#fff;border-radius:50%;transform:translateX(-50%);transition:left0.5sease;box-shadow:0010pxrgba(255,255,255,0.5);}
+
+.unclean-viz{background:rgba(0,0,0,0.2);border-radius:14px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);margin-bottom:16px;min-height:80px;}
+.unclean-controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+.unclean-result{min-height:50px;}
+
+:global(.unclean-step){padding:8px12px;margin-bottom:8px;border-radius:8px;font-size:0.9rem;animation:eventAppear0.4sease-out;}
+:global(.unclean-step.info){background:rgba(96,165,250,0.1);color:#93c5fd;border-left:3pxsolid#60a5fa;}
+:global(.unclean-step.success){background:rgba(52,211,153,0.1);color:#6ee7b7;border-left:3pxsolid#34d399;}
+:global(.unclean-step.error){background:rgba(239,68,68,0.1);color:#fca5a5;border-left:3pxsolid#ef4444;}
+:global(.unclean-step.warn){background:rgba(251,191,36,0.1);color:#fde68a;border-left:3pxsolid#fbbf24;}
+
+/*ExplainSection*/
+.explain-section{margin-bottom:50px;}
+.explain-grid{display:grid;grid-template-columns:1fr1fr;gap:20px;}
+.explain-card{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.1);border-radius:14px;padding:24px;}
+.explain-cardh3{font-size:1rem;color:#fff;margin-bottom:10px;}
+.explain-cardp{color:#aaa;line-height:1.6;font-size:0.9rem;}
+.explain-cardstrong{color:#34d399;}
+.explain-cardem{color:#60a5fa;}
+.explain-cardcode{background:rgba(0,0,0,0.3);padding:2px6px;border-radius:4px;font-size:0.85rem;color:#34d399;}
+.highlight-card{background:linear-gradient(135deg,rgba(52,211,153,0.08),rgba(96,165,250,0.08));border-color:rgba(52,211,153,0.3);}
+
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px0;border-top:1pxsolidrgba(255,255,255,0.1);margin-bottom:30px;}
+.viz-footera{color:#34d399;}
+.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;}
+.share-buttonsspan{color:#666;}
+.share-btn{padding:10px20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background0.2s;}
+.share-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+@media(max-width:768px){
+.viz-headerh1{font-size:1.8rem;}
+.explain-grid{grid-template-columns:1fr;}
+.acks-comparison{grid-template-columns:1fr;}
+.acks-mode-selector{flex-direction:column;}
+.unclean-toggle{flex-direction:column;}
+.cluster-controls{flex-direction:column;}
+}
+</style>
+
+<script is:inline>
+//==========STATE==========
+letrf=3;
+constBROKERS=3;
+constPARTITIONS=3;
+
+
+letbrokers=[];
+letreplicas=[];
+letmessageCounter=0;
+
+functioninitCluster(){
+brokers=Array.from({length:BROKERS},(_,i)=>({id:i,aliveue}));
+replicas=[];
+messageCounter=0;
+for(letp=0;p<PARTITIONS;p++){
+for(letr=0;r<rf;r++){
+constbroker=(p+r)%BROKERS;
+replicas.push({partition:p,broker,isLeader:r===0,inIsrue,leo:0});
+}
+}
+}
+
+//==========CLUSTERVIZ==========
+functionrenderCluster(){
+constviz=document.getElementById('clusterViz');
+viz.innerHTML='';
+constcontainer=document.createElement('div');
+container.style.cssText='display:flex;gap:16px;flex-wrap:wrap;';
+
+for(letb=0;b<BROKERS;b++){
+constbroker=brokers[b];
+constbox=document.createElement('div');
+box.className=`broker-box${broker.alive?'':'down'}`;
+
+conststatusColor=broker.alive?'#34d399':'#ef4444';
+lethtml=`<div class="broker-header"><span class="broker-status-dot" style="background:${statusColor}"></span>Broker${b}${broker.alive?'':'(DOWN)'}</div><div>`;
+
+constbrokerReplicas=replicas.filter(r=>r.broker===b);
+brokerReplicas.forEach(r=>{
+letcls=r.isLeader?'leader':(r.inIsr?'follower':'out-of-sync');
+letlabel=r.isLeader?'👑L':(r.inIsr?'F':'⚠️F');
+html+=`<span class="partition-chip${cls}">P${r.partition}${label}</span>`;
+});
+if(brokerReplicas.length===0){
+html+='<span style="color:#6b7280;font-size:0.8rem;">Noreplicas</span>';
+}
+
+html+='</div>';
+if(broker.alive){
+constleaderCount=brokerReplicas.filter(r=>r.isLeader).length;
+if(leaderCount>0){
+html+=`<div style="margin-top:8px;font-size:0.75rem;color:#888;">↑Producerwriteshere(${leaderCount}leader${leaderCount>1?'s':''})</div>`;
+}
+}
+box.innerHTML=html;
+container.appendChild(box);
+}
+viz.appendChild(container);
+
+//Status
+constaliveCount=brokers.filter(b=>b.alive).length;
+consttotalReplicas=replicas.length;
+constisrCount=replicas.filter(r=>r.inIsr&&brokers[r.broker].alive).length;
+document.getElementById('clusterStatus').textContent=
+`${aliveCount}/${BROKERS}brokersalive.${PARTITIONS}partitions×RF=${rf}=${totalReplicas}replicas.ISRreplicas:${isrCount}/${totalReplicas}.Messagesproduced:${messageCounter}.`;
+}
+
+document.getElementById('rfSlider')?.addEventListener('input',(e)=>{
+rf=parseInt((e.target).value);
+document.getElementById('rfLabel').textContent=String(rf);
+initCluster();
+renderCluster();
+});
+
+document.getElementById('produceBtn')?.addEventListener('click',()=>{
+constcount=Math.floor(Math.random()*5)+3;
+messageCounter+=count;
+replicas.forEach(r=>{
+if(r.isLeader&&brokers[r.broker].alive){
+r.leo+=count;
+}
+});
+//FollowersreplicateimmediatelyifaliveandinISR
+replicas.forEach(r=>{
+if(!r.isLeader&&r.inIsr&&brokers[r.broker].alive){
+constleader=replicas.find(l=>l.partition===r.partition&&l.isLeader);
+r.leo=leader.leo;
+}
+});
+renderCluster();
+});
+
+document.getElementById('killBrokerBtn')?.addEventListener('click',()=>{
+constalive=brokers.filter(b=>b.alive);
+if(alive.length<=1)return;
+constvictim=alive[alive.length-1];
+victim.alive=false;
+//Electnewleadersforpartitionswhoseleaderwasonthisbroker
+replicas.forEach(r=>{
+if(r.broker===victim.id)r.inIsr=false;
+});
+for(letp=0;p<PARTITIONS;p++){
+constpartReplicas=replicas.filter(r=>r.partition===p);
+constleader=partReplicas.find(r=>r.isLeader);
+if(leader&&leader.broker===victim.id){
+leader.isLeader=false;
+constnewLeader=partReplicas.find(r=>r.inIsr&&brokers[r.broker].alive);
+if(newLeader)newLeader.isLeader=true;
+}
+}
+renderCluster();
+});
+
+document.getElementById('restartBrokerBtn')?.addEventListener('click',()=>{
+constdead=brokers.filter(b=>!b.alive);
+if(dead.length===0)return;
+constrevived=dead[0];
+revived.alive=true;
+//ReplicasonthisbrokerrejoinISR(catchup)
+replicas.forEach(r=>{
+if(r.broker===revived.id){
+r.inIsr=true;
+constleader=replicas.find(l=>l.partition===r.partition&&l.isLeader);
+if(leader)r.leo=leader.leo;
+}
+});
+renderCluster();
+});
+
+document.getElementById('resetClusterBtn')?.addEventListener('click',()=>{
+initCluster();
+renderCluster();
+});
+
+//==========ISRVIZ==========
+constMAX_ISR_LOG=50;
+letisrLeaderLeo=0;
+letisrFollower1Leo=0;
+letisrFollower2Leo=0;
+letisrFollower1Slow=false;
+letisrFollower2Slow=false;
+letlagThreshold=10000;
+
+functionrenderIsr(){
+constviz=document.getElementById('isrViz');
+viz.innerHTML='';
+
+constmaxLeo=Math.max(isrLeaderLeo,1);
+constdata=[
+{label:'Leader',leorLeaderLeo,isLeaderue,inIsrue},
+{label:'Follower-1',leorFollower1Leo,isLeaderlse,inIsr:!isrFollower1Slow||(isrLeaderLeo-isrFollower1Leo)<=Math.floor(lagThreshold/1000)},
+{label:'Follower-2',leorFollower2Leo,isLeaderlse,inIsr:!isrFollower2Slow||(isrLeaderLeo-isrFollower2Leo)<=Math.floor(lagThreshold/1000)},
+;
+
+data.forEach(d=>{
+constrow=document.createElement('div');
+row.className='isr-replica-row';
+constlabelCls=d.isLeader?'leader':(d.inIsr?'in-sync':'out-sync');
+constfillCls=d.isLeader?'leader-fill':(d.inIsr?'follower-fill':'out-fill');
+constpct=(d.leo/MAX_ISR_LOG*100).toFixed(1);
+constbadge=d.isLeader?'':`<span class="isr-badge${d.inIsr?'in':'out'}">${d.inIsr?'ISR':'OUT'}</span>`;
+row.innerHTML=`
+<div class="isr-replica-label${labelCls}">${d.label}${badge}</div>
+<div class="isr-log-track"><div class="isr-log-fill${fillCls}" style="width:${pct}%"></div></div>
+<div class="isr-offset-label">LEO:${d.leo}</div>
+`;
+viz.appendChild(row);
+});
+
+constisrMembers=data.filter(d=>d.inIsr).map(d=>d.label);
+document.getElementById('isrInfo').textContent=`ISR={${isrMembers.join(',')}}.Lagthreshold:${lagThreshold}ms(~${Math.floor(lagThreshold/1000)}offsetsbehind).`;
+}
+
+document.getElementById('lagThresholdSlider')?.addEventListener('input',(e)=>{
+lagThreshold=parseInt((e.target).value);
+document.getElementById('lagThresholdLabel').textContent=String(lagThreshold);
+renderIsr();
+});
+
+document.getElementById('isrProduceBtn')?.addEventListener('click',()=>{
+constburst=Math.floor(Math.random()*6)+3;
+isrLeaderLeo=Math.min(MAX_ISR_LOG,isrLeaderLeo+burst);
+if(!isrFollower1Slow)isrFollower1Leo=isrLeaderLeo;
+elseisrFollower1Leo=Math.min(isrLeaderLeo,isrFollower1Leo+Math.floor(burst*0.3));
+if(!isrFollower2Slow)isrFollower2Leo=isrLeaderLeo;
+elseisrFollower2Leo=Math.min(isrLeaderLeo,isrFollower2Leo+Math.floor(burst*0.2));
+renderIsr();
+});
+
+document.getElementById('slowFollowerBtn')?.addEventListener('click',()=>{
+if(!isrFollower1Slow){isrFollower1Slow=true;}
+elseif(!isrFollower2Slow){isrFollower2Slow=true;}
+renderIsr();
+});
+
+document.getElementById('healFollowerBtn')?.addEventListener('click',()=>{
+isrFollower1Slow=false;
+isrFollower2Slow=false;
+isrFollower1Leo=isrLeaderLeo;
+isrFollower2Leo=isrLeaderLeo;
+renderIsr();
+});
+
+document.getElementById('resetIsrBtn')?.addEventListener('click',()=>{
+isrLeaderLeo=0;isrFollower1Leo=0;isrFollower2Leo=0;
+isrFollower1Slow=false;isrFollower2Slow=false;
+renderIsr();
+});
+
+//==========HIGHWATERMARK==========
+constHW_MAX=20;
+lethwLeader=0;
+lethwF1=0;
+lethwF2=0;
+lethwF2Slow=false;
+
+functiongetHW(){
+returnMath.min(hwLeader,hwF1,hwF2Slow?hwF2:hwF2);
+}
+
+functionrenderHW(){
+constviz=document.getElementById('hwViz');
+viz.innerHTML='';
+consthw=getHW();
+
+constdata=[
+{label:'Leader',leoLeader,cls:'leader'},
+{label:'Follower-1',leoF1,cls:'follower'},
+{label:'Follower-2',leoF2,clsF2Slow?'slow':'follower'},
+;
+
+data.forEach(d=>{
+constrow=document.createElement('div');
+row.className='hw-row';
+constcommittedW=d.leo>0?(Math.min(hw,d.leo)/HW_MAX*100):0;
+constuncommittedW=d.leo>hw?((d.leo-hw)/HW_MAX*100):0;
+consthwLeft=(hw/HW_MAX*100);
+
+row.innerHTML=`
+<div class="hw-label${d.cls}">${d.label}${d.cls==='slow'?'🐌':''}</div>
+<div class="hw-track">
+<div class="hw-segmentcommitted" style="width:${committedW}%">${hw>0?'0-'+(hw-1):''}</div>
+<div class="hw-segmentuncommitted" style="width:${uncommittedW}%">${d.leo>hw?hw+'-'+(d.leo-1):''}</div>
+${hw>0?`<div class="hw-marker" style="left:${hwLeft}%"><div class="hw-marker-label">HW=${hw}</div></div>`:''}
+</div>
+<div class="hw-offset">LEO:${d.leo}</div>
+`;
+viz.appendChild(row);
+});
+
+document.getElementById('hwReadOffset').textContent=String(hw);
+document.getElementById('hwInfo').textContent=hw<hwLeader
+?`⚠️HighWatermark(${hw})isbehindleaderLEO(${hwLeader})—${hwF2Slow?'slowreplicadraggingdownHW!':'followerscatchingup...'}Consumercanonlyreaduptooffset${hw}.`
+:hwLeader===0?'Producemessagestotheleader,thenstepthroughreplicationtoseeHWadvance.'
+:`✅Allreplicascaughtup.HW=${hw}.Consumercanreadallcommittedmessages.`;
+}
+
+document.getElementById('hwProduceBtn')?.addEventListener('click',()=>{
+hwLeader=Math.min(HW_MAX,hwLeader+Math.floor(Math.random()*3)+1);
+renderHW();
+});
+
+document.getElementById('hwReplicateBtn')?.addEventListener('click',()=>{
+//Followerscatchuptowardleader
+hwF1=Math.min(hwLeader,hwF1+Math.floor(Math.random()*2)+1);
+if(!hwF2Slow)hwF2=Math.min(hwLeader,hwF2+Math.floor(Math.random()*2)+1);
+elsehwF2=Math.min(hwLeader,hwF2+(Math.random()>0.5?1:0));
+renderHW();
+});
+
+document.getElementById('hwSlowReplicaBtn')?.addEventListener('click',()=>{
+hwF2Slow=!hwF2Slow;
+renderHW();
+});
+
+document.getElementById('hwResetBtn')?.addEventListener('click',()=>{
+hwLeader=0;hwF1=0;hwF2=0;hwF2Slow=false;
+renderHW();
+});
+
+//==========ACKS==========
+letacksMode='0';
+letminIsr=2;
+letacksLeaderAlive=true;
+letacksFollowerAlive=[true,true];
+
+document.querySelectorAll('.acks-btn').forEach(btn=>{
+btn.addEventListener('click',()=>{
+document.querySelectorAll('.acks-btn').forEach(b=>b.classList.remove('active'));
+btn.classList.add('active');
+acksMode=(btn).dataset.acks;
+renderAcksViz();
+});
+});
+
+document.getElementById('minIsrSlider')?.addEventListener('input',(e)=>{
+minIsr=parseInt((e.target).value);
+document.getElementById('minIsrLabel').textContent=String(minIsr);
+renderAcksViz();
+});
+
+functionrenderAcksViz(){
+constviz=document.getElementById('acksViz');
+viz.innerHTML='';
+constaliveFollowers=acksFollowerAlive.filter(a=>a).length;
+constisrSize=(acksLeaderAlive?1:0)+aliveFollowers;
+
+constitems=[
+{name:'Leader(B0)',aliveksLeaderAlive,isLeaderue},
+{name:'Follower(B1)',aliveksFollowerAlive[0],isLeaderlse},
+{name:'Follower(B2)',aliveksFollowerAlive[1],isLeaderlse},
+;
+
+constcontainer=document.createElement('div');
+container.style.cssText='display:flex;gap:12px;flex-wrap:wrap;';
+items.forEach(item=>{
+constel=document.createElement('div');
+el.style.cssText=`padding:12px16px;border-radius:10px;border:1pxsolid${item.alive?(item.isLeader?'rgba(52,211,153,0.4)':'rgba(96,165,250,0.3)'):'rgba(239,68,68,0.3)'};background:${item.alive?(item.isLeader?'rgba(52,211,153,0.08)':'rgba(96,165,250,0.06)'):'rgba(239,68,68,0.06)'};min-width:120px;text-align:center;`;
+el.innerHTML=`<div style="font-weight:700;font-size:0.85rem;color:${item.alive?'#fff':'#888'}">${item.name}</div>
+<div style="font-size:0.75rem;color:${item.alive?'#34d399':'#ef4444'};margin-top:4px">${item.alive?'✅Alive':'💀Down'}</div>`;
+container.appendChild(el);
+});
+viz.appendChild(container);
+
+constisrInfo=document.createElement('div');
+isrInfo.style.cssText='margin-top:12px;font-size:0.85rem;color:#888;';
+isrInfo.textContent=`ISRsize:${isrSize}|acks=${acksMode}|min.insync.replicas=${minIsr}`;
+viz.appendChild(isrInfo);
+}
+
+document.getElementById('acksProduceBtn')?.addEventListener('click',()=>{
+constresult=document.getElementById('acksResult');
+result.innerHTML='';
+constaliveFollowers=acksFollowerAlive.filter(a=>a).length;
+constisrSize=(acksLeaderAlive?1:0)+aliveFollowers;
+
+functionaddStep(cls,text){
+constel=document.createElement('div');
+el.className=`acks-step${cls}`;
+el.textContent=text;
+result.appendChild(el);
+}
+
+if(!acksLeaderAlive){
+addStep('error','❌Leaderisdown—producefailsregardlessofackssetting.');
+return;
+}
+
+addStep('info',`📤Producersendsmessagetoleader(acks=${acksMode})...`);
+
+if(acksMode==='0'){
+addStep('success','✅acks=0:Producerdoesn\'twaitforANYacknowledgment.Messagesent(fire&forget).');
+addStep('warn','⚠️Ifleadercrashesbeforewritingtolog,messageisLOST.Producerwon\'tknow.');
+}elseif(acksMode==='1'){
+addStep('success','✅acks=1:Leaderwrotetoitslocallogandacknowledged.');
+if(aliveFollowers===0){
+addStep('warn','⚠️Nofollowersalive!Ifleadercrashesnow,messageisLOST.');
+}else{
+addStep('info',`📋${aliveFollowers}follower(s)willreplicateasynchronously.`);
+addStep('warn','⚠️IfleadercrashesBEFOREfollowersreplicate,messagecouldbelost.');
+}
+}else{
+//acks=all
+if(isrSize<minIsr){
+addStep('error',`❌NOT_ENOUGH_REPLICAS:ISRsize(${isrSize})<min.insync.replicas(${minIsr}).WriteREJECTED.`);
+return;
+}
+addStep('info',`⏳Waitingforall${isrSize}ISRmemberstoacknowledge...`);
+addStep('success',`✅acks=all:All${isrSize}ISRmembersacknowledged.Messageisdurable.`);
+if(isrSize>=2){
+addStep('success','🛡️Cansurvive1brokerfailurewithzerodataloss.');
+}
+}
+});
+
+document.getElementById('acksKillLeaderBtn')?.addEventListener('click',()=>{
+acksLeaderAlive=false;
+//Promoteafollower
+if(acksFollowerAlive[0]){
+//B1becomesleaderconceptually
+}
+renderAcksViz();
+constresult=document.getElementById('acksResult');
+result.innerHTML='';
+constel=document.createElement('div');
+el.className='acks-steperror';
+
+if(acksMode==='0'){
+el.textContent='💀Leadercrashed.Withacks=0,anyin-flightmessagesareLOST.Producerdoesn\'tevenknow.';
+}elseif(acksMode==='1'){
+el.textContent='💀Leadercrashed.Withacks=1,recentlyacknowledgedmessages(writtentoleaderonly)maybeLOSTiffollowershadn\'treplicatedyet.';
+}else{
+el.textContent='💀Leadercrashed.Withacks=all,allacknowledgedmessagesareSAFEonremainingISRmembers.Nodataloss!';
+}
+result.appendChild(el);
+});
+
+document.getElementById('acksKillFollowerBtn')?.addEventListener('click',()=>{
+if(acksFollowerAlive[1])acksFollowerAlive[1]=false;
+elseif(acksFollowerAlive[0])acksFollowerAlive[0]=false;
+renderAcksViz();
+});
+
+document.getElementById('acksResetBtn')?.addEventListener('click',()=>{
+acksLeaderAlive=true;
+acksFollowerAlive=[true,true];
+document.getElementById('acksResult').innerHTML='';
+renderAcksViz();
+});
+
+//==========UNCLEANLEADERELECTION==========
+letuncleanMode='clean';
+
+document.querySelectorAll('.unclean-btn').forEach(btn=>{
+btn.addEventListener('click',()=>{
+document.querySelectorAll('.unclean-btn').forEach(b=>b.classList.remove('active'));
+btn.classList.add('active');
+uncleanMode=(btn).dataset.mode;
+constindicator=document.getElementById('tradeoffIndicator');
+indicator.style.left=uncleanMode==='clean'?'20%':'80%';
+renderUncleanViz();
+});
+});
+
+functionrenderUncleanViz(){
+constviz=document.getElementById('uncleanViz');
+viz.innerHTML='';
+constdesc=uncleanMode==='clean'
+?'🔒Cleanelectiononly:IfallISRreplicasaredown,thepartitiongoesOFFLINEuntilanISRmemberrecovers.Nodataloss,butnoavailability.'
+:'⚡Uncleanelectionallowed:Anout-of-syncreplicacanbecomeleader.ThepartitionstaysAVAILABLE,butmessagesthenewleadermissedarepermanentlyLOST.';
+viz.innerHTML=`<div style="font-size:0.9rem;color:#aaa;line-height:1.6;">${desc}</div>`;
+}
+
+document.getElementById('uncleanKillAllIsrBtn')?.addEventListener('click',()=>{
+constresult=document.getElementById('uncleanResult');
+result.innerHTML='';
+
+functionaddStep(cls,text){
+constel=document.createElement('div');
+el.className=`unclean-step${cls}`;
+el.textContent=text;
+result.appendChild(el);
+}
+
+addStep('error','💀AllISRmembersareDOWN.Leaderandin-syncfollowerscrashed.');
+addStep('warn','⏳Kafkacontrollerdetectspartitionhasnoleader...');
+
+if(uncleanMode==='clean'){
+addStep('info','🔒unclean.leader.election.enable=false—waitingforISRmembertocomeback...');
+addStep('error','🚫PartitionisOFFLINE.ProducersgetNotLeaderOrFollower.Consumersstall.');
+addStep('info','✅WhenanISRmemberrecovers,itbecomesleaderwithALLdataintact.Zerodataloss.');
+}else{
+addStep('warn','⚡unclean.leader.election.enable=true—electingout-of-syncreplicaasleader!');
+addStep('warn','📋Out-of-syncreplica(B2)hadLEO=45,butleaderhadLEO=52.7messagesMISSING.');
+addStep('error','💀Messages45-51arePERMANENTLYLOST.NewleaderstartsfromitsownLEO.');
+addStep('success','✅PartitionisAVAILABLEagain.Producersandconsumerscanresume—butwithdatagap.');
+}
+});
+
+document.getElementById('uncleanResetBtn')?.addEventListener('click',()=>{
+document.getElementById('uncleanResult').innerHTML='';
+});
+
+//==========INIT==========
+initCluster();
+renderCluster();
+renderIsr();
+renderHW();
+renderAcksViz();
+renderUncleanViz();
+</script>
+</BaseLayout>

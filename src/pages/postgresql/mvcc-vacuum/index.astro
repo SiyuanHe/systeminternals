@@ -1,0 +1,1680 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+title="MVCC&Vacuum:PostgreSQL'sConcurrencyEngine"
+description="InteractivevisualizationofPostgreSQLMVCC—tuplevisibility,deadtuples,tablebloat,VACUUM,autovacuum,andtransactionIDwraparound"
+breadcrumbs={[
+{label:"Home",href:"/"},
+{label:"PostgreSQL",href:"/postgresql/"},
+{label:"MVCC&Vacuum",href:"/postgresql/mvcc-vacuum/"}
+]}
+>
+<div class="viz-container">
+<header class="viz-header">
+<h1>🔄MVCC&Vacuum</h1>
+<p class="subtitle">HowPostgreSQLManagesConcurrentAccessWithoutReadLocks</p>
+</header>
+
+<!--Overview-->
+<section class="overview-section">
+<div class="overview-card">
+<p>
+PostgreSQLuses<strong>Multi-VersionConcurrencyControl</strong>(MVCC)soreadersneverblockwriters
+andwritersneverblockreaders.Everyrowhashiddensystemcolumns—<em>xmin</em>(thetransaction
+thatcreatedit)and<em>xmax</em>(thetransactionthatdeletedorupdatedit).AnUPDATEdoesn'tmodify
+in-place:itmarkstheoldrowdeadandinsertsanewversion.Thetradeoff?<strong>Deadtuples</strong>
+accumulateandneedcleanup—that'swhatVACUUMdoes.
+</p>
+</div>
+</section>
+
+<!--Section1:MVCCBasics—InteractiveTableHeap-->
+<section class="flow-section">
+<h2>📦TableHeap:TupleLifecycle</h2>
+<p class="section-desc">Everyrowversionlivesintheheap.INSERTcreates,UPDATEcopies+kills,DELETEkills.</p>
+
+<div class="flow-controls">
+<button id="insertBtn" class="action-btnprimary-btn">➕INSERT</button>
+<button id="updateBtn" class="action-btnstep-btn"disabled>✏️UPDATE</button>
+<button id="deleteBtn" class="action-btndelete-btn"disabled>🗑️DELETE</button>
+<button id="resetHeapBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="flow-status" id="heapStatus">
+<span class="status-badgeidle" id="heapBadge">Ready</span>
+<span class="status-text" id="heapStatusText">ClickINSERTtoaddarowtotheheap</span>
+</div>
+
+<!--TableHeapVisual-->
+<div class="heap-container">
+<div class="heap-header">
+<span class="heap-col">ctid</span>
+<span class="heap-col">xmin</span>
+<span class="heap-col">xmax</span>
+<span class="heap-col">data</span>
+<span class="heap-col">status</span>
+</div>
+<div class="heap-body" id="heapBody">
+<div class="heap-empty">Tableisempty—INSERTsomerows!</div>
+</div>
+</div>
+
+<div class="heap-stats">
+<div class="stat-box">
+<div class="stat-value" id="liveCount">0</div>
+<div class="stat-label">LiveTuples</div>
+</div>
+<div class="stat-boxdead">
+<div class="stat-value" id="deadCount">0</div>
+<div class="stat-label">DeadTuples</div>
+</div>
+<div class="stat-box">
+<div class="stat-value" id="txnCounter">100</div>
+<div class="stat-label">CurrentTxnID</div>
+</div>
+</div>
+</section>
+
+<!--Explanation:Whynotupdatein-place?-->
+<section class="explain-section">
+<div class="explain-cardhighlight-card">
+<h3>💡WhyNotUpdateIn-Place?</h3>
+<p>
+IfPostgreSQLmodifiedrowsdirectly,concurrentreaderswouldseehalf-writtendata.
+Instead,theoldversionstaysuntouched(readersonoldersnapshotsstillseeit),
+andthenewversioniswrittenelsewhere.ThisisthefundamentalMVCCtradeoff:
+<strong>noreadlocks,butdeadtuplespileup</strong>.MySQLInnoDBtakesadifferent
+approach—itupdatesin-placeandstoresoldversionsinanundolog.
+</p>
+</div>
+</section>
+
+<!--Section2:SnapshotIsolation-->
+<section class="flow-section">
+<h2>👁️SnapshotIsolation:WhoSeesWhat?</h2>
+<p class="section-desc">EachtransactiongetsasnapshotatBEGIN.Itcanonlyseerowscommittedbeforeitssnapshot.</p>
+
+<div class="flow-controls">
+<button id="startSnapDemo" class="action-btnprimary-btn">▶RunDemo</button>
+<button id="stepSnapBtn" class="action-btnstep-btn"disabled>⏭NextStep</button>
+<button id="resetSnapBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="snap-container">
+<div class="snap-sessions">
+<div class="snap-session" id="snapSession1">
+<div class="snap-session-headersession-a">SessionA(Txn200)</div>
+<div class="snap-session-body" id="snapBody1">
+<div class="snap-empty">Waiting...</div>
+</div>
+</div>
+<div class="snap-session" id="snapSession2">
+<div class="snap-session-headersession-b">SessionB(Txn201)</div>
+<div class="snap-session-body" id="snapBody2">
+<div class="snap-empty">Waiting...</div>
+</div>
+</div>
+</div>
+<div class="snap-heap">
+<div class="snap-heap-title">Table:accounts</div>
+<div class="snap-heap-header">
+<span>xmin</span><span>xmax</span><span>name</span><span>balance</span>
+</div>
+<div id="snapHeapBody" class="snap-heap-body">
+<div class="snap-rowcommitted">
+<span>150</span><span>—</span><span>alice</span><span>$500</span>
+</div>
+<div class="snap-rowcommitted">
+<span>160</span><span>—</span><span>bob</span><span>$300</span>
+</div>
+</div>
+</div>
+</div>
+
+<div class="snap-explanation" id="snapExplanation">
+<p>Twosessionswilloperateconcurrently.Watchhowsnapshotisolationensureseachseesaconsistentview.</p>
+</div>
+</section>
+
+<!--Section3:DeadTuples&Bloat-->
+<section class="flow-section">
+<h2>💀DeadTuples&TableBloat</h2>
+<p class="section-desc">Updatesanddeletesleavedeadtuplesbehind.WithoutVACUUM,yourtablegrowsforever.</p>
+
+<div class="bloat-controls">
+<div class="bloat-slider">
+<label>Updatespersecond:<strong id="updateRateValue">10</strong></label>
+<input type="range" id="updateRateSlider" min="1" max="100" value="10">
+</div>
+<div class="bloat-actions">
+<button id="startBloatBtn" class="action-btnprimary-btn">▶StartUpdates</button>
+<button id="stopBloatBtn" class="action-btnreset-btn"disabled>⏹Stop</button>
+<button id="vacuumBloatBtn" class="action-btngc-btn"disabled>🧹RunVACUUM</button>
+<button id="resetBloatBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+</div>
+
+<div class="bloat-viz">
+<div class="bloat-bar-container">
+<div class="bloat-bar-label">TableSize</div>
+<div class="bloat-bar-track">
+<div class="bloat-bar-live" id="bloatLive" style="width:100%;">
+<span>LiveData</span>
+</div>
+<div class="bloat-bar-dead" id="bloatDead" style="width:0%;">
+<span>DeadTuples</span>
+</div>
+<div class="bloat-bar-free" id="bloatFree" style="width:0%;">
+<span>Reusable</span>
+</div>
+</div>
+</div>
+<div class="bloat-meters">
+<div class="bloat-meter">
+<div class="meter-value" id="bloatLiveCount">100</div>
+<div class="meter-label">LiveTuples</div>
+</div>
+<div class="bloat-meterdead">
+<div class="meter-value" id="bloatDeadCount">0</div>
+<div class="meter-label">DeadTuples</div>
+</div>
+<div class="bloat-meterfree">
+<div class="meter-value" id="bloatFreeCount">0</div>
+<div class="meter-label">ReusableSpace</div>
+</div>
+<div class="bloat-meterratio">
+<div class="meter-value" id="bloatRatio">100%</div>
+<div class="meter-label">SpaceEfficiency</div>
+</div>
+</div>
+</div>
+</section>
+
+<!--Explanation:VACUUMtypes-->
+<section class="explain-section">
+<div class="explain-grid">
+<div class="explain-card">
+<h3>🧹RegularVACUUM</h3>
+<p>
+Scansthetableandmarksdeadtuplesas<strong>reusable</strong>—futureINSERTs
+canreclaimthatspace.Butit<em>nevershrinksthefile</em>.Atablethatgrew
+to10GBstays10GBondisk,evenifmostrowsaredeleted.Runsconcurrentlywith
+readsandwrites.
+</p>
+</div>
+<div class="explain-card">
+<h3>🔨VACUUMFULL</h3>
+<p>
+Rewritestheentiretableintoanewfile,reclaimingalldeadspace.Thefile
+actuallyshrinks.Butittakesan<strong>exclusivelock</strong>—noreadsor
+writesduringtheentireoperation.UseonlywhenregularVACUUMisn'tenough
+andyoucanafforddowntime.
+</p>
+</div>
+</div>
+</section>
+
+<!--Section4:VACUUMAnimation-->
+<section class="flow-section">
+<h2>🧹VACUUMInAction</h2>
+<p class="section-desc">WatchVACUUMscantheheap,identifydeadtuples,andmarkspaceasreusable.</p>
+
+<div class="flow-controls">
+<button id="setupVacuumBtn" class="action-btnprimary-btn">📦SetupTable</button>
+<button id="runVacuumBtn" class="action-btngc-btn"disabled>🧹RunVACUUM</button>
+<button id="resetVacuumBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="vacuum-viz">
+<div class="vacuum-heap" id="vacuumHeap">
+<div class="heap-empty">Click"SetupTable"topopulatetheheap</div>
+</div>
+<div class="vacuum-progress" id="vacuumProgress" style="display:none;">
+<div class="vacuum-scanner" id="vacuumScanner"></div>
+<span id="vacuumProgressText">Scanning...</span>
+</div>
+<div class="vacuum-legend">
+<span class="legend-item"><span class="legend-dotlive"></span>Live</span>
+<span class="legend-item"><span class="legend-dotdead"></span>Dead</span>
+<span class="legend-item"><span class="legend-dotfreed"></span>FreedbyVACUUM</span>
+<span class="legend-item"><span class="legend-dotscanning"></span>Scanning</span>
+</div>
+</div>
+</section>
+
+<!--Section5:AutovacuumThresholdCalculator-->
+<section class="flow-section">
+<h2>⚙️AutovacuumThresholds</h2>
+<p class="section-desc">Autovacuumtriggerswhen:deadtuples≥threshold+scale_factor×totalrows</p>
+
+<div class="autovac-controls">
+<div class="autovac-slider">
+<label>autovacuum_vacuum_threshold:<strong id="thresholdValue">50</strong></label>
+<input type="range" id="thresholdSlider" min="0" max="500" value="50" step="10">
+</div>
+<div class="autovac-slider">
+<label>autovacuum_vacuum_scale_factor:<strong id="scaleFactorValue">0.20</strong></label>
+<input type="range" id="scaleFactorSlider" min="0" max="100" value="20" step="1">
+</div>
+<div class="autovac-slider">
+<label>Tablerowcount:<strong id="rowCountValue">10,000</strong></label>
+<input type="range" id="rowCountSlider" min="100" max="10000000" value="10000" step="100">
+</div>
+</div>
+
+<div class="autovac-result">
+<div class="autovac-formula">
+<span class="formula-part">Trigger=</span>
+<span class="formula-val" id="formulaThreshold">50</span>
+<span class="formula-part">+</span>
+<span class="formula-val" id="formulaScale">0.20</span>
+<span class="formula-part">×</span>
+<span class="formula-val" id="formulaRows">10,000</span>
+<span class="formula-part">=</span>
+<span class="formula-result" id="formulaResult">2,050</span>
+<span class="formula-part">deadtuples</span>
+</div>
+<p class="autovac-desc" id="autovacDesc">
+Autovacuumwilltriggerwhen2,050deadtuplesaccumulateinthistable.
+</p>
+</div>
+</section>
+
+<!--Section6:TransactionIDWraparound-->
+<section class="flow-section">
+<h2>💣TransactionIDWraparound</h2>
+<p class="section-desc">PostgreSQLuses32-bittransactionIDs.At~4billion,theywraparound—anddisasterstrikes.</p>
+
+<div class="wrap-controls">
+<div class="wrap-slider">
+<label>Currenttxnage:<strong id="txnAgeValue">500million</strong></label>
+<input type="range" id="txnAgeSlider" min="0" max="2147483647" value="500000000" step="1000000">
+</div>
+<div class="wrap-actions">
+<button id="ageTxnBtn" class="action-btndelete-btn">⏩Age+100M</button>
+<button id="freezeBtn" class="action-btngc-btn">❄️VACUUMFREEZE</button>
+<button id="resetWrapBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+</div>
+
+<div class="wrap-viz">
+<div class="wrap-number-line">
+<div class="wrap-track">
+<div class="wrap-safe" id="wrapSafe"></div>
+<div class="wrap-warning" id="wrapWarning"></div>
+<div class="wrap-danger" id="wrapDanger"></div>
+<div class="wrap-cursor" id="wrapCursor"></div>
+</div>
+<div class="wrap-labels">
+<span>0</span>
+<span>1B</span>
+<span class="warn-label">1.5B⚠️</span>
+<span class="danger-label">2B💀</span>
+</div>
+</div>
+<div class="wrap-status" id="wrapStatus">
+<span class="wrap-status-icon">✅</span>
+<span class="wrap-status-text">Healthy—plentyofheadroombeforewraparound</span>
+</div>
+<div class="wrap-info">
+<div class="wrap-info-item">
+<span class="wrap-info-label">Remainingbeforewraparound:</span>
+<span class="wrap-info-value" id="wrapRemaining">1.65billiontxns</span>
+</div>
+<div class="wrap-info-item">
+<span class="wrap-info-label">At1000txn/s,timeleft:</span>
+<span class="wrap-info-value" id="wrapTime">~19days</span>
+</div>
+</div>
+</div>
+</section>
+
+<!--Explanation:Freezing-->
+<section class="explain-section">
+<div class="explain-cardhighlight-card">
+<h3>❄️WhatIsFreezing?</h3>
+<p>
+WhenVACUUMfreezesatuple,itreplacesits<code>xmin</code>with<strong>FrozenTransactionId(2)</strong>,
+aspecialvaluemeaning"visibletoeveryone,forever."Thisresetsthetuple'sageto0.Withoutfreezing,
+oldtupleswouldeventuallyhavetheirxminwraparoundpastthecurrenttxnID—makingcommitteddata
+suddenly<em>invisible</em>.PostgreSQLwill<strong>forceashutdown</strong>ratherthanletthishappen,
+refusingallnewtransactionsuntilyoumanuallyrunVACUUMFREEZE.
+</p>
+</div>
+</section>
+
+<footer class="viz-footer">
+<p>Basedon<ahref="https://www.postgresql.org/docs/current/mvcc.html" target="_blank">PostgreSQLMVCCDocumentation</a>and<ahref="https://www.postgresql.org/docs/current/routine-vacuuming.html" target="_blank">RoutineVacuumingGuide</a></p>
+</footer>
+
+<div class="share-buttons">
+<span>Sharethisvisualization:</span>
+<ahref="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20PostgreSQL%20MVCC%20and%20VACUUM&url=https://systeminternals.dev/postgresql/mvcc-vacuum/" target="_blank" class="share-btn">𝕏Twitter</a>
+<ahref="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/postgresql/mvcc-vacuum/" target="_blank" class="share-btn">inLinkedIn</a>
+<ahref="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/postgresql/mvcc-vacuum/&t=Interactive%20PostgreSQL%20MVCC%20%26%20Vacuum%20Visualizer" target="_blank" class="share-btn">🟧HackerNews</a>
+</div>
+</div>
+</BaseLayout>
+
+<style>
+.viz-container{
+max-width:1100px;
+margin:0auto;
+}
+
+.viz-header{
+text-align:center;
+margin-bottom:40px;
+}
+
+.viz-headerh1{
+font-size:2.5rem;
+margin-bottom:10px;
+background:linear-gradient(90deg,#f472b6,#a78bfa,#60a5fa);
+-webkit-background-clip:text;
+-webkit-text-fill-color:transparent;
+background-clip:text;
+}
+
+.subtitle{
+color:#888;
+font-size:1.1rem;
+}
+
+h2{
+font-size:1.5rem;
+color:#fff;
+margin-bottom:12px;
+}
+
+.section-desc{
+color:#888;
+margin-bottom:24px;
+font-size:1rem;
+}
+
+/*Overview*/
+.overview-section{
+margin-bottom:50px;
+}
+
+.overview-card{
+background:linear-gradient(135deg,rgba(167,139,250,0.1),rgba(96,165,250,0.05));
+border:1pxsolidrgba(167,139,250,0.3);
+border-radius:16px;
+padding:24px28px;
+font-size:1.05rem;
+line-height:1.8;
+color:#ccc;
+}
+
+.overview-cardstrong{color:#fff;}
+.overview-cardem{color:#a78bfa;font-style:normal;font-weight:500;}
+.overview-carda{color:#60a5fa;}
+
+/*ActionButtons*/
+.action-btn{
+padding:10px20px;
+border:none;
+border-radius:10px;
+font-size:0.95rem;
+font-weight:600;
+cursor:pointer;
+transition:all0.2s;
+}
+
+.action-btn:disabled{
+opacity:0.4;
+cursor:not-allowed;
+}
+
+.primary-btn{
+background:linear-gradient(135deg,#a78bfa,#7c3aed);
+color:white;
+}
+
+.primary-btn:hover:not(:disabled){
+transform:translateY(-2px);
+box-shadow:05px20pxrgba(124,58,237,0.4);
+}
+
+.step-btn{
+background:linear-gradient(135deg,#60a5fa,#3b82f6);
+color:white;
+}
+
+.delete-btn{
+background:linear-gradient(135deg,#f87171,#ef4444);
+color:white;
+}
+
+.gc-btn{
+background:linear-gradient(135deg,#f59e0b,#d97706);
+color:white;
+}
+
+.reset-btn{
+background:rgba(255,255,255,0.1);
+color:#aaa;
+}
+
+.reset-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+/*FlowSection*/
+.flow-section{
+margin-bottom:50px;
+}
+
+.flow-controls{
+display:flex;
+gap:12px;
+flex-wrap:wrap;
+margin-bottom:20px;
+}
+
+.flow-status{
+display:flex;
+align-items:center;
+gap:12px;
+margin-bottom:24px;
+padding:12px16px;
+background:rgba(255,255,255,0.03);
+border-radius:10px;
+border:1pxsolidrgba(255,255,255,0.1);
+}
+
+.status-badge{
+padding:4px12px;
+border-radius:20px;
+font-size:0.8rem;
+font-weight:600;
+text-transform:uppercase;
+}
+
+.status-badge.idle{background:rgba(107,114,128,0.3);color:#9ca3af;}
+.status-badge.insert{background:rgba(34,197,94,0.2);color:#22c55e;}
+.status-badge.update{background:rgba(96,165,250,0.2);color:#60a5fa;}
+.status-badge.delete{background:rgba(239,68,68,0.2);color:#f87171;}
+
+.status-text{
+color:#aaa;
+font-size:0.95rem;
+}
+
+/*HeapTable*/
+.heap-container{
+background:rgba(0,0,0,0.2);
+border-radius:16px;
+border:1pxsolidrgba(255,255,255,0.1);
+overflow:hidden;
+margin-bottom:20px;
+}
+
+.heap-header{
+display:grid;
+grid-template-columns:60px80px80px1fr100px;
+gap:1px;
+padding:10px16px;
+background:rgba(255,255,255,0.05);
+font-size:0.8rem;
+font-weight:600;
+color:#888;
+text-transform:uppercase;
+letter-spacing:0.5px;
+}
+
+.heap-body{
+min-height:100px;
+max-height:350px;
+overflow-y:auto;
+}
+
+.heap-empty{
+padding:40px;
+text-align:center;
+color:#555;
+font-style:italic;
+}
+
+:global(.heap-row){
+display:grid;
+grid-template-columns:60px80px80px1fr100px;
+gap:1px;
+padding:8px16px;
+font-family:'Monaco','Menlo',monospace;
+font-size:0.82rem;
+border-bottom:1pxsolidrgba(255,255,255,0.05);
+animation:rowAppear0.3sease-out;
+transition:opacity0.3s,background0.3s;
+}
+
+:global(.heap-row.live){color:#86efac;}
+:global(.heap-row.dead){color:#fca5a5;opacity:0.6;}
+:global(.heap-row.dead.row-status){color:#ef4444;}
+:global(.heap-row.live.row-status){color:#22c55e;}
+
+:global(.row-status){
+font-weight:600;
+font-size:0.75rem;
+}
+
+@keyframesrowAppear{
+from{opacity:0;background:rgba(255,255,255,0.1);}
+to{opacity:1;background:transparent;}
+}
+
+.heap-stats{
+display:flex;
+gap:16px;
+flex-wrap:wrap;
+}
+
+.stat-box{
+flex:1;
+min-width:120px;
+background:rgba(34,197,94,0.08);
+border:1pxsolidrgba(34,197,94,0.2);
+border-radius:12px;
+padding:16px;
+text-align:center;
+}
+
+.stat-box.dead{
+background:rgba(239,68,68,0.08);
+border-color:rgba(239,68,68,0.2);
+}
+
+.stat-value{
+font-size:1.8rem;
+font-weight:700;
+color:#fff;
+}
+
+.stat-label{
+font-size:0.8rem;
+color:#888;
+margin-top:4px;
+}
+
+/*ExplanationCards*/
+.explain-section{
+margin-bottom:50px;
+}
+
+.explain-card{
+background:rgba(255,255,255,0.03);
+border:1pxsolidrgba(255,255,255,0.1);
+border-radius:14px;
+padding:24px;
+}
+
+.explain-cardh3{
+font-size:1.1rem;
+color:#fff;
+margin-bottom:12px;
+}
+
+.explain-cardp{
+color:#aaa;
+line-height:1.7;
+font-size:0.95rem;
+}
+
+.explain-cardstrong{color:#00d4ff;}
+.explain-cardem{color:#a78bfa;}
+.explain-cardcode{
+background:rgba(0,0,0,0.3);
+padding:2px6px;
+border-radius:4px;
+font-size:0.85rem;
+color:#22c55e;
+}
+
+.highlight-card{
+background:linear-gradient(135deg,rgba(244,114,182,0.08),rgba(167,139,250,0.08));
+border-color:rgba(244,114,182,0.3);
+}
+
+.explain-grid{
+display:grid;
+grid-template-columns:1fr1fr;
+gap:20px;
+}
+
+/*SnapshotIsolation*/
+.snap-container{
+display:grid;
+grid-template-columns:1fr1fr;
+gap:20px;
+margin-bottom:20px;
+}
+
+.snap-sessions{
+display:flex;
+flex-direction:column;
+gap:16px;
+}
+
+.snap-session{
+border-radius:12px;
+overflow:hidden;
+border:1pxsolidrgba(255,255,255,0.1);
+}
+
+.snap-session-header{
+padding:10px14px;
+font-weight:600;
+font-size:0.9rem;
+}
+
+.snap-session-header.session-a{background:rgba(244,114,182,0.2);color:#f9a8d4;}
+.snap-session-header.session-b{background:rgba(96,165,250,0.2);color:#93c5fd;}
+
+.snap-session-body{
+padding:12px14px;
+min-height:80px;
+background:rgba(0,0,0,0.2);
+font-family:'Monaco','Menlo',monospace;
+font-size:0.8rem;
+}
+
+.snap-empty{color:#555;font-style:italic;}
+
+:global(.snap-entry){
+padding:4px0;
+color:#ccc;
+border-bottom:1pxsolidrgba(255,255,255,0.05);
+animation:rowAppear0.3sease-out;
+}
+
+:global(.snap-entry.highlight){color:#fbbf24;font-weight:600;}
+
+.snap-heap{
+background:rgba(0,0,0,0.2);
+border-radius:12px;
+border:1pxsolidrgba(255,255,255,0.1);
+overflow:hidden;
+}
+
+.snap-heap-title{
+padding:10px14px;
+font-weight:600;
+font-size:0.9rem;
+background:rgba(255,255,255,0.05);
+color:#aaa;
+}
+
+.snap-heap-header{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+padding:6px14px;
+font-size:0.75rem;
+color:#666;
+text-transform:uppercase;
+border-bottom:1pxsolidrgba(255,255,255,0.05);
+}
+
+.snap-heap-body{
+padding:4px0;
+font-family:'Monaco','Menlo',monospace;
+font-size:0.8rem;
+}
+
+:global(.snap-row){
+display:grid;
+grid-template-columns:repeat(4,1fr);
+padding:6px14px;
+transition:all0.3s;
+}
+
+:global(.snap-row.committed){color:#86efac;}
+:global(.snap-row.dead){color:#fca5a5;opacity:0.5;text-decoration:line-through;}
+:global(.snap-row.new-row){color:#93c5fd;animation:rowAppear0.3sease-out;}
+
+.snap-explanation{
+padding:12px16px;
+background:rgba(255,255,255,0.03);
+border-radius:10px;
+border:1pxsolidrgba(255,255,255,0.1);
+color:#aaa;
+font-size:0.9rem;
+}
+
+/*Bloat*/
+.bloat-controls{
+display:flex;
+gap:24px;
+align-items:flex-start;
+flex-wrap:wrap;
+margin-bottom:24px;
+}
+
+.bloat-slider{
+flex:1;
+min-width:200px;
+}
+
+.bloat-sliderlabel{
+display:block;
+color:#ccc;
+margin-bottom:10px;
+font-size:0.95rem;
+}
+
+.bloat-sliderstrong{color:#a78bfa;}
+
+.bloat-sliderinput[type="range"],
+.autovac-sliderinput[type="range"],
+.wrap-sliderinput[type="range"]{
+width:100%;
+height:8px;
+-webkit-appearance:none;
+background:rgba(255,255,255,0.15);
+border-radius:4px;
+cursor:pointer;
+}
+
+.bloat-sliderinput[type="range"]::-webkit-slider-thumb,
+.autovac-sliderinput[type="range"]::-webkit-slider-thumb,
+.wrap-sliderinput[type="range"]::-webkit-slider-thumb{
+-webkit-appearance:none;
+width:20px;
+height:20px;
+border-radius:50%;
+background:#a78bfa;
+cursor:pointer;
+}
+
+.bloat-actions{
+display:flex;
+gap:10px;
+flex-wrap:wrap;
+align-items:flex-start;
+}
+
+.bloat-viz{
+background:rgba(0,0,0,0.2);
+border-radius:16px;
+padding:24px;
+border:1pxsolidrgba(255,255,255,0.1);
+}
+
+.bloat-bar-container{
+margin-bottom:24px;
+}
+
+.bloat-bar-label{
+font-size:0.85rem;
+color:#888;
+margin-bottom:8px;
+}
+
+.bloat-bar-track{
+display:flex;
+height:40px;
+border-radius:8px;
+overflow:hidden;
+background:rgba(255,255,255,0.05);
+}
+
+.bloat-bar-live{
+background:linear-gradient(90deg,#22c55e,#16a34a);
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:0.75rem;
+color:white;
+font-weight:600;
+transition:width0.5s;
+min-width:0;
+overflow:hidden;
+}
+
+.bloat-bar-dead{
+background:linear-gradient(90deg,#ef4444,#dc2626);
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:0.75rem;
+color:white;
+font-weight:600;
+transition:width0.5s;
+min-width:0;
+overflow:hidden;
+}
+
+.bloat-bar-free{
+background:linear-gradient(90deg,#3b82f6,#2563eb);
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:0.75rem;
+color:white;
+font-weight:600;
+transition:width0.5s;
+min-width:0;
+overflow:hidden;
+}
+
+.bloat-meters{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:12px;
+}
+
+.bloat-meter{
+text-align:center;
+padding:12px;
+border-radius:10px;
+background:rgba(34,197,94,0.08);
+border:1pxsolidrgba(34,197,94,0.15);
+}
+
+.bloat-meter.dead{
+background:rgba(239,68,68,0.08);
+border-color:rgba(239,68,68,0.15);
+}
+
+.bloat-meter.free{
+background:rgba(59,130,246,0.08);
+border-color:rgba(59,130,246,0.15);
+}
+
+.bloat-meter.ratio{
+background:rgba(167,139,250,0.08);
+border-color:rgba(167,139,250,0.15);
+}
+
+.meter-value{
+font-size:1.4rem;
+font-weight:700;
+color:#fff;
+}
+
+.meter-label{
+font-size:0.75rem;
+color:#888;
+margin-top:4px;
+}
+
+/*VACUUMAnimation*/
+.vacuum-viz{
+background:rgba(0,0,0,0.2);
+border-radius:16px;
+padding:24px;
+border:1pxsolidrgba(255,255,255,0.1);
+}
+
+.vacuum-heap{
+display:grid;
+grid-template-columns:repeat(auto-fill,minmax(48px,1fr));
+gap:6px;
+margin-bottom:20px;
+min-height:80px;
+}
+
+:global(.vac-tuple){
+width:100%;
+aspect-ratio:1;
+border-radius:8px;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:0.65rem;
+font-weight:600;
+transition:all0.3s;
+}
+
+:global(.vac-tuple.live){background:rgba(34,197,94,0.3);border:1pxsolidrgba(34,197,94,0.5);color:#86efac;}
+:global(.vac-tuple.dead){background:rgba(239,68,68,0.3);border:1pxsolidrgba(239,68,68,0.5);color:#fca5a5;}
+:global(.vac-tuple.freed){background:rgba(59,130,246,0.15);border:1pxdashedrgba(59,130,246,0.4);color:#60a5fa;}
+:global(.vac-tuple.scanning){box-shadow:0012pxrgba(251,191,36,0.6);border-color:#fbbf24;}
+
+.vacuum-progress{
+margin-bottom:16px;
+display:flex;
+align-items:center;
+gap:12px;
+}
+
+.vacuum-scanner{
+height:6px;
+flex:1;
+background:rgba(255,255,255,0.1);
+border-radius:3px;
+overflow:hidden;
+position:relative;
+}
+
+:global(.vacuum-scanner-fill){
+height:100%;
+background:linear-gradient(90deg,#fbbf24,#f59e0b);
+border-radius:3px;
+transition:width0.2s;
+}
+
+#vacuumProgressText{
+font-size:0.85rem;
+color:#fbbf24;
+font-weight:600;
+white-space:nowrap;
+}
+
+.vacuum-legend{
+display:flex;
+gap:20px;
+flex-wrap:wrap;
+}
+
+.legend-item{
+display:flex;
+align-items:center;
+gap:6px;
+font-size:0.8rem;
+color:#888;
+}
+
+.legend-dot{
+width:12px;
+height:12px;
+border-radius:4px;
+}
+
+.legend-dot.live{background:rgba(34,197,94,0.5);}
+.legend-dot.dead{background:rgba(239,68,68,0.5);}
+.legend-dot.freed{background:rgba(59,130,246,0.3);border:1pxdashedrgba(59,130,246,0.5);}
+.legend-dot.scanning{background:rgba(251,191,36,0.5);}
+
+/*Autovacuum*/
+.autovac-controls{
+display:flex;
+flex-direction:column;
+gap:16px;
+margin-bottom:24px;
+}
+
+.autovac-slider{
+max-width:500px;
+}
+
+.autovac-sliderlabel{
+display:block;
+color:#ccc;
+margin-bottom:8px;
+font-size:0.95rem;
+}
+
+.autovac-sliderstrong{color:#a78bfa;}
+
+.autovac-result{
+background:rgba(0,0,0,0.2);
+border-radius:16px;
+padding:24px;
+border:1pxsolidrgba(255,255,255,0.1);
+text-align:center;
+}
+
+.autovac-formula{
+font-size:1.1rem;
+margin-bottom:12px;
+font-family:'Monaco','Menlo',monospace;
+}
+
+.formula-part{color:#888;}
+.formula-val{color:#a78bfa;font-weight:600;}
+.formula-result{color:#22c55e;font-weight:700;font-size:1.3rem;}
+
+.autovac-desc{color:#aaa;font-size:0.9rem;}
+
+/*Wraparound*/
+.wrap-controls{
+display:flex;
+gap:24px;
+align-items:flex-start;
+flex-wrap:wrap;
+margin-bottom:24px;
+}
+
+.wrap-slider{
+flex:1;
+min-width:250px;
+}
+
+.wrap-sliderlabel{
+display:block;
+color:#ccc;
+margin-bottom:8px;
+font-size:0.95rem;
+}
+
+.wrap-sliderstrong{color:#a78bfa;}
+
+.wrap-actions{
+display:flex;
+gap:10px;
+flex-wrap:wrap;
+}
+
+.wrap-viz{
+background:rgba(0,0,0,0.2);
+border-radius:16px;
+padding:24px;
+border:1pxsolidrgba(255,255,255,0.1);
+}
+
+.wrap-number-line{
+margin-bottom:20px;
+}
+
+.wrap-track{
+height:32px;
+border-radius:8px;
+overflow:hidden;
+display:flex;
+position:relative;
+background:rgba(255,255,255,0.05);
+}
+
+.wrap-safe{
+height:100%;
+background:linear-gradient(90deg,#22c55e,#16a34a);
+transition:width0.5s;
+}
+
+.wrap-warning{
+height:100%;
+background:linear-gradient(90deg,#f59e0b,#d97706);
+transition:width0.5s;
+}
+
+.wrap-danger{
+height:100%;
+background:linear-gradient(90deg,#ef4444,#dc2626);
+transition:width0.5s;
+}
+
+.wrap-cursor{
+position:absolute;
+top:-4px;
+bottom:-4px;
+width:4px;
+background:#fff;
+border-radius:2px;
+transition:left0.5s;
+box-shadow:0010pxrgba(255,255,255,0.5);
+}
+
+.wrap-labels{
+display:flex;
+justify-content:space-between;
+margin-top:6px;
+font-size:0.75rem;
+color:#888;
+}
+
+.warn-label{color:#f59e0b;}
+.danger-label{color:#ef4444;}
+
+.wrap-status{
+display:flex;
+align-items:center;
+gap:10px;
+padding:12px16px;
+border-radius:10px;
+margin-bottom:16px;
+font-size:0.95rem;
+}
+
+.wrap-status-icon{font-size:1.2rem;}
+.wrap-status-text{color:#ccc;}
+
+.wrap-info{
+display:flex;
+gap:24px;
+flex-wrap:wrap;
+}
+
+.wrap-info-item{
+flex:1;
+min-width:200px;
+}
+
+.wrap-info-label{
+font-size:0.8rem;
+color:#888;
+display:block;
+margin-bottom:4px;
+}
+
+.wrap-info-value{
+font-size:1.1rem;
+font-weight:600;
+color:#fff;
+}
+
+/*Footer*/
+.viz-footer{
+text-align:center;
+color:#666;
+font-size:0.9rem;
+padding:20px0;
+border-top:1pxsolidrgba(255,255,255,0.1);
+margin-bottom:30px;
+}
+
+.viz-footera{color:#60a5fa;}
+
+.share-buttons{
+display:flex;
+align-items:center;
+justify-content:center;
+gap:16px;
+flex-wrap:wrap;
+}
+
+.share-buttonsspan{color:#666;}
+
+.share-btn{
+padding:10px20px;
+background:rgba(255,255,255,0.1);
+border-radius:8px;
+color:#fff;
+font-size:0.9rem;
+transition:background0.2s;
+}
+
+.share-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+@media(max-width:768px){
+.viz-headerh1{font-size:1.8rem;}
+.heap-header{font-size:0.7rem;}
+.snap-container{grid-template-columns:1fr;}
+.explain-grid{grid-template-columns:1fr;}
+.bloat-meters{grid-template-columns:repeat(2,1fr);}
+.wrap-info{flex-direction:column;}
+}
+</style>
+
+<script is:inline>
+//==========SECTION1:TABLEHEAP==========
+
+lettuples=[];
+letcurrentTxn=100;
+letctidCounter=0;
+constnames=['alice','bob','carol','dave','eve','frank'];
+constbalances=['$500','$300','$1200','$50','$800','$420'];
+
+functionupdateHeapStats(){
+constlive=tuples.filter(t=>t.live).length;
+constdead=tuples.filter(t=>!t.live).length;
+document.getElementById('liveCount').textContent=String(live);
+document.getElementById('deadCount').textContent=String(dead);
+document.getElementById('txnCounter').textContent=String(currentTxn);
+(document.getElementById('updateBtn')).disabled=live===0;
+(document.getElementById('deleteBtn')).disabled=live===0;
+}
+
+functionrenderHeap(){
+constbody=document.getElementById('heapBody');
+if(tuples.length===0){
+body.innerHTML='<div class="heap-empty">Tableisempty—INSERTsomerows!</div>';
+updateHeapStats();
+return;
+}
+body.innerHTML=tuples.map(t=>`
+<div class="heap-row${t.live?'live':'dead'}">
+<span>${t.ctid}</span>
+<span>${t.xmin}</span>
+<span>${t.xmax??'—'}</span>
+<span>${t.data}</span>
+<span class="row-status">${t.live?'●LIVE':'✗DEAD'}</span>
+</div>
+`).join('');
+updateHeapStats();
+}
+
+functionsetHeapStatus(badge,cls,text){
+document.getElementById('heapBadge').className='status-badge'+cls;
+document.getElementById('heapBadge').textContent=badge;
+document.getElementById('heapStatusText').textContent=text;
+}
+
+document.getElementById('insertBtn')?.addEventListener('click',()=>{
+constidx=tuples.filter(t=>t.live).length%names.length;
+constname=names[idx];
+constbalance=balances[idx];
+currentTxn++;
+ctidCounter++;
+tuples.push({
+ctid:`(0,${ctidCounter})`,
+xmin:currentTxn,
+xmax:null,
+data:`${name},${balance}`,
+live:true,
+name
+});
+setHeapStatus('Insert','insert',`Txn${currentTxn}:INSERT(${name},${balance})→newtupleat(0,${ctidCounter})`);
+renderHeap();
+});
+
+document.getElementById('updateBtn')?.addEventListener('click',()=>{
+constliveTuples=tuples.filter(t=>t.live);
+if(liveTuples.length===0)return;
+consttarget=liveTuples[Math.floor(Math.random()*liveTuples.length)];
+currentTxn++;
+//Markolddead
+target.xmax=currentTxn;
+target.live=false;
+//Insertnewversion
+ctidCounter++;
+constnewBalance='$'+(Math.floor(Math.random()*2000));
+tuples.push({
+ctid:`(0,${ctidCounter})`,
+xmin:currentTxn,
+xmax:null,
+data:`${target.name},${newBalance}`,
+live:true,
+name:target.name
+});
+setHeapStatus('Update','update',`Txn${currentTxn}:UPDATE${target.name}→old${target.ctid}dead(xmax=${currentTxn}),newat(0,${ctidCounter})`);
+renderHeap();
+});
+
+document.getElementById('deleteBtn')?.addEventListener('click',()=>{
+constliveTuples=tuples.filter(t=>t.live);
+if(liveTuples.length===0)return;
+consttarget=liveTuples[Math.floor(Math.random()*liveTuples.length)];
+currentTxn++;
+target.xmax=currentTxn;
+target.live=false;
+setHeapStatus('Delete','delete',`Txn${currentTxn}:DELETE${target.name}→${target.ctid}dead(xmax=${currentTxn})`);
+renderHeap();
+});
+
+document.getElementById('resetHeapBtn')?.addEventListener('click',()=>{
+tuples=[];
+currentTxn=100;
+ctidCounter=0;
+setHeapStatus('Ready','idle','ClickINSERTtoaddarowtotheheap');
+renderHeap();
+});
+
+renderHeap();
+
+//==========SECTION2:SNAPSHOTISOLATION==========
+letsnapStep=0;
+constsnapSteps=[
+{
+a:'BEGIN;--snapshot:seestxns≤199',
+b:null,
+heap:null,
+explain:'SessionAstarts.Itssnapshotincludesallcommittedtxnsuptonow.'
+},
+{
+a:"SELECT*FROMaccountsWHEREname='alice';→$500",
+b:null,
+heap:null,
+explain:"SessionAreadsalice'scurrentbalance:$500."
+},
+{
+a:null,
+b:'BEGIN;--snapshot:seestxns≤199',
+heap:null,
+explain:'SessionBstarts.Samesnapshot—bothseethesamecommitteddata.'
+},
+{
+a:"UPDATEaccountsSETbalance='$800'WHEREname='alice';",
+aHighlight:true,
+b:null,
+heap:'update-alice',
+explain:"SessionAupdatesaliceto$800.Oldtuple(xmin=150)getsxmax=200.Newtupleinsertedwithxmin=200.SessionA'sownchangeisvisibletoitself."
+},
+{
+a:null,
+b:"SELECT*FROMaccountsWHEREname='alice';→$500←still!",
+bHighlight:true,
+heap:null,
+explain:"SessionBstillsees$500!Thenewtuplehasxmin=200(SessionA'stxn),whichhasn'tcommittedyet.Snapshotisolationinaction."
+},
+{
+a:'COMMIT;--Txn200committed✅',
+b:null,
+heap:null,
+explain:"SessionAcommits.ButSessionB'ssnapshotwastakenBEFOREthiscommit."
+},
+{
+a:null,
+b:"SELECT*FROMaccountsWHEREname='alice';→$500←STILL$500!",
+bHighlight:true,
+heap:null,
+explain:"EvenafterSessionAcommits,SessionBstillsees$500.ItssnapshotwastakenatBEGIN,and200wasn'tcommittedatthattime.ThisisREPEATABLEREAD."
+},
+{
+a:null,
+b:'COMMIT;',
+heap:null,
+explain:"SessionBcommits.AnewtransactionstartingnowWOULDsee$800(Txn200iscommittedandinthenewsnapshot)."
+},
+;
+
+functionrenderSnapStep(idx){
+conststep=snapSteps[idx];
+constbody1=document.getElementById('snapBody1');
+constbody2=document.getElementById('snapBody2');
+constexplain=document.getElementById('snapExplanation');
+
+if(step.a){
+constentry=document.createElement('div');
+entry.className='snap-entry'+(step.aHighlight?'highlight':'');
+entry.textContent=step.a;
+body1.appendChild(entry);
+}
+if(step.b){
+constentry=document.createElement('div');
+entry.className='snap-entry'+(step.bHighlight?'highlight':'');
+entry.textContent=step.b;
+body2.appendChild(entry);
+}
+
+if(step.heap==='update-alice'){
+constheapBody=document.getElementById('snapHeapBody');
+//Markoldaliceasdead
+constrows=heapBody.querySelectorAll('.snap-row');
+rows[0].className='snap-rowdead';
+(rows[0]).querySelector('span:nth-child(2)').textContent='200';
+//Addnewversion
+constnewRow=document.createElement('div');
+newRow.className='snap-rownew-row';
+newRow.innerHTML='<span>200</span><span>—</span><span>alice</span><span>$800</span>';
+heapBody.appendChild(newRow);
+}
+
+explain.innerHTML=`<p>${step.explain}</p>`;
+}
+
+document.getElementById('startSnapDemo')?.addEventListener('click',()=>{
+snapStep=0;
+document.getElementById('snapBody1').innerHTML='';
+document.getElementById('snapBody2').innerHTML='';
+document.getElementById('snapHeapBody').innerHTML=`
+<div class="snap-rowcommitted"><span>150</span><span>—</span><span>alice</span><span>$500</span></div>
+<div class="snap-rowcommitted"><span>160</span><span>—</span><span>bob</span><span>$300</span></div>
+`;
+renderSnapStep(0);
+(document.getElementById('stepSnapBtn')).disabled=false;
+});
+
+document.getElementById('stepSnapBtn')?.addEventListener('click',()=>{
+if(snapStep<snapSteps.length-1){
+snapStep++;
+renderSnapStep(snapStep);
+if(snapStep>=snapSteps.length-1){
+(document.getElementById('stepSnapBtn')).disabled=true;
+}
+}
+});
+
+document.getElementById('resetSnapBtn')?.addEventListener('click',()=>{
+snapStep=0;
+(document.getElementById('stepSnapBtn')).disabled=true;
+document.getElementById('snapBody1').innerHTML='<div class="snap-empty">Waiting...</div>';
+document.getElementById('snapBody2').innerHTML='<div class="snap-empty">Waiting...</div>';
+document.getElementById('snapHeapBody').innerHTML=`
+<div class="snap-rowcommitted"><span>150</span><span>—</span><span>alice</span><span>$500</span></div>
+<div class="snap-rowcommitted"><span>160</span><span>—</span><span>bob</span><span>$300</span></div>
+`;
+document.getElementById('snapExplanation').innerHTML='<p>Twosessionswilloperateconcurrently.Watchhowsnapshotisolationensureseachseesaconsistentview.</p>';
+});
+
+//==========SECTION3:BLOAT==========
+letbloatLive=100;
+letbloatDead=0;
+letbloatFree=0;
+letbloatInterval=null;
+
+functionrenderBloat(){
+consttotal=bloatLive+bloatDead+bloatFree;
+constlivePct=(bloatLive/total)*100;
+constdeadPct=(bloatDead/total)*100;
+constfreePct=(bloatFree/total)*100;
+
+(document.getElementById('bloatLive')).style.width=livePct+'%';
+(document.getElementById('bloatDead')).style.width=deadPct+'%';
+(document.getElementById('bloatFree')).style.width=freePct+'%';
+
+document.getElementById('bloatLiveCount').textContent=String(bloatLive);
+document.getElementById('bloatDeadCount').textContent=String(bloatDead);
+document.getElementById('bloatFreeCount').textContent=String(bloatFree);
+
+constefficiency=total>0?Math.round((bloatLive/total)*100):100;
+document.getElementById('bloatRatio').textContent=efficiency+'%';
+}
+
+document.getElementById('updateRateSlider')?.addEventListener('input',(e)=>{
+document.getElementById('updateRateValue').textContent=(e.target).value;
+});
+
+document.getElementById('startBloatBtn')?.addEventListener('click',()=>{
+if(bloatInterval)return;
+(document.getElementById('startBloatBtn')).disabled=true;
+(document.getElementById('stopBloatBtn')).disabled=false;
+(document.getElementById('vacuumBloatBtn')).disabled=false;
+
+bloatInterval=setInterval(()=>{
+constrate=parseInt((document.getElementById('updateRateSlider')).value);
+//Eachupdatecreatesadeadtuplebutkeepslivecountsame(it'sanUPDATE)
+bloatDead+=Math.ceil(rate/10);
+renderBloat();
+},200);
+});
+
+document.getElementById('stopBloatBtn')?.addEventListener('click',()=>{
+if(bloatInterval){clearInterval(bloatInterval);bloatInterval=null;}
+(document.getElementById('startBloatBtn')).disabled=false;
+(document.getElementById('stopBloatBtn')).disabled=true;
+});
+
+document.getElementById('vacuumBloatBtn')?.addEventListener('click',()=>{
+bloatFree+=bloatDead;
+bloatDead=0;
+renderBloat();
+});
+
+document.getElementById('resetBloatBtn')?.addEventListener('click',()=>{
+if(bloatInterval){clearInterval(bloatInterval);bloatInterval=null;}
+bloatLive=100;bloatDead=0;bloatFree=0;
+(document.getElementById('startBloatBtn')).disabled=false;
+(document.getElementById('stopBloatBtn')).disabled=true;
+(document.getElementById('vacuumBloatBtn')).disabled=true;
+renderBloat();
+});
+
+renderBloat();
+
+//==========SECTION4:VACUUMANIMATION==========
+letvacTuples=[];
+
+functionrenderVacuumHeap(){
+constheap=document.getElementById('vacuumHeap');
+if(vacTuples.length===0){
+heap.innerHTML='<div class="heap-empty">Click"SetupTable"topopulatetheheap</div>';
+return;
+}
+heap.innerHTML=vacTuples.map((t,i)=>
+`<div class="vac-tuple${t.status}" data-idx="${i}">${t.status==='live'?'●':t.status==='dead'?'✗':'○'}</div>`
+).join('');
+}
+
+document.getElementById('setupVacuumBtn')?.addEventListener('click',()=>{
+vacTuples=[];
+for(leti=0;i<64;i++){
+vacTuples.push({status:Math.random()<0.35?'dead':'live',id:i});
+}
+renderVacuumHeap();
+(document.getElementById('runVacuumBtn')).disabled=false;
+document.getElementById('vacuumProgress').style.display='none';
+});
+
+document.getElementById('runVacuumBtn')?.addEventListener('click',async()=>{
+(document.getElementById('runVacuumBtn')).disabled=true;
+(document.getElementById('setupVacuumBtn')).disabled=true;
+constprogress=document.getElementById('vacuumProgress');
+progress.style.display='flex';
+
+constscanner=document.getElementById('vacuumScanner');
+scanner.innerHTML='<div class="vacuum-scanner-fill" style="width:0%"></div>';
+constfill=scanner.querySelector('.vacuum-scanner-fill');
+
+letfreedCount=0;
+for(leti=0;i<vacTuples.length;i++){
+constpct=((i+1)/vacTuples.length)*100;
+fill.style.width=pct+'%';
+
+//Highlightcurrent
+constels=document.querySelectorAll('.vac-tuple');
+els.forEach(el=>el.classList.remove('scanning'));
+els[i]?.classList.add('scanning');
+
+if(vacTuples[i].status==='dead'){
+awaitnewPromise(r=>setTimeout(r,150));
+vacTuples[i].status='freed';
+freedCount++;
+renderVacuumHeap();
+document.getElementById('vacuumProgressText').textContent=`Freed${freedCount}deadtuples...`;
+}else{
+awaitnewPromise(r=>setTimeout(r,50));
+}
+}
+
+document.getElementById('vacuumProgressText').textContent=`✅VACUUMcomplete!Freed${freedCount}deadtuples.`;
+(document.getElementById('setupVacuumBtn')).disabled=false;
+});
+
+document.getElementById('resetVacuumBtn')?.addEventListener('click',()=>{
+vacTuples=[];
+renderVacuumHeap();
+document.getElementById('vacuumProgress').style.display='none';
+(document.getElementById('runVacuumBtn')).disabled=true;
+(document.getElementById('setupVacuumBtn')).disabled=false;
+});
+
+//==========SECTION5:AUTOVACUUMCALCULATOR==========
+functionformatNum(n){
+returnn.toLocaleString();
+}
+
+functionupdateAutovac(){
+constthreshold=parseInt((document.getElementById('thresholdSlider')).value);
+constscaleFactor=parseInt((document.getElementById('scaleFactorSlider')).value)/100;
+constrowCount=parseInt((document.getElementById('rowCountSlider')).value);
+
+document.getElementById('thresholdValue').textContent=String(threshold);
+document.getElementById('scaleFactorValue').textContent=scaleFactor.toFixed(2);
+document.getElementById('rowCountValue').textContent=formatNum(rowCount);
+
+consttrigger=threshold+Math.floor(scaleFactor*rowCount);
+document.getElementById('formulaThreshold').textContent=String(threshold);
+document.getElementById('formulaScale').textContent=scaleFactor.toFixed(2);
+document.getElementById('formulaRows').textContent=formatNum(rowCount);
+document.getElementById('formulaResult').textContent=formatNum(trigger);
+
+constpct=((trigger/rowCount)*100).toFixed(1);
+document.getElementById('autovacDesc').textContent=
+`Autovacuumwilltriggerwhen${formatNum(trigger)}deadtuplesaccumulate(${pct}%oftable).`+
+(trigger>rowCount?'⚠️Triggerislargerthanthetable—autovacuummayneverfire!':'');
+}
+
+document.getElementById('thresholdSlider')?.addEventListener('input',updateAutovac);
+document.getElementById('scaleFactorSlider')?.addEventListener('input',updateAutovac);
+document.getElementById('rowCountSlider')?.addEventListener('input',updateAutovac);
+updateAutovac();
+
+//==========SECTION6:TXNIDWRAPAROUND==========
+constMAX_AGE=2147483647;//2^31-1
+constWARN_AGE=1500000000;
+constDANGER_AGE=2000000000;
+
+functionupdateWraparound(){
+constage=parseInt((document.getElementById('txnAgeSlider')).value);
+constremaining=MAX_AGE-age;
+
+//Formatagedisplay
+if(age>=1000000000){
+document.getElementById('txnAgeValue').textContent=(age/1000000000).toFixed(2)+'billion';
+}else{
+document.getElementById('txnAgeValue').textContent=(age/1000000).toFixed(0)+'million';
+}
+
+//Cursorposition(percentageofMAX_AGE)
+constpct=(age/MAX_AGE)*100;
+(document.getElementById('wrapCursor')).style.left=pct+'%';
+
+//Colorzones
+constsafePct=Math.min(pct,(WARN_AGE/MAX_AGE)*100);
+constwarnPct=pct>(WARN_AGE/MAX_AGE)*100
+?Math.min(pct-safePct,((DANGER_AGE-WARN_AGE)/MAX_AGE)*100)
+:0;
+constdangerPct=pct>(DANGER_AGE/MAX_AGE)*100
+?pct-safePct-warnPct
+:0;
+
+(document.getElementById('wrapSafe')).style.width=safePct+'%';
+(document.getElementById('wrapWarning')).style.width=warnPct+'%';
+(document.getElementById('wrapDanger')).style.width=dangerPct+'%';
+
+//Status
+conststatusEl=document.getElementById('wrapStatus');
+if(age<WARN_AGE){
+statusEl.innerHTML='<span class="wrap-status-icon">✅</span><span class="wrap-status-text">Healthy—plentyofheadroombeforewraparound</span>';
+statusEl.style.background='rgba(34,197,94,0.1)';
+}elseif(age<DANGER_AGE){
+statusEl.innerHTML='<span class="wrap-status-icon">⚠️</span><span class="wrap-status-text">Warning—scheduleVACUUMFREEZEsoon!</span>';
+statusEl.style.background='rgba(245,158,11,0.1)';
+}else{
+statusEl.innerHTML='<span class="wrap-status-icon">💀</span><span class="wrap-status-text">CRITICAL—PostgreSQLwillshutdowntopreventdataloss!</span>';
+statusEl.style.background='rgba(239,68,68,0.15)';
+}
+
+//Remaining
+if(remaining>=1000000000){
+document.getElementById('wrapRemaining').textContent=(remaining/1000000000).toFixed(2)+'billiontxns';
+}else{
+document.getElementById('wrapRemaining').textContent=(remaining/1000000).toFixed(0)+'milliontxns';
+}
+
+//Timeestimateat1000txn/s
+constseconds=remaining/1000;
+if(seconds>86400){
+document.getElementById('wrapTime').textContent='~'+Math.floor(seconds/86400)+'days';
+}elseif(seconds>3600){
+document.getElementById('wrapTime').textContent='~'+Math.floor(seconds/3600)+'hours';
+}else{
+document.getElementById('wrapTime').textContent='~'+Math.floor(seconds/60)+'minutes';
+}
+}
+
+document.getElementById('txnAgeSlider')?.addEventListener('input',updateWraparound);
+
+document.getElementById('ageTxnBtn')?.addEventListener('click',()=>{
+constslider=document.getElementById('txnAgeSlider');
+constnewVal=Math.min(parseInt(slider.value)+100000000,MAX_AGE);
+slider.value=String(newVal);
+updateWraparound();
+});
+
+document.getElementById('freezeBtn')?.addEventListener('click',()=>{
+constslider=document.getElementById('txnAgeSlider');
+slider.value='0';
+updateWraparound();
+});
+
+document.getElementById('resetWrapBtn')?.addEventListener('click',()=>{
+constslider=document.getElementById('txnAgeSlider');
+slider.value='500000000';
+updateWraparound();
+});
+
+updateWraparound();
+</script>

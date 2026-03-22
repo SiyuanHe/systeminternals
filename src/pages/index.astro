@@ -8,7 +8,7 @@ const raftTopics = [
 const kafkaTopics = [
   { title: "Partitions & Offsets", description: "The anatomy of a Kafka topic — and how to choose partition counts", href: "/kafka/partitions/", status: "live" },
   { title: "Consumer Groups & Rebalancing", description: "Assignment strategies, cooperative rebalancing, and rebalance storms", href: "/kafka/consumer-groups/", status: "live" },
-  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "#", status: "coming" },
+  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "/kafka/isr-replication/", status: "live" },
   { title: "Log Compaction", description: "Keeping the latest value per key", href: "#", status: "coming" },
 ];
 
@@ -17,10 +17,22 @@ const redisTopics = [
   { title: "Persistence: RDB & AOF", description: "Snapshots vs append-only file — tradeoffs and tuning", href: "#", status: "coming" },
 ];
 
+const postgresqlTopics = [
+  { title: "MVCC & Vacuum", description: "Tuple versioning, dead tuples, bloat, autovacuum, and txn ID wraparound", href: "/postgresql/mvcc-vacuum/", status: "live" },
+  { title: "WAL & Replication", description: "Write-ahead log, streaming replication, and logical replication", href: "#", status: "coming" },
+  { title: "Query Planner", description: "How PostgreSQL decides to scan, join, and sort", href: "#", status: "coming" },
+];
+
+const cassandraTopics = [
+  { title: "Consistent Hashing & Gossip", description: "Token ring, vnodes, gossip protocol, and phi accrual failure detection", href: "/cassandra/consistent-hashing/", status: "live" },
+  { title: "Read/Write Path", description: "Coordinators, consistency levels, and read repair", href: "#", status: "coming" },
+  { title: "Compaction Strategies", description: "STCS, LCS, TWCS — when to use each", href: "#", status: "coming" },
+];
+
 const mongodbTopics = [
   { title: "Sharding & Chunks", description: "How data distributes across shards — and how to avoid hotspots", href: "/mongodb/sharding/", status: "live" },
   { title: "WiredTiger Storage", description: "The engine behind MongoDB's performance", href: "#", status: "coming" },
-  { title: "Replica Set Elections", description: "Leader election and failover mechanics", href: "#", status: "coming" },
+  { title: "Replica Set Elections", description: "Leader election and failover mechanics", href: "/mongodb/replica-set-elections/", status: "live" },
 ];
 
 const tidbTopics = [
@@ -93,6 +105,42 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {redisTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🐘</span>
+      PostgreSQL
+    </h2>
+    <div class="topics-grid">
+      {postgresqlTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">👁️</span>
+      Apache Cassandra
+    </h2>
+    <div class="topics-grid">
+      {cassandraTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

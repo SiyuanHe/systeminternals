@@ -1,0 +1,979 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+title="MongoDBReplicaSetElections:Failover&ConsensusVisualized"
+description="InteractivevisualizationofMongoDBreplicasetelections—heartbeats,Raft-likeconsensus,writeconcern,readpreference,rollbacks,andspecialmembertypes"
+breadcrumbs={[
+{label:"Home",href:"/"},
+{label:"MongoDB",href:"/mongodb/"},
+{label:"ReplicaSetElections",href:"/mongodb/replica-set-elections/"}
+]}
+>
+<div class="viz-container">
+<header class="viz-header">
+<h1>🍃ReplicaSetElections</h1>
+<p class="subtitle">HowMongoDBAchievesHighAvailabilityThroughConsensus&Failover</p>
+</header>
+
+<section class="overview-section">
+<div class="overview-card">
+<p>
+AMongoDB<strong>replicaset</strong>isagroupof<em>mongod</em>instancesthatmaintainthesamedata.
+Onememberisthe<strong>primary</strong>(handlesallwrites),therestare<strong>secondaries</strong>that
+replicateviathe<em>oplog</em>—acappedcollectionofrecentwriteoperations.Whentheprimaryfails,
+an<strong>election</strong>picksanewoneusingaRaft-inspiredconsensusprotocol,typicallywithin10seconds.
+</p>
+</div>
+</section>
+
+<!--ReplicaSetBasics-->
+<section class="sim-section">
+<h2>🗄️ReplicaSetBasics</h2>
+<p class="section-desc">Aprimary+secondaries,connectedbyoplogreplication.Clicknodestoseetheiroplog.</p>
+
+<div class="rs-cluster" id="basicsCluster">
+<div class="rs-nodeprimary-node" id="basicNode0" data-idx="0">
+<div class="node-role">PRIMARY</div>
+<div class="node-icon">🟢</div>
+<div class="node-name">mongo-0</div>
+<div class="node-oplog-count">oplog:<span id="basicOplog0">0</span></div>
+</div>
+<div class="rs-arrows">
+<div class="arrow-line">
+<span class="arrow-label">oplog→</span>
+</div>
+<div class="arrow-line">
+<span class="arrow-label">oplog→</span>
+</div>
+</div>
+<div class="rs-secondaries">
+<div class="rs-nodesecondary-node" id="basicNode1" data-idx="1">
+<div class="node-role">SECONDARY</div>
+<div class="node-icon">🔵</div>
+<div class="node-name">mongo-1</div>
+<div class="node-oplog-count">oplog:<span id="basicOplog1">0</span></div>
+</div>
+<div class="rs-nodesecondary-node" id="basicNode2" data-idx="2">
+<div class="node-role">SECONDARY</div>
+<div class="node-icon">🔵</div>
+<div class="node-name">mongo-2</div>
+<div class="node-oplog-count">oplog:<span id="basicOplog2">0</span></div>
+</div>
+</div>
+</div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="writeDocBtn" class="action-btnprimary-btn">✏️WriteDocument</button>
+<button id="write10Btn" class="action-btnprimary-btn-secondary">⚡Write10</button>
+<button id="basicsResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="sim-log" id="basicsLog">
+<div class="log-entry">Replicasetready.Writedocumentstoseeoplogreplication.</div>
+</div>
+</section>
+
+<!--ElectionProtocol-->
+<section class="sim-section">
+<h2>🗳️ElectionProtocol(Raft-like)</h2>
+<p class="section-desc">MongoDB4.0+usesaRaft-inspiredprotocolwithtermsandmajorityvoting.Stepthroughanelection.</p>
+
+<div class="election-viz" id="electionViz">
+<div class="election-nodes">
+<div class="e-node" id="eNode0">
+<div class="e-role" id="eRole0">PRIMARY</div>
+<div class="e-icon" id="eIcon0">🟢</div>
+<div class="e-name">mongo-0</div>
+<div class="e-priority">priority:<span id="ePri0">1</span></div>
+<div class="e-vote" id="eVote0"></div>
+</div>
+<div class="e-node" id="eNode1">
+<div class="e-role" id="eRole1">SECONDARY</div>
+<div class="e-icon" id="eIcon1">🔵</div>
+<div class="e-name">mongo-1</div>
+<div class="e-priority">priority:<span id="ePri1">1</span></div>
+<div class="e-vote" id="eVote1"></div>
+</div>
+<div class="e-node" id="eNode2">
+<div class="e-role" id="eRole2">SECONDARY</div>
+<div class="e-icon" id="eIcon2">🔵</div>
+<div class="e-name">mongo-2</div>
+<div class="e-priority">priority:<span id="ePri2">1</span></div>
+<div class="e-vote" id="eVote2"></div>
+</div>
+</div>
+<div class="election-info">
+<div class="stat-card"><span class="stat-label">Term</span><span class="stat-value" id="electionTerm">1</span></div>
+<div class="stat-card"><span class="stat-label">Step</span><span class="stat-value" id="electionStep">—</span></div>
+<div class="stat-card"><span class="stat-label">Votes</span><span class="stat-value" id="electionVotes">—</span></div>
+</div>
+</div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="electionStepBtn" class="action-btnprimary-btn">▶️NextStep</button>
+<button id="electionResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="sim-log" id="electionLog">
+<div class="log-entry">Electiondemoready.Click"NextStep"towalkthroughaprimaryfailureandelection.</div>
+</div>
+</section>
+
+<!--Heartbeats&FailureDetection-->
+<section class="sim-section">
+<h2>💓Heartbeats&FailureDetection</h2>
+<p class="section-desc">Memberspingeachotherevery2s.Ifnoresponsefor10s(electionTimeoutMillis),thememberismarkedunreachableandanelectiontriggers.Killanodetowatch.</p>
+
+<div class="hb-cluster" id="hbCluster">
+<div class="hb-nodehb-primary" id="hbNode0">
+<div class="hb-role" id="hbRole0">PRIMARY</div>
+<div class="hb-icon" id="hbIcon0">🟢</div>
+<div class="hb-name">mongo-0</div>
+<div class="hb-status" id="hbStatus0">healthy</div>
+<button class="kill-btn" id="hbKill0">💀Kill</button>
+</div>
+<div class="hb-node" id="hbNode1">
+<div class="hb-role" id="hbRole1">SECONDARY</div>
+<div class="hb-icon" id="hbIcon1">🔵</div>
+<div class="hb-name">mongo-1</div>
+<div class="hb-status" id="hbStatus1">healthy</div>
+<button class="kill-btn" id="hbKill1">💀Kill</button>
+</div>
+<div class="hb-node" id="hbNode2">
+<div class="hb-role" id="hbRole2">SECONDARY</div>
+<div class="hb-icon" id="hbIcon2">🔵</div>
+<div class="hb-name">mongo-2</div>
+<div class="hb-status" id="hbStatus2">healthy</div>
+<button class="kill-btn" id="hbKill2">💀Kill</button>
+</div>
+<div class="hb-node" id="hbNode3">
+<div class="hb-role" id="hbRole3">SECONDARY</div>
+<div class="hb-icon" id="hbIcon3">🔵</div>
+<div class="hb-name">mongo-3</div>
+<div class="hb-status" id="hbStatus3">healthy</div>
+<button class="kill-btn" id="hbKill3">💀Kill</button>
+</div>
+<div class="hb-node" id="hbNode4">
+<div class="hb-role" id="hbRole4">SECONDARY</div>
+<div class="hb-icon" id="hbIcon4">🔵</div>
+<div class="hb-name">mongo-4</div>
+<div class="hb-status" id="hbStatus4">healthy</div>
+<button class="kill-btn" id="hbKill4">💀Kill</button>
+</div>
+</div>
+
+<div class="hb-heartbeats" id="hbHeartbeats"></div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="hbResetBtn" class="action-btnreset-btn">🔄ResetCluster</button>
+</div>
+
+<div class="sim-log" id="hbLog">
+<div class="log-entry">5-nodeclusterrunning.Killtheprimarytotriggeranelection.</div>
+</div>
+</section>
+
+<!--WriteConcern&ReadPreference-->
+<section class="sim-section">
+<h2>✍️WriteConcern&ReadPreference</h2>
+<p class="section-desc">Writeconcerncontrolsdurabilityguarantees.Readpreferencecontrolswhichnodesservereads.</p>
+
+<div class="wc-controls">
+<div class="key-selector">
+<label>WriteConcern:</label>
+<div class="key-buttons">
+<button class="key-btnwc-btnactive" data-wc="1">w:1(primaryack)</button>
+<button class="key-btnwc-btn" data-wc="majority">w:majority</button>
+<button class="key-btnwc-btn" data-wc="0">w:0(fire&forget)</button>
+</div>
+</div>
+<div class="key-selector" style="margin-top:12px;">
+<label>ReadPreference:</label>
+<div class="key-buttons">
+<button class="key-btnrp-btnactive" data-rp="primary">primary</button>
+<button class="key-btnrp-btn" data-rp="primaryPreferred">primaryPreferred</button>
+<button class="key-btnrp-btn" data-rp="secondary">secondary</button>
+<button class="key-btnrp-btn" data-rp="secondaryPreferred">secondaryPreferred</button>
+<button class="key-btnrp-btn" data-rp="nearest">nearest</button>
+</div>
+</div>
+</div>
+
+<div class="wc-cluster" id="wcCluster">
+<div class="wc-nodewc-primary" id="wcNode0">
+<div class="wc-role">PRIMARY</div>
+<div class="wc-icon">🟢</div>
+<div class="wc-name">mongo-0</div>
+<div class="wc-indicator" id="wcInd0"></div>
+</div>
+<div class="wc-node" id="wcNode1">
+<div class="wc-role">SECONDARY</div>
+<div class="wc-icon">🔵</div>
+<div class="wc-name">mongo-1</div>
+<div class="wc-indicator" id="wcInd1"></div>
+</div>
+<div class="wc-node" id="wcNode2">
+<div class="wc-role">SECONDARY</div>
+<div class="wc-icon">🔵</div>
+<div class="wc-name">mongo-2</div>
+<div class="wc-indicator" id="wcInd2"></div>
+</div>
+</div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="wcWriteBtn" class="action-btnprimary-btn">✏️SendWrite</button>
+<button id="wcReadBtn" class="action-btnbalance-btn">📖SendRead</button>
+<button id="wcCrashBtn" class="action-btn" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;">💥CrashPrimary(w:1dataloss)</button>
+</div>
+
+<div class="sim-log" id="wcLog">
+<div class="log-entry">Selectwriteconcernandreadpreference,thensendoperations.</div>
+</div>
+</section>
+
+<!--Rollbacks-->
+<section class="sim-section">
+<h2>⏪Rollbacks</h2>
+<p class="section-desc">Whenanoldprimaryhadwritesnotyetreplicated,thosewritesrollbackafteranewprimaryiselected.Stepthroughthescenario.</p>
+
+<div class="rollback-viz" id="rollbackViz">
+<div class="rb-nodes">
+<div class="rb-node" id="rbNode0">
+<div class="rb-role" id="rbRole0">PRIMARY</div>
+<div class="rb-icon" id="rbIcon0">🟢</div>
+<div class="rb-name">mongo-0</div>
+<div class="rb-oplog" id="rbOplog0">oplog:[A,B,C]</div>
+</div>
+<div class="rb-node" id="rbNode1">
+<div class="rb-role" id="rbRole1">SECONDARY</div>
+<div class="rb-icon" id="rbIcon1">🔵</div>
+<div class="rb-name">mongo-1</div>
+<div class="rb-oplog" id="rbOplog1">oplog:[A,B,C]</div>
+</div>
+<div class="rb-node" id="rbNode2">
+<div class="rb-role" id="rbRole2">SECONDARY</div>
+<div class="rb-icon" id="rbIcon2">🔵</div>
+<div class="rb-name">mongo-2</div>
+<div class="rb-oplog" id="rbOplog2">oplog:[A,B,C]</div>
+</div>
+</div>
+<div class="rb-status" id="rbStatus">Allnodesinsync—oplog:[A,B,C]</div>
+</div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="rbStepBtn" class="action-btnprimary-btn">▶️NextStep</button>
+<button id="rbResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="sim-log" id="rbLog">
+<div class="log-entry">Stepthrougharollbackscenariotoseehowdivergentoplogsareresolved.</div>
+</div>
+</section>
+
+<!--SpecialMembers-->
+<section class="sim-section">
+<h2>🎭SpecialMembers</h2>
+<p class="section-desc">Arbiters,hidden,anddelayedmembersservedifferentroles.Addthemtoseehowtheyparticipate.</p>
+
+<div class="special-cluster" id="specialCluster">
+<div class="sp-nodesp-primary" id="spNode0">
+<div class="sp-role">PRIMARY</div>
+<div class="sp-icon">🟢</div>
+<div class="sp-name">mongo-0</div>
+<div class="sp-detail">votes:1|data:✅</div>
+</div>
+<div class="sp-node" id="spNode1">
+<div class="sp-role">SECONDARY</div>
+<div class="sp-icon">🔵</div>
+<div class="sp-name">mongo-1</div>
+<div class="sp-detail">votes:1|data:✅</div>
+</div>
+<div class="sp-node" id="spNode2">
+<div class="sp-role">SECONDARY</div>
+<div class="sp-icon">🔵</div>
+<div class="sp-name">mongo-2</div>
+<div class="sp-detail">votes:1|data:✅</div>
+</div>
+</div>
+
+<div id="specialExtra"></div>
+
+<div class="sim-actions" style="margin-top:16px;">
+<button id="addArbiterBtn" class="action-btn" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;">⚖️AddArbiter</button>
+<button id="addHiddenBtn" class="action-btn" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;">👻AddHidden</button>
+<button id="addDelayedBtn" class="action-btn" style="background:linear-gradient(135deg,#06b6d4,#0891b2);color:#fff;">⏱️AddDelayed</button>
+<button id="spResetBtn" class="action-btnreset-btn">🔄Reset</button>
+</div>
+
+<div class="explain-grid" style="margin-top:24px;">
+<div class="explain-card" style="border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.05);">
+<h3>⚖️Arbiter</h3>
+<p>Votesinelectionsbutholds<strong>nodata</strong>.Breakstiesineven-membersets.Usesminimalresources.</p>
+<div class="verdict" style="background:rgba(245,158,11,0.15);color:#fbbf24;">Usefortie-breakingonly</div>
+</div>
+<div class="explain-card" style="border-color:rgba(139,92,246,0.3);background:rgba(139,92,246,0.05);">
+<h3>👻HiddenMember</h3>
+<p>Replicatesdatabutis<strong>invisibletoclients</strong>.Perfectforanalyticsworkloadsordedicatedbackups.</p>
+<div class="verdict" style="background:rgba(139,92,246,0.15);color:#c4b5fd;">Greatforanalytics/backup</div>
+</div>
+<div class="explain-card" style="border-color:rgba(6,182,212,0.3);background:rgba(6,182,212,0.05);">
+<h3>⏱️DelayedMember</h3>
+<p>Replicateswitha<strong>timedelay</strong>(e.g.,1hourbehind).Protectionagainstaccidentaldropsorhumanerror.</p>
+<div class="verdict" style="background:rgba(6,182,212,0.15);color:#67e8f9;">Insuranceagainsthumanerror</div>
+</div>
+</div>
+</section>
+
+<!--OpsBestPractices-->
+<section class="ops-section">
+<h2>🛠️OperationalBestPractices</h2>
+<div class="ops-grid">
+<div class="ops-card">
+<h4>📊CheckReplicaSetStatus</h4>
+<code>rs.status()</code>
+<p>Showseachmember'sstate,optime,heartbeatstatus,andelectioninfo.Runfirstwhentroubleshooting.</p>
+</div>
+<div class="ops-card">
+<h4>⏱️ElectionTimeout</h4>
+<code>{'settings:{electionTimeoutMillis:10000}'}</code>
+<p>Default10s.Lower=fasterfailoverbutmorefalseelectionsonflakynetworks.Don'tgobelow5s.</p>
+</div>
+<div class="ops-card">
+<h4>🏷️MemberPriority</h4>
+<code>{"rs.reconfig({members:[{_id:0,priority:2}]})"}</code>
+<p>Higherprioritymembersarepreferredasprimary.Setpriority:0topreventamemberfrombecomingprimary.</p>
+</div>
+<div class="ops-card">
+<h4>📋WriteConcernMajority</h4>
+<code>{"db.coll.insertOne({},{writeConcern:{w:'majority'}})"}</code>
+<p>Ensureswritessurvivefailover.Slightlatencycostbutpreventsdataloss.Useforcriticaldata.</p>
+</div>
+<div class="ops-card">
+<h4>🔍OplogSize</h4>
+<code>{"rs.printReplicationInfo()"}</code>
+<p>Showsoplogwindow(hoursofdata).Ifsecondariesfallbehindtheoplogwindow,theyneedfullresync.</p>
+</div>
+<div class="ops-card">
+<h4>⚠️AvoidEvenMemberCounts</h4>
+<code>Use3,5,or7members(oddnumbers)</code>
+<p>Evencountsrisktiesinelections.Ifyoumustuseeven,addanarbiterforthetie-breakingvote.</p>
+</div>
+</div>
+</section>
+
+<footer class="viz-footer">
+<p>Basedon<ahref="https://www.mongodb.com/docs/manual/replication/" target="_blank">MongoDBReplicationDocumentation</a></p>
+</footer>
+
+<div class="share-buttons">
+<span>Sharethisvisualization:</span>
+<ahref="https://twitter.com/intent/tweet?text=Interactive%20MongoDB%20Replica%20Set%20Elections%20Visualizer%20-%20see%20how%20failover%20and%20consensus%20work&url=https://systeminternals.dev/mongodb/replica-set-elections/" target="_blank" class="share-btn">𝕏Twitter</a>
+<ahref="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/mongodb/replica-set-elections/" target="_blank" class="share-btn">inLinkedIn</a>
+<ahref="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/mongodb/replica-set-elections/&t=Interactive%20MongoDB%20Replica%20Set%20Elections%20Visualizer" target="_blank" class="share-btn">🟧HN</a>
+</div>
+</div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0auto;}
+.viz-header{text-align:center;margin-bottom:40px;}
+.viz-headerh1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#22c55e,#4ade80,#86efac);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.subtitle{color:#888;font-size:1.1rem;}
+h2{font-size:1.5rem;color:#fff;margin-bottom:12px;}
+.section-desc{color:#888;margin-bottom:24px;}
+
+.overview-section{margin-bottom:50px;}
+.overview-card{background:linear-gradient(135deg,rgba(34,197,94,0.1),rgba(74,222,128,0.05));border:1pxsolidrgba(34,197,94,0.3);border-radius:16px;padding:24px28px;font-size:1.05rem;line-height:1.8;color:#ccc;}
+.overview-cardstrong{color:#fff;}
+.overview-cardem{color:#4ade80;font-style:normal;font-weight:500;}
+
+.action-btn{padding:10px20px;border:none;border-radius:10px;font-size:0.95rem;font-weight:600;cursor:pointer;transition:all0.2s;}
+.action-btn:disabled{opacity:0.4;cursor:not-allowed;}
+.primary-btn{background:linear-gradient(135deg,#22c55e,#16a34a);color:white;}
+.primary-btn:hover{transform:translateY(-2px);box-shadow:05px20pxrgba(34,197,94,0.4);}
+.primary-btn-secondary{background:linear-gradient(135deg,#16a34a,#15803d);color:white;}
+.balance-btn{background:linear-gradient(135deg,#f59e0b,#d97706);color:white;}
+.reset-btn{background:rgba(255,255,255,0.1);color:#aaa;}
+.reset-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+.sim-section{margin-bottom:50px;}
+.sim-actions{display:flex;gap:12px;flex-wrap:wrap;}
+
+.sim-log{background:rgba(0,0,0,0.3);border-radius:10px;padding:14px;max-height:120px;overflow-y:auto;font-family:'Monaco','Menlo',monospace;font-size:0.8rem;margin-top:16px;}
+:global(.log-entry){padding:3px0;color:#888;border-bottom:1pxsolidrgba(255,255,255,0.05);}
+:global(.log-entry.warn){color:#fbbf24;}
+:global(.log-entry.good){color:#4ade80;}
+:global(.log-entry.bad){color:#f87171;}
+
+.stat-card{background:rgba(255,255,255,0.03);border-radius:10px;padding:14px;text-align:center;border:1pxsolidrgba(255,255,255,0.1);}
+.stat-label{display:block;font-size:0.8rem;color:#666;margin-bottom:4px;}
+.stat-value{font-size:1.3rem;font-weight:700;color:#fff;}
+
+/*ReplicaSetBasics*/
+.rs-cluster{display:flex;align-items:center;gap:30px;justify-content:center;flex-wrap:wrap;}
+.rs-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:20px;text-align:center;min-width:130px;transition:all0.3s;cursor:pointer;}
+.rs-node:hover{border-color:rgba(34,197,94,0.5);}
+.primary-node{border-color:rgba(34,197,94,0.5);background:rgba(34,197,94,0.08);}
+.secondary-node{border-color:rgba(59,130,246,0.3);}
+.node-role{font-size:0.7rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:6px;}
+.secondary-node.node-role{color:#60a5fa;}
+.node-icon{font-size:2rem;margin-bottom:6px;}
+.node-name{font-size:0.85rem;color:#ccc;margin-bottom:4px;}
+.node-oplog-count{font-size:0.75rem;color:#666;}
+.rs-arrows{display:flex;flex-direction:column;gap:10px;}
+.arrow-line{color:#555;font-size:0.75rem;}
+.arrow-label{color:#4ade80;}
+.rs-secondaries{display:flex;flex-direction:column;gap:12px;}
+
+/*ElectionProtocol*/
+.election-viz{background:rgba(0,0,0,0.2);border-radius:16px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);}
+.election-nodes{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-bottom:20px;}
+.e-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:16px20px;text-align:center;min-width:120px;transition:all0.3s;}
+.e-node.e-down{opacity:0.3;border-color:rgba(239,68,68,0.5);}
+.e-node.e-candidate{border-color:rgba(245,158,11,0.6);background:rgba(245,158,11,0.1);}
+.e-node.e-elected{border-color:rgba(34,197,94,0.6);background:rgba(34,197,94,0.1);}
+.e-role{font-size:0.7rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:4px;}
+.e-icon{font-size:1.5rem;margin-bottom:4px;}
+.e-name{font-size:0.8rem;color:#ccc;margin-bottom:4px;}
+.e-priority{font-size:0.7rem;color:#666;}
+.e-vote{font-size:0.75rem;min-height:18px;color:#fbbf24;margin-top:4px;font-weight:600;}
+.election-info{display:flex;gap:16px;justify-content:center;}
+
+/*Heartbeats*/
+.hb-cluster{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+.hb-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:14px16px;text-align:center;min-width:110px;transition:all0.3s;}
+.hb-node.hb-down{opacity:0.3;border-color:rgba(239,68,68,0.5);}
+.hb-primary{border-color:rgba(34,197,94,0.5);background:rgba(34,197,94,0.08);}
+.hb-role{font-size:0.65rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:4px;}
+.hb-icon{font-size:1.3rem;margin-bottom:4px;}
+.hb-name{font-size:0.8rem;color:#ccc;margin-bottom:4px;}
+.hb-status{font-size:0.7rem;color:#4ade80;margin-bottom:8px;}
+.hb-status.dead{color:#f87171;}
+.kill-btn{padding:4px10px;border:1pxsolidrgba(239,68,68,0.3);border-radius:6px;background:rgba(239,68,68,0.1);color:#fca5a5;font-size:0.7rem;cursor:pointer;transition:all0.2s;}
+.kill-btn:hover{background:rgba(239,68,68,0.3);}
+.kill-btn:disabled{opacity:0.3;cursor:not-allowed;}
+.hb-heartbeats{margin-top:16px;min-height:30px;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
+:global(.hb-ping){padding:2px8px;border-radius:4px;font-size:0.65rem;background:rgba(34,197,94,0.15);color:#4ade80;animation:pingPop0.3sease-out;}
+:global(.hb-ping.fail){background:rgba(239,68,68,0.15);color:#f87171;}
+@keyframespingPop{from{transform:scale(0.8);opacity:0;}to{transform:scale(1);opacity:1;}}
+
+/*WriteConcern&ReadPreference*/
+.wc-controls{margin-bottom:20px;}
+.key-selector{margin-bottom:8px;}
+.key-selectorlabel{display:block;color:#aaa;margin-bottom:8px;font-size:0.9rem;}
+.key-buttons{display:flex;gap:10px;flex-wrap:wrap;}
+.key-btn{padding:10px16px;border:1pxsolidrgba(255,255,255,0.15);border-radius:10px;background:rgba(255,255,255,0.03);color:#ccc;font-size:0.85rem;cursor:pointer;transition:all0.2s;}
+.key-btn:hover{border-color:rgba(34,197,94,0.5);}
+.key-btn.active{border-color:#22c55e;background:rgba(34,197,94,0.15);color:#4ade80;}
+.wc-cluster{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;}
+.wc-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:16px20px;text-align:center;min-width:120px;transition:all0.3s;}
+.wc-primary{border-color:rgba(34,197,94,0.5);background:rgba(34,197,94,0.08);}
+.wc-role{font-size:0.65rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:4px;}
+.wc-node:not(.wc-primary).wc-role{color:#60a5fa;}
+.wc-icon{font-size:1.3rem;margin-bottom:4px;}
+.wc-name{font-size:0.8rem;color:#ccc;margin-bottom:6px;}
+.wc-indicator{min-height:20px;font-size:0.7rem;font-weight:600;}
+:global(.wc-flash){animation:wcFlash0.6sease-out;}
+@keyframeswcFlash{0%{box-shadow:0000rgba(34,197,94,0.6);}100%{box-shadow:0000transparent;}}
+:global(.wc-write-indicator){color:#4ade80;}
+:global(.wc-read-indicator){color:#60a5fa;}
+:global(.wc-crash){opacity:0.3;border-color:rgba(239,68,68,0.5)!important;background:rgba(239,68,68,0.05)!important;}
+
+/*Rollbacks*/
+.rollback-viz{background:rgba(0,0,0,0.2);border-radius:16px;padding:24px;border:1pxsolidrgba(255,255,255,0.1);}
+.rb-nodes{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-bottom:16px;}
+.rb-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:16px20px;text-align:center;min-width:140px;transition:all0.3s;}
+.rb-node.rb-down{opacity:0.3;border-color:rgba(239,68,68,0.5);}
+.rb-node.rb-diverged{border-color:rgba(245,158,11,0.5);background:rgba(245,158,11,0.05);}
+.rb-node.rb-rolled-back{border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.05);}
+.rb-role{font-size:0.7rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:4px;}
+.rb-icon{font-size:1.3rem;margin-bottom:4px;}
+.rb-name{font-size:0.8rem;color:#ccc;margin-bottom:6px;}
+.rb-oplog{font-size:0.7rem;color:#888;font-family:'Monaco','Menlo',monospace;padding:4px8px;background:rgba(0,0,0,0.2);border-radius:6px;}
+.rb-oplog.diverged{color:#fbbf24;}
+.rb-oplog.rolled-back{color:#f87171;text-decoration:line-through;}
+.rb-status{text-align:center;font-size:0.85rem;color:#888;padding:10px;background:rgba(255,255,255,0.02);border-radius:8px;}
+
+/*SpecialMembers*/
+.special-cluster{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;}
+.sp-node{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:14px18px;text-align:center;min-width:120px;transition:all0.3s;}
+.sp-primary{border-color:rgba(34,197,94,0.5);background:rgba(34,197,94,0.08);}
+.sp-role{font-size:0.65rem;font-weight:700;color:#4ade80;letter-spacing:1px;margin-bottom:4px;}
+.sp-node:not(.sp-primary).sp-role{color:#60a5fa;}
+.sp-icon{font-size:1.3rem;margin-bottom:4px;}
+.sp-name{font-size:0.8rem;color:#ccc;margin-bottom:4px;}
+.sp-detail{font-size:0.7rem;color:#666;}
+:global(.sp-extra){background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.15);border-radius:14px;padding:14px18px;text-align:center;min-width:120px;display:inline-block;margin:6px;animation:eventAppear0.4sease-out;}
+:global(.sp-arbiter){border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.05);}
+:global(.sp-hidden){border-color:rgba(139,92,246,0.4);background:rgba(139,92,246,0.05);}
+:global(.sp-delayed){border-color:rgba(6,182,212,0.4);background:rgba(6,182,212,0.05);}
+
+@keyframeseventAppear{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
+
+.explain-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;}
+.explain-card{background:rgba(255,255,255,0.03);border:1pxsolidrgba(255,255,255,0.1);border-radius:14px;padding:24px;}
+.explain-cardh3{font-size:1rem;color:#fff;margin-bottom:10px;}
+.explain-cardp{color:#aaa;line-height:1.6;font-size:0.9rem;margin-bottom:10px;}
+.explain-cardstrong{color:#00d4ff;}
+.verdict{font-size:0.85rem;font-weight:600;padding:6px12px;border-radius:6px;display:inline-block;}
+
+.ops-section{margin-bottom:50px;}
+.ops-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;}
+.ops-card{background:rgba(255,255,255,0.03);border-radius:12px;padding:20px;border:1pxsolidrgba(255,255,255,0.1);}
+.ops-cardh4{font-size:0.95rem;color:#fff;margin-bottom:10px;}
+.ops-cardcode{display:block;background:rgba(0,0,0,0.3);padding:8px10px;border-radius:6px;font-size:0.75rem;color:#4ade80;margin-bottom:10px;overflow-x:auto;}
+.ops-cardp{font-size:0.85rem;color:#888;line-height:1.5;}
+
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px0;border-top:1pxsolidrgba(255,255,255,0.1);margin-bottom:30px;}
+.viz-footera{color:#4ade80;}
+.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;}
+.share-buttonsspan{color:#666;}
+.share-btn{padding:10px20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background0.2s;}
+.share-btn:hover{background:rgba(255,255,255,0.2);color:#fff;}
+
+@media(max-width:768px){
+.viz-headerh1{font-size:1.8rem;}
+.rs-cluster{flex-direction:column;}
+.rs-arrows{flex-direction:row;}
+.rs-secondaries{flex-direction:row;}
+.election-nodes{flex-direction:column;align-items:center;}
+.hb-cluster{flex-direction:column;align-items:center;}
+.key-buttons{flex-direction:column;}
+.explain-grid{grid-template-columns:1fr;}
+}
+</style>
+
+<script is:inline>
+//===Utility===
+functionlog(containerId,msg,cls=''){
+constel=document.getElementById(containerId);
+constentry=document.createElement('div');
+entry.className='log-entry'+cls;
+entry.textContent=msg;
+el.insertBefore(entry,el.firstChild);
+if(el.children.length>30)el.removeChild(el.lastChild);
+}
+
+//===BasicsSection===
+letbasicOplogs=[0,0,0];
+
+functionupdateBasics(){
+for(leti=0;i<3;i++){
+document.getElementById(`basicOplog${i}`).textContent=String(basicOplogs[i]);
+}
+}
+
+functionwriteBasics(count){
+for(leti=0;i<count;i++){
+basicOplogs[0]++;
+//Secondariesreplicatewithslightdelaysimulation
+setTimeout(()=>{basicOplogs[1]++;updateBasics();},100*(i+1));
+setTimeout(()=>{basicOplogs[2]++;updateBasics();},200*(i+1));
+}
+updateBasics();
+log('basicsLog',`Primaryaccepted${count}write(s).Secondariesreplicatingviaoplog...`,'good');
+}
+
+document.getElementById('writeDocBtn')?.addEventListener('click',()=>writeBasics(1));
+document.getElementById('write10Btn')?.addEventListener('click',()=>writeBasics(10));
+document.getElementById('basicsResetBtn')?.addEventListener('click',()=>{
+basicOplogs=[0,0,0];
+updateBasics();
+document.getElementById('basicsLog').innerHTML='<div class="log-entry">Reset.Ready.</div>';
+});
+
+//===ElectionProtocol===
+leteStep=0;
+consteSteps=[
+()=>{
+//Step1:Primarygoesdown
+document.getElementById('eNode0').classList.add('e-down');
+document.getElementById('eIcon0').textContent='🔴';
+document.getElementById('eRole0').textContent='DOWN';
+document.getElementById('eRole0').style.color='#f87171';
+document.getElementById('electionStep').textContent='1/5';
+log('electionLog','Step1:Primary(mongo-0)becomesunreachable.Heartbeattimeoutdetected.','bad');
+},
+()=>{
+//Step2:Timeoutdetected
+document.getElementById('electionStep').textContent='2/5';
+log('electionLog','Step2:Secondariesdetectnoheartbeatfor10s(electionTimeoutMillis).Triggeringelection.','warn');
+},
+()=>{
+//Step3:Candidateemerges
+document.getElementById('eNode1').classList.add('e-candidate');
+document.getElementById('eRole1').textContent='CANDIDATE';
+document.getElementById('eRole1').style.color='#fbbf24';
+document.getElementById('eIcon1').textContent='🟡';
+document.getElementById('electionTerm').textContent='2';
+document.getElementById('electionStep').textContent='3/5';
+log('electionLog','Step3:mongo-1startselectionforterm2.Requestsvotesfrompeers.','warn');
+},
+()=>{
+//Step4:Votesreceived
+document.getElementById('eVote1').textContent='✅self-vote';
+document.getElementById('eVote2').textContent='✅votedfor1';
+document.getElementById('electionVotes').textContent='2/3';
+document.getElementById('electionStep').textContent='4/5';
+log('electionLog','Step4:mongo-1receivesvotefrommongo-2.Hasmajority(2/3).','good');
+},
+()=>{
+//Step5:Newprimary
+document.getElementById('eNode1').classList.remove('e-candidate');
+document.getElementById('eNode1').classList.add('e-elected');
+document.getElementById('eRole1').textContent='PRIMARY';
+document.getElementById('eRole1').style.color='#4ade80';
+document.getElementById('eIcon1').textContent='🟢';
+document.getElementById('eRole2').textContent='SECONDARY';
+document.getElementById('electionStep').textContent='5/5';
+document.getElementById('electionVotes').textContent='✅';
+log('electionLog','Step5:mongo-1electedasnewprimaryforterm2.Replicasetoperational.','good');
+}
+;
+
+document.getElementById('electionStepBtn')?.addEventListener('click',()=>{
+if(eStep<eSteps.length){
+eSteps[eStep]();
+eStep++;
+}else{
+log('electionLog','Electioncomplete.Resettotryagain.','warn');
+}
+});
+
+document.getElementById('electionResetBtn')?.addEventListener('click',()=>{
+eStep=0;
+for(leti=0;i<3;i++){
+constnode=document.getElementById(`eNode${i}`);
+node.classList.remove('e-down','e-candidate','e-elected');
+document.getElementById(`eVote${i}`).textContent='';
+}
+document.getElementById('eIcon0').textContent='🟢';
+document.getElementById('eIcon1').textContent='🔵';
+document.getElementById('eIcon2').textContent='🔵';
+document.getElementById('eRole0').textContent='PRIMARY';
+document.getElementById('eRole0').style.color='#4ade80';
+document.getElementById('eRole1').textContent='SECONDARY';
+document.getElementById('eRole1').style.color='#4ade80';
+document.getElementById('eRole2').textContent='SECONDARY';
+document.getElementById('eRole2').style.color='#4ade80';
+document.getElementById('electionTerm').textContent='1';
+document.getElementById('electionStep').textContent='—';
+document.getElementById('electionVotes').textContent='—';
+document.getElementById('electionLog').innerHTML='<div class="log-entry">Reset.Readyforelectiondemo.</div>';
+});
+
+//===Heartbeats&FailureDetection===
+constHB_COUNT=5;
+lethbAlive=[true,true,true,true,true];
+lethbRoles=['PRIMARY','SECONDARY','SECONDARY','SECONDARY','SECONDARY'];
+lethbInterval=null;
+
+functionhbUpdateUI(){
+for(leti=0;i<HB_COUNT;i++){
+constnode=document.getElementById(`hbNode${i}`);
+constroleEl=document.getElementById(`hbRole${i}`);
+consticonEl=document.getElementById(`hbIcon${i}`);
+conststatusEl=document.getElementById(`hbStatus${i}`);
+constkillBtn=document.getElementById(`hbKill${i}`);
+
+node.classList.toggle('hb-down',!hbAlive[i]);
+node.classList.toggle('hb-primary',hbAlive[i]&&hbRoles[i]==='PRIMARY');
+roleEl.textContent=hbAlive[i]?hbRoles[i]:'DOWN';
+roleEl.style.color=!hbAlive[i]?'#f87171':hbRoles[i]==='PRIMARY'?'#4ade80':'#60a5fa';
+iconEl.textContent=!hbAlive[i]?'🔴':hbRoles[i]==='PRIMARY'?'🟢':'🔵';
+statusEl.textContent=hbAlive[i]?'healthy':'unreachable';
+statusEl.classList.toggle('dead',!hbAlive[i]);
+killBtn.disabled=!hbAlive[i];
+killBtn.textContent=hbAlive[i]?'💀Kill':'☠️Dead';
+}
+}
+
+functionhbPing(){
+constcontainer=document.getElementById('hbHeartbeats');
+//Clearoldpings
+if(container.children.length>20){
+while(container.children.length>10)container.removeChild(container.firstChild);
+}
+constprimaryIdx=hbRoles.indexOf('PRIMARY');
+if(primaryIdx===-1||!hbAlive[primaryIdx])return;
+
+for(leti=0;i<HB_COUNT;i++){
+if(i===primaryIdx)continue;
+constping=document.createElement('span');
+ping.className='hb-ping'+(hbAlive[i]?'':'fail');
+ping.textContent=`${primaryIdx}→${i}:${hbAlive[i]?'ok':'timeout'}`;
+container.appendChild(ping);
+}
+}
+
+functionhbElect(){
+//Findalivesecondaries
+constcandidates=[];
+for(leti=0;i<HB_COUNT;i++){
+if(hbAlive[i]&&hbRoles[i]==='SECONDARY')candidates.push(i);
+}
+if(candidates.length===0){
+log('hbLog','Nocandidatesavailableforelection!Replicasethasnoprimary.','bad');
+return;
+}
+//Checkmajority:need>total/2alivenodes(includingthenewprimary)
+constaliveCount=hbAlive.filter(a=>a).length;
+if(aliveCount<=Math.floor(HB_COUNT/2)){
+log('hbLog',`Only${aliveCount}/${HB_COUNT}membersalive.Cannotreachmajority.Noprimaryelected.`,'bad');
+return;
+}
+constnewPrimary=candidates[0];
+hbRoles=hbRoles.map((r,i)=>i===newPrimary?'PRIMARY':(hbAlive[i]?'SECONDARY':r));
+hbUpdateUI();
+log('hbLog',`Electioncomplete!mongo-${newPrimary}isthenewPRIMARY.`,'good');
+}
+
+for(leti=0;i<HB_COUNT;i++){
+document.getElementById(`hbKill${i}`)?.addEventListener('click',()=>{
+constwasPrimary=hbRoles[i]==='PRIMARY';
+hbAlive[i]=false;
+hbRoles[i]=wasPrimary?'DOWN':hbRoles[i];
+hbUpdateUI();
+log('hbLog',`mongo-${i}killed!${wasPrimary?'Primarylost—triggeringelection...':''}`,'bad');
+if(wasPrimary){
+setTimeout(()=>{
+log('hbLog','Heartbeattimeout(10s)expired.Startingelection...','warn');
+setTimeout(()=>hbElect(),800);
+},1500);
+}
+});
+}
+
+document.getElementById('hbResetBtn')?.addEventListener('click',()=>{
+hbAlive=[true,true,true,true,true];
+hbRoles=['PRIMARY','SECONDARY','SECONDARY','SECONDARY','SECONDARY'];
+hbUpdateUI();
+document.getElementById('hbHeartbeats').innerHTML='';
+document.getElementById('hbLog').innerHTML='<div class="log-entry">Clusterreset.All5nodeshealthy.</div>';
+});
+
+hbInterval=setInterval(hbPing,2000);
+hbUpdateUI();
+
+//===WriteConcern&ReadPreference===
+letwcMode='1';
+letrpMode='primary';
+letwcCrashed=false;
+
+document.querySelectorAll('.wc-btn').forEach(btn=>{
+btn.addEventListener('click',()=>{
+document.querySelectorAll('.wc-btn').forEach(b=>b.classList.remove('active'));
+btn.classList.add('active');
+wcMode=(btn).dataset.wc;
+});
+});
+
+document.querySelectorAll('.rp-btn').forEach(btn=>{
+btn.addEventListener('click',()=>{
+document.querySelectorAll('.rp-btn').forEach(b=>b.classList.remove('active'));
+btn.classList.add('active');
+rpMode=(btn).dataset.rp;
+});
+});
+
+functionwcFlashNode(idx,cls){
+constind=document.getElementById(`wcInd${idx}`);
+constnode=document.getElementById(`wcNode${idx}`);
+ind.className='wc-indicator'+cls;
+ind.textContent=cls.includes('write')?'✏️write':'📖read';
+node.classList.add('wc-flash');
+setTimeout(()=>{node.classList.remove('wc-flash');},600);
+setTimeout(()=>{ind.textContent='';ind.className='wc-indicator';},1500);
+}
+
+document.getElementById('wcWriteBtn')?.addEventListener('click',()=>{
+if(wcCrashed){log('wcLog','Primaryiscrashed!Resetfirst.','bad');return;}
+wcFlashNode(0,'wc-write-indicator');
+if(wcMode==='0'){
+log('wcLog','w:0—Writesent.Noacknowledgment.Fireandforget!','warn');
+}elseif(wcMode==='1'){
+log('wcLog','w:1—Writeacknowledgedbyprimaryonly.Datacouldbelostifprimarycrashesbeforereplication.','warn');
+}else{
+setTimeout(()=>wcFlashNode(1,'wc-write-indicator'),300);
+log('wcLog','w:majority—Writeacknowledgedbyprimary+1secondary(majorityof3).Durableacrossfailover.','good');
+}
+});
+
+document.getElementById('wcReadBtn')?.addEventListener('click',()=>{
+if(wcCrashed&&rpMode==='primary'){
+log('wcLog','Primaryisdown!Readfailedwith"primary"readpreference.','bad');
+return;
+}
+consttargets=[];
+switch(rpMode){
+case'primary':targets.push(0);break;
+case'primaryPreferred':targets.push(wcCrashed?1:0);break;
+case'secondary':targets.push(1,2);break;
+case'secondaryPreferred':targets.push(1);break;
+case'nearest':targets.push(Math.floor(Math.random()*3));break;
+}
+targets.forEach((t,i)=>{
+if(!wcCrashed||t!==0)setTimeout(()=>wcFlashNode(t,'wc-read-indicator'),i*200);
+});
+log('wcLog',`Readroutedto:${targets.map(t=>'mongo-'+t).join(',')}(readPreference:${rpMode})`,'good');
+});
+
+document.getElementById('wcCrashBtn')?.addEventListener('click',()=>{
+if(wcCrashed){
+//Reset
+wcCrashed=false;
+document.getElementById('wcNode0').classList.remove('wc-crash');
+log('wcLog','Primaryrestored.','good');
+return;
+}
+wcCrashed=true;
+document.getElementById('wcNode0').classList.add('wc-crash');
+if(wcMode==='1'){
+log('wcLog','💥Primarycrashed!Withw:1,thelastwritewasonlyontheprimary—DATALOST!Itwasnotreplicated.','bad');
+}elseif(wcMode==='majority'){
+log('wcLog','💥Primarycrashed!Withw:majority,thelastwritewasreplicatedtoasecondary—dataissafe.','good');
+}else{
+log('wcLog','💥Primarycrashed!Withw:0,youhavenoideaifthewriteevenmadeit.Probablylost.','bad');
+}
+});
+
+//===RollbackScenario===
+letrbStep=0;
+constrbSteps=[
+()=>{
+//PrimaryacceptsanewwriteD
+document.getElementById('rbOplog0').textContent='oplog:[A,B,C,D]';
+document.getElementById('rbOplog0').classList.add('diverged');
+document.getElementById('rbStatus').textContent='PrimaryacceptedwriteD(notyetreplicatedtosecondaries)';
+document.getElementById('rbStatus').style.color='#fbbf24';
+log('rbLog','Step1:PrimaryacceptswriteDwithw:1.Notyetreplicated.','warn');
+},
+()=>{
+//Primarycrashes
+document.getElementById('rbNode0').classList.add('rb-down');
+document.getElementById('rbIcon0').textContent='🔴';
+document.getElementById('rbRole0').textContent='DOWN';
+document.getElementById('rbRole0').style.color='#f87171';
+document.getElementById('rbStatus').textContent='PrimarycrashedbeforereplicatingwriteD!';
+document.getElementById('rbStatus').style.color='#f87171';
+log('rbLog','Step2:Primarycrashes!WriteDexistsonlyonmongo-0.','bad');
+},
+()=>{
+//Newprimaryelected
+document.getElementById('rbRole1').textContent='PRIMARY';
+document.getElementById('rbRole1').style.color='#4ade80';
+document.getElementById('rbIcon1').textContent='🟢';
+document.getElementById('rbStatus').textContent='mongo-1electedasnewprimary(term2).Oplog:[A,B,C]—noD!';
+document.getElementById('rbStatus').style.color='#fbbf24';
+log('rbLog','Step3:mongo-1elected.Itsoplogis[A,B,C]—writeDdoesnotexist.','warn');
+},
+()=>{
+//NewprimaryacceptswriteE
+document.getElementById('rbOplog1').textContent='oplog:[A,B,C,E]';
+document.getElementById('rbOplog1').classList.add('diverged');
+document.getElementById('rbOplog2').textContent='oplog:[A,B,C,E]';
+document.getElementById('rbStatus').textContent='NewprimaryacceptswriteE.Oplogshavediverged!';
+log('rbLog','Step4:NewprimaryacceptswriteE,replicatestomongo-2.Oplogsdivergefromoldprimary.','warn');
+},
+()=>{
+//Oldprimarycomesback
+document.getElementById('rbNode0').classList.remove('rb-down');
+document.getElementById('rbNode0').classList.add('rb-diverged');
+document.getElementById('rbIcon0').textContent='⚠️';
+document.getElementById('rbRole0').textContent='RECOVERING';
+document.getElementById('rbRole0').style.color='#fbbf24';
+document.getElementById('rbStatus').textContent='Oldprimarycomesbackonline.Detectsdivergentoplog!';
+document.getElementById('rbStatus').style.color='#fbbf24';
+log('rbLog','Step5:mongo-0rejoins.Itsoplog[A,B,C,D]divergesfromcurrentprimary[A,B,C,E].','warn');
+},
+()=>{
+//Rollback
+document.getElementById('rbNode0').classList.remove('rb-diverged');
+document.getElementById('rbNode0').classList.add('rb-rolled-back');
+document.getElementById('rbOplog0').textContent='oplog:[A,B,C,D̶]→[A,B,C,E]';
+document.getElementById('rbOplog0').classList.remove('diverged');
+document.getElementById('rbOplog0').classList.add('rolled-back');
+document.getElementById('rbRole0').textContent='SECONDARY';
+document.getElementById('rbRole0').style.color='#60a5fa';
+document.getElementById('rbIcon0').textContent='🔵';
+document.getElementById('rbStatus').textContent='WriteDrolledback!Savedtorollbackfileformanualrecovery.mongo-0syncsto[A,B,C,E].';
+document.getElementById('rbStatus').style.color='#f87171';
+log('rbLog','Step6:ROLLBACK—writeDremoved,savedtorollback/<collection>/<timestamp>.bson.mongo-0catchesup.','bad');
+}
+;
+
+document.getElementById('rbStepBtn')?.addEventListener('click',()=>{
+if(rbStep<rbSteps.length){
+rbSteps[rbStep]();
+rbStep++;
+}else{
+log('rbLog','Rollbackscenariocomplete.Resettoreplay.','warn');
+}
+});
+
+document.getElementById('rbResetBtn')?.addEventListener('click',()=>{
+rbStep=0;
+for(leti=0;i<3;i++){
+constnode=document.getElementById(`rbNode${i}`);
+node.classList.remove('rb-down','rb-diverged','rb-rolled-back');
+constoplog=document.getElementById(`rbOplog${i}`);
+oplog.textContent='oplog:[A,B,C]';
+oplog.classList.remove('diverged','rolled-back');
+}
+document.getElementById('rbIcon0').textContent='🟢';
+document.getElementById('rbIcon1').textContent='🔵';
+document.getElementById('rbIcon2').textContent='🔵';
+document.getElementById('rbRole0').textContent='PRIMARY';
+document.getElementById('rbRole0').style.color='#4ade80';
+document.getElementById('rbRole1').textContent='SECONDARY';
+document.getElementById('rbRole1').style.color='#4ade80';
+document.getElementById('rbRole2').textContent='SECONDARY';
+document.getElementById('rbRole2').style.color='#4ade80';
+document.getElementById('rbStatus').textContent='Allnodesinsync—oplog:[A,B,C]';
+document.getElementById('rbStatus').style.color='#888';
+document.getElementById('rbLog').innerHTML='<div class="log-entry">Reset.Readyforrollbackdemo.</div>';
+});
+
+//===SpecialMembers===
+letspCount=0;
+
+functionaddSpecialMember(type){
+spCount++;
+constcontainer=document.getElementById('specialExtra');
+constdiv=document.createElement('div');
+div.className='sp-extrasp-'+type;
+if(type==='arbiter'){
+div.innerHTML=`
+<div style="font-size:0.65rem;font-weight:700;color:#fbbf24;letter-spacing:1px;margin-bottom:4px;">ARBITER</div>
+<div style="font-size:1.3rem;margin-bottom:4px;">⚖️</div>
+<div style="font-size:0.8rem;color:#ccc;margin-bottom:4px;">arbiter-${spCount}</div>
+<div style="font-size:0.7rem;color:#666;">votes:1|data:❌</div>
+`;
+}elseif(type==='hidden'){
+div.innerHTML=`
+<div style="font-size:0.65rem;font-weight:700;color:#a78bfa;letter-spacing:1px;margin-bottom:4px;">HIDDEN</div>
+<div style="font-size:1.3rem;margin-bottom:4px;">👻</div>
+<div style="font-size:0.8rem;color:#ccc;margin-bottom:4px;">hidden-${spCount}</div>
+<div style="font-size:0.7rem;color:#666;">votes:0|data:✅|priority:0</div>
+`;
+}else{
+div.innerHTML=`
+<div style="font-size:0.65rem;font-weight:700;color:#22d3ee;letter-spacing:1px;margin-bottom:4px;">DELAYED</div>
+<div style="font-size:1.3rem;margin-bottom:4px;">⏱️</div>
+<div style="font-size:0.8rem;color:#ccc;margin-bottom:4px;">delayed-${spCount}</div>
+<div style="font-size:0.7rem;color:#666;">votes:0|data:✅(1hbehind)|priority:0</div>
+`;
+}
+container.appendChild(div);
+}
+
+document.getElementById('addArbiterBtn')?.addEventListener('click',()=>addSpecialMember('arbiter'));
+document.getElementById('addHiddenBtn')?.addEventListener('click',()=>addSpecialMember('hidden'));
+document.getElementById('addDelayedBtn')?.addEventListener('click',()=>addSpecialMember('delayed'));
+document.getElementById('spResetBtn')?.addEventListener('click',()=>{
+spCount=0;
+document.getElementById('specialExtra').innerHTML='';
+});
+</script>

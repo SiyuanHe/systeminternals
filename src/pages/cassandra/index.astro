@@ -1,0 +1,124 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Consistent Hashing & Gossip", description: "Token ring, vnodes, replication, gossip protocol, and failure detection", href: "/cassandra/consistent-hashing/", status: "live" },
+  { title: "Read & Write Paths", description: "Memtables, SSTables, commit log, and compaction strategies", href: "#", status: "coming" },
+  { title: "Data Modeling", description: "Partition keys, clustering columns, and denormalization patterns", href: "#", status: "coming" },
+  { title: "Compaction Strategies", description: "STCS, LCS, TWCS — when to use each and how they work", href: "#", status: "coming" },
+  { title: "Lightweight Transactions", description: "Paxos consensus for compare-and-set operations", href: "#", status: "coming" },
+  { title: "Repair & Anti-Entropy", description: "Merkle trees, read repair, and full/incremental repair", href: "#", status: "coming" },
+  { title: "Snitch & Topology", description: "How Cassandra understands datacenter and rack layout", href: "#", status: "coming" },
+  { title: "Tombstones & TTLs", description: "Deletes, gc_grace_seconds, and avoiding zombie data", href: "#", status: "coming" },
+  { title: "Streaming & Bootstrap", description: "How nodes join, leave, and rebalance data", href: "#", status: "coming" },
+  { title: "Materialized Views & SAI", description: "Secondary indexing strategies and trade-offs", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Cassandra Database Internals" 
+  description="Interactive visualizations for understanding Apache Cassandra architecture, consistent hashing, gossip protocol, and distributed operations"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Cassandra", href: "/cassandra/" }]}
+>
+  <section class="section-header">
+    <h1>🟠 Cassandra Database Internals</h1>
+    <p>
+      Apache Cassandra is a distributed wide-column store designed for high availability with no single point of failure.
+      These visualizations help you understand how Cassandra distributes data, replicates across datacenters,
+      detects failures, and maintains consistency — all without a master node.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(249, 115, 22, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>
