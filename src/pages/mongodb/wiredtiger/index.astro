@@ -1,0 +1,1277 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="MongoDB WiredTiger Storage Engine: Internals Visualized" 
+  description="Interactive visualization of WiredTiger — B-Tree pages, MVCC snapshots, checkpointing, cache eviction, compression, and journal (WAL)"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "MongoDB", href: "/mongodb/" },
+    { label: "WiredTiger Storage", href: "/mongodb/wiredtiger/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🍃 WiredTiger Storage Engine</h1>
+      <p class="subtitle">How MongoDB Stores, Caches, and Recovers Your Data</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          WiredTiger is MongoDB's default storage engine since 3.2. It uses a <strong>B-Tree</strong> index structure
+          (not LSM-Tree like RocksDB), provides <em>document-level concurrency</em> via MVCC snapshots,
+          and ensures durability through <strong>write-ahead journaling</strong> with periodic checkpoints.
+          Understanding its internals — page structure, cache management, and compression — is key to tuning MongoDB performance.
+        </p>
+      </div>
+    </section>
+
+    <!-- B-Tree vs LSM-Tree -->
+    <section class="sim-section">
+      <h2>🌳 B-Tree vs LSM-Tree</h2>
+      <p class="section-desc">WiredTiger chose B-Tree for MongoDB's random-read-heavy workloads. Compare both structures side by side.</p>
+
+      <div class="sim-controls">
+        <div class="sim-actions">
+          <button id="treeWriteBtn" class="action-btn primary-btn">✏️ Write Key</button>
+          <button id="treeReadBtn" class="action-btn primary-btn-secondary">🔍 Read Key</button>
+          <button id="treeBurstBtn" class="action-btn balance-btn">⚡ Burst 10 Writes</button>
+          <button id="treeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="tree-compare">
+        <div class="tree-panel">
+          <div class="tree-panel-header btree-header">B-Tree (WiredTiger)</div>
+          <div class="tree-canvas" id="btreeCanvas"></div>
+          <div class="tree-stats">
+            <div class="stat-card"><span class="stat-label">Writes</span><span class="stat-value" id="btreeWrites">0</span></div>
+            <div class="stat-card"><span class="stat-label">Reads</span><span class="stat-value" id="btreeReads">0</span></div>
+            <div class="stat-card"><span class="stat-label">Read Cost</span><span class="stat-value" id="btreeReadCost">O(log n)</span></div>
+          </div>
+          <div class="tree-note good-note">✅ In-place updates, fast point reads by _id</div>
+        </div>
+        <div class="tree-panel">
+          <div class="tree-panel-header lsm-header">LSM-Tree (RocksDB-style)</div>
+          <div class="tree-canvas" id="lsmCanvas"></div>
+          <div class="tree-stats">
+            <div class="stat-card"><span class="stat-label">Writes</span><span class="stat-value" id="lsmWrites">0</span></div>
+            <div class="stat-card"><span class="stat-label">Reads</span><span class="stat-value" id="lsmReads">0</span></div>
+            <div class="stat-card"><span class="stat-label">Read Cost</span><span class="stat-value" id="lsmReadCost">O(k·log n)</span></div>
+          </div>
+          <div class="tree-note warn-note">⚠️ Append-only writes (fast), but reads check multiple levels</div>
+        </div>
+      </div>
+
+      <div class="sim-log" id="treeLog">
+        <div class="log-entry">Ready. Write and read keys to compare B-Tree vs LSM behavior.</div>
+      </div>
+    </section>
+
+    <!-- Page Structure -->
+    <section class="sim-section">
+      <h2>📄 Page Structure</h2>
+      <p class="section-desc">WiredTiger organizes data in a B-Tree of pages — internal (branch) pages route to leaf pages that hold documents.</p>
+
+      <div class="page-tree-container">
+        <div class="page-tree" id="pageTree">
+          <div class="page-level">
+            <div class="page-node root-page" data-page="root" id="pageRoot">
+              <div class="page-type">Root (Internal)</div>
+              <div class="page-size">4KB</div>
+              <div class="page-keys">keys: [F, N]</div>
+            </div>
+          </div>
+          <div class="page-connectors">
+            <svg width="100%" height="30" class="connector-svg">
+              <line x1="25%" y1="0" x2="16.6%" y2="30" stroke="#555" stroke-width="1.5"></line>
+              <line x1="50%" y1="0" x2="50%" y2="30" stroke="#555" stroke-width="1.5"></line>
+              <line x1="75%" y1="0" x2="83.3%" y2="30" stroke="#555" stroke-width="1.5"></line>
+            </svg>
+          </div>
+          <div class="page-level">
+            <div class="page-node internal-page" data-page="int-left" id="pageIntLeft">
+              <div class="page-type">Internal</div>
+              <div class="page-size">4KB</div>
+              <div class="page-keys">keys: [C]</div>
+            </div>
+            <div class="page-node internal-page" data-page="int-mid" id="pageIntMid">
+              <div class="page-type">Internal</div>
+              <div class="page-size">4KB</div>
+              <div class="page-keys">keys: [J]</div>
+            </div>
+            <div class="page-node internal-page" data-page="int-right" id="pageIntRight">
+              <div class="page-type">Internal</div>
+              <div class="page-size">4KB</div>
+              <div class="page-keys">keys: [R]</div>
+            </div>
+          </div>
+          <div class="page-connectors">
+            <svg width="100%" height="30" class="connector-svg">
+              <line x1="8.3%" y1="0" x2="8.3%" y2="30" stroke="#555" stroke-width="1"></line>
+              <line x1="16.6%" y1="0" x2="25%" y2="30" stroke="#555" stroke-width="1"></line>
+              <line x1="41.6%" y1="0" x2="41.6%" y2="30" stroke="#555" stroke-width="1"></line>
+              <line x1="50%" y1="0" x2="58.3%" y2="30" stroke="#555" stroke-width="1"></line>
+              <line x1="75%" y1="0" x2="75%" y2="30" stroke="#555" stroke-width="1"></line>
+              <line x1="83.3%" y1="0" x2="91.6%" y2="30" stroke="#555" stroke-width="1"></line>
+            </svg>
+          </div>
+          <div class="page-level leaf-level">
+            <div class="page-node leaf-page" data-page="leaf-0" id="pageLeaf0">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">A, B</div>
+            </div>
+            <div class="page-node leaf-page" data-page="leaf-1" id="pageLeaf1">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">C, D, E</div>
+            </div>
+            <div class="page-node leaf-page" data-page="leaf-2" id="pageLeaf2">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">F, G, H</div>
+            </div>
+            <div class="page-node leaf-page" data-page="leaf-3" id="pageLeaf3">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">J, K, L, M</div>
+            </div>
+            <div class="page-node leaf-page" data-page="leaf-4" id="pageLeaf4">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">N, O, P, Q</div>
+            </div>
+            <div class="page-node leaf-page" data-page="leaf-5" id="pageLeaf5">
+              <div class="page-type">Leaf</div>
+              <div class="page-size">32KB</div>
+              <div class="page-docs">R, S, T, U</div>
+            </div>
+          </div>
+        </div>
+        <div class="page-inspector" id="pageInspector">
+          <div class="inspector-title">🔍 Click a page to inspect</div>
+          <div class="inspector-body" id="inspectorBody">
+            <p class="inspector-hint">Select any page in the tree above to see its internal structure and metadata.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MVCC & Snapshots -->
+    <section class="sim-section">
+      <h2>📸 MVCC &amp; Snapshots</h2>
+      <p class="section-desc">WiredTiger stores multiple document versions with transaction timestamps. Reads use point-in-time snapshots.</p>
+
+      <div class="sim-controls">
+        <div class="sim-actions">
+          <button id="mvccWriteBtn" class="action-btn primary-btn">✏️ Write (Txn)</button>
+          <button id="mvccReadBtn" class="action-btn primary-btn-secondary">🔍 Snapshot Read</button>
+          <button id="mvccConcurrentBtn" class="action-btn balance-btn">🔀 Concurrent Ops</button>
+          <button id="mvccResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="mvcc-container">
+        <div class="mvcc-doc">
+          <div class="mvcc-doc-header">Document: user_42</div>
+          <div class="mvcc-versions" id="mvccVersions">
+            <div class="mvcc-version current-version">
+              <div class="version-ts">ts: 1</div>
+              <div class="version-data">&#123; name: "Alice", age: 30 &#125;</div>
+              <div class="version-badge">current</div>
+            </div>
+          </div>
+        </div>
+        <div class="mvcc-snapshots" id="mvccSnapshots">
+          <div class="snapshot-header">Active Snapshots</div>
+          <div class="snapshot-list" id="snapshotList">
+            <div class="snapshot-empty">No active snapshots. Click "Snapshot Read" to create one.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-log" id="mvccLog">
+        <div class="log-entry">Ready. Write to create new versions, read to take snapshots.</div>
+      </div>
+    </section>
+
+    <!-- Checkpointing -->
+    <section class="sim-section">
+      <h2>💾 Checkpointing</h2>
+      <p class="section-desc">Every 60 seconds (or 2GB of journal data), WiredTiger flushes all dirty pages to disk and creates a new consistent root.</p>
+
+      <div class="checkpoint-controls">
+        <button id="cpWriteBtn" class="action-btn primary-btn">✏️ Dirty Write</button>
+        <button id="cpCheckpointBtn" class="action-btn balance-btn">💾 Checkpoint!</button>
+        <button id="cpCrashBtn" class="action-btn crash-btn">💥 Simulate Crash</button>
+        <button id="cpResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="checkpoint-viz">
+        <div class="cp-section-col">
+          <div class="cp-label">WiredTiger Cache (Memory)</div>
+          <div class="cp-pages" id="cpPages">
+            <div class="cp-page clean">Page A <span class="cp-status">clean</span></div>
+            <div class="cp-page clean">Page B <span class="cp-status">clean</span></div>
+            <div class="cp-page clean">Page C <span class="cp-status">clean</span></div>
+            <div class="cp-page clean">Page D <span class="cp-status">clean</span></div>
+          </div>
+        </div>
+        <div class="cp-arrow" id="cpArrow">⬇️</div>
+        <div class="cp-section-col">
+          <div class="cp-label">On Disk</div>
+          <div class="cp-disk" id="cpDisk">
+            <div class="cp-disk-item">Checkpoint #0 (initial) — all clean</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cp-stats">
+        <div class="stat-card"><span class="stat-label">Dirty Pages</span><span class="stat-value" id="cpDirtyCount">0</span></div>
+        <div class="stat-card"><span class="stat-label">Checkpoints</span><span class="stat-value" id="cpCount">0</span></div>
+        <div class="stat-card"><span class="stat-label">Journal Entries</span><span class="stat-value" id="cpJournalCount">0</span></div>
+      </div>
+
+      <div class="sim-log" id="cpLog">
+        <div class="log-entry">Ready. Write to dirty pages, then checkpoint to flush to disk.</div>
+      </div>
+    </section>
+
+    <!-- Cache & Eviction -->
+    <section class="sim-section">
+      <h2>🧊 Cache &amp; Eviction</h2>
+      <p class="section-desc">WiredTiger uses its own cache (default: 50% of RAM - 1GB). When it fills up, eviction kicks in — clean pages first, then dirty.</p>
+
+      <div class="sim-controls">
+        <div class="sim-actions">
+          <button id="cacheLoadBtn" class="action-btn primary-btn">📥 Load Page</button>
+          <button id="cacheBurstBtn" class="action-btn primary-btn-secondary">⚡ Burst Load</button>
+          <button id="cacheDirtyBtn" class="action-btn balance-btn">🖊️ Dirty Write</button>
+          <button id="cacheResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="cache-viz">
+        <div class="cache-meter-container">
+          <div class="cache-meter-label">Cache Usage</div>
+          <div class="cache-meter">
+            <div class="cache-meter-fill" id="cacheFill"></div>
+            <div class="cache-meter-target" id="cacheTarget" title="Eviction target (80%)"></div>
+          </div>
+          <div class="cache-meter-info">
+            <span id="cacheUsed">0</span> / <span id="cacheMax">16</span> pages
+            <span class="cache-pct" id="cachePct">0%</span>
+          </div>
+        </div>
+        <div class="cache-slots" id="cacheSlots"></div>
+        <div class="cache-legend">
+          <span class="legend-item"><span class="legend-dot clean-dot"></span> Clean</span>
+          <span class="legend-item"><span class="legend-dot dirty-dot"></span> Dirty</span>
+          <span class="legend-item"><span class="legend-dot empty-dot"></span> Empty</span>
+        </div>
+      </div>
+
+      <div class="sim-log" id="cacheLog">
+        <div class="log-entry">Ready. Load pages into cache. When it fills past 80%, eviction begins.</div>
+      </div>
+    </section>
+
+    <!-- Compression -->
+    <section class="sim-section">
+      <h2>🗜️ Compression</h2>
+      <p class="section-desc">WiredTiger supports block compression (snappy, zlib, zstd) and prefix key compression. Trade CPU for disk space.</p>
+
+      <div class="compression-demo">
+        <div class="comp-input">
+          <div class="comp-label">Original Data (1000 documents, ~48KB)</div>
+          <div class="comp-bar original-bar">
+            <div class="comp-fill" style="width: 100%;">48 KB</div>
+          </div>
+        </div>
+
+        <div class="comp-results" id="compResults">
+          <div class="comp-row">
+            <div class="comp-algo">
+              <span class="comp-name">None</span>
+              <span class="comp-desc">No compression</span>
+            </div>
+            <div class="comp-bar-wrap">
+              <div class="comp-bar"><div class="comp-fill comp-none" style="width: 100%;">48 KB</div></div>
+            </div>
+            <div class="comp-metrics">
+              <span class="comp-ratio">1.0x</span>
+              <span class="comp-cpu">⚡ 0ms CPU</span>
+            </div>
+          </div>
+          <div class="comp-row">
+            <div class="comp-algo">
+              <span class="comp-name active-algo">Snappy (default)</span>
+              <span class="comp-desc">Fast, moderate ratio</span>
+            </div>
+            <div class="comp-bar-wrap">
+              <div class="comp-bar"><div class="comp-fill comp-snappy" style="width: 58%;">28 KB</div></div>
+            </div>
+            <div class="comp-metrics">
+              <span class="comp-ratio">1.7x</span>
+              <span class="comp-cpu">⚡ 0.3ms CPU</span>
+            </div>
+          </div>
+          <div class="comp-row">
+            <div class="comp-algo">
+              <span class="comp-name">zlib</span>
+              <span class="comp-desc">Slower, better ratio</span>
+            </div>
+            <div class="comp-bar-wrap">
+              <div class="comp-bar"><div class="comp-fill comp-zlib" style="width: 35%;">17 KB</div></div>
+            </div>
+            <div class="comp-metrics">
+              <span class="comp-ratio">2.8x</span>
+              <span class="comp-cpu">🐢 2.1ms CPU</span>
+            </div>
+          </div>
+          <div class="comp-row">
+            <div class="comp-algo">
+              <span class="comp-name">zstd</span>
+              <span class="comp-desc">Best balance</span>
+            </div>
+            <div class="comp-bar-wrap">
+              <div class="comp-bar"><div class="comp-fill comp-zstd" style="width: 30%;">14 KB</div></div>
+            </div>
+            <div class="comp-metrics">
+              <span class="comp-ratio">3.4x</span>
+              <span class="comp-cpu">⚡ 0.5ms CPU</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="comp-toggle-area">
+          <label>Simulate with data type:</label>
+          <div class="key-buttons">
+            <button class="key-btn active" data-comp="json" id="compJson">📄 JSON Documents</button>
+            <button class="key-btn" data-comp="binary" id="compBinary">🔢 Binary/Images</button>
+            <button class="key-btn" data-comp="text" id="compText">📝 Text-heavy</button>
+          </div>
+        </div>
+
+        <div class="comp-prefix">
+          <h4>🔑 Prefix Key Compression</h4>
+          <div class="prefix-demo">
+            <div class="prefix-before">
+              <div class="prefix-label">Without prefix compression:</div>
+              <code>user:alice:profile</code><br>
+              <code>user:alice:settings</code><br>
+              <code>user:alice:sessions</code><br>
+              <span class="prefix-size">54 bytes</span>
+            </div>
+            <div class="prefix-arrow">→</div>
+            <div class="prefix-after">
+              <div class="prefix-label">With prefix compression:</div>
+              <code>[user:alice:]profile</code><br>
+              <code>[↑ prefix]settings</code><br>
+              <code>[↑ prefix]sessions</code><br>
+              <span class="prefix-size">34 bytes (37% saved)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Journal (WAL) -->
+    <section class="sim-section">
+      <h2>📝 Journal (Write-Ahead Log)</h2>
+      <p class="section-desc">Every write goes to the journal first. Synced every 50ms (or immediately with j:true). On crash, replay from last checkpoint.</p>
+
+      <div class="sim-controls">
+        <div class="sim-actions">
+          <button id="walWriteBtn" class="action-btn primary-btn">✏️ Write (j:false)</button>
+          <button id="walWriteSyncBtn" class="action-btn primary-btn-secondary">✏️ Write (j:true)</button>
+          <button id="walSyncBtn" class="action-btn balance-btn">⏱️ 50ms Sync</button>
+          <button id="walResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="wal-viz">
+        <div class="wal-flow">
+          <div class="wal-stage">
+            <div class="wal-stage-label">1. Application Write</div>
+            <div class="wal-stage-box" id="walApp">
+              <div class="wal-pending" id="walPending">0 pending</div>
+            </div>
+          </div>
+          <div class="wal-arrow">→</div>
+          <div class="wal-stage">
+            <div class="wal-stage-label">2. Journal Buffer</div>
+            <div class="wal-stage-box" id="walBuffer">
+              <div class="wal-buffer-entries" id="walBufferEntries"></div>
+              <div class="wal-pending" id="walBufferCount">0 entries</div>
+            </div>
+          </div>
+          <div class="wal-arrow">→</div>
+          <div class="wal-stage">
+            <div class="wal-stage-label">3. Journal on Disk</div>
+            <div class="wal-stage-box synced-box" id="walDisk">
+              <div class="wal-pending" id="walDiskCount">0 synced</div>
+            </div>
+          </div>
+          <div class="wal-arrow">→</div>
+          <div class="wal-stage">
+            <div class="wal-stage-label">4. Checkpoint</div>
+            <div class="wal-stage-box checkpoint-box" id="walCheckpoint">
+              <div class="wal-pending" id="walCpCount">0 checkpoints</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-log" id="walLog">
+        <div class="log-entry">Ready. Writes go to journal buffer first, then sync to disk.</div>
+      </div>
+    </section>
+
+    <!-- Ops Best Practices -->
+    <section class="ops-section">
+      <h2>🛠️ Operational Best Practices</h2>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h4>📊 Cache Statistics</h4>
+          <code>db.serverStatus().wiredTiger.cache</code>
+          <p>Monitor "bytes currently in the cache" vs "maximum bytes configured". Alert if eviction can't keep up.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🗜️ Collection Compression</h4>
+          <code>db.createCollection("c", &#123;storageEngine: &#123;wiredTiger: &#123;configString: "block_compressor=zstd"&#125;&#125;&#125;)</code>
+          <p>Use zstd for best size/speed tradeoff. Snappy is default for backward compatibility.</p>
+        </div>
+        <div class="ops-card">
+          <h4>💾 Force Checkpoint</h4>
+          <code>db.adminCommand(&#123;fsync: 1&#125;)</code>
+          <p>Forces an immediate checkpoint. Useful before backups or maintenance windows.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📏 Cache Size Tuning</h4>
+          <code>storage.wiredTiger.engineConfig.cacheSizeGB</code>
+          <p>Default: 50% of (RAM - 1GB). Increase for read-heavy workloads; decrease if sharing with other processes.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📈 Eviction Monitoring</h4>
+          <code>db.serverStatus().wiredTiger.cache["tracked dirty bytes in the cache"]</code>
+          <p>If dirty bytes stay above 5% of cache, writes are outpacing eviction. Consider more RAM or reducing write rate.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔍 Table Stats</h4>
+          <code>db.collection.stats().wiredTiger</code>
+          <p>Shows B-Tree depth, page counts, overflow pages, and per-collection compression ratio.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://source.wiredtiger.com/develop/arch-index.html" target="_blank">WiredTiger Architecture Guide</a> and <a href="https://www.mongodb.com/docs/manual/core/wiredtiger/" target="_blank">MongoDB WiredTiger Docs</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20WiredTiger%20Storage%20Engine%20Visualizer%20-%20see%20how%20MongoDB%20stores%20data%20internally&url=https://systeminternals.dev/mongodb/wiredtiger/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/mongodb/wiredtiger/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/mongodb/wiredtiger/&t=Interactive%20WiredTiger%20Storage%20Engine%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #22c55e, #4ade80, #86efac); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(74,222,128,0.05)); border: 1px solid rgba(34,197,94,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #4ade80; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .primary-btn-secondary { background: linear-gradient(135deg, #16a34a, #15803d); color: white; }
+  .balance-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+  .crash-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .crash-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .sim-section { margin-bottom: 50px; }
+  .sim-controls { margin-bottom: 24px; }
+  .sim-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* B-Tree vs LSM */
+  .tree-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .tree-panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .tree-panel-header { font-weight: 700; text-align: center; padding: 8px; border-radius: 8px; margin-bottom: 16px; }
+  .btree-header { background: rgba(34,197,94,0.15); color: #4ade80; }
+  .lsm-header { background: rgba(139,92,246,0.15); color: #a78bfa; }
+  .tree-canvas { min-height: 140px; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; margin-bottom: 12px; font-family: 'Monaco','Menlo',monospace; font-size: 0.75rem; color: #aaa; overflow-y: auto; max-height: 200px; }
+  .tree-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+  .tree-note { font-size: 0.85rem; padding: 8px 12px; border-radius: 8px; }
+  .good-note { background: rgba(34,197,94,0.1); color: #86efac; }
+  .warn-note { background: rgba(245,158,11,0.1); color: #fcd34d; }
+
+  .stat-card { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .stat-label { display: block; font-size: 0.75rem; color: #666; margin-bottom: 2px; }
+  .stat-value { font-size: 1.1rem; font-weight: 700; color: #fff; }
+
+  .sim-log { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 14px; max-height: 120px; overflow-y: auto; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; }
+  :global(.log-entry) { padding: 3px 0; color: #888; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  :global(.log-entry.warn) { color: #fbbf24; }
+  :global(.log-entry.good) { color: #4ade80; }
+  :global(.log-entry.bad) { color: #f87171; }
+
+  /* Page Structure */
+  .page-tree-container { display: grid; grid-template-columns: 1fr 300px; gap: 20px; margin-bottom: 20px; }
+  .page-tree { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; }
+  .page-level { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .leaf-level { gap: 8px; }
+  .page-connectors { text-align: center; }
+  .connector-svg { display: block; margin: 0 auto; }
+  .page-node { padding: 10px 14px; border-radius: 10px; text-align: center; cursor: pointer; transition: all 0.2s; border: 2px solid transparent; min-width: 90px; }
+  .page-node:hover { transform: translateY(-2px); }
+  :global(.page-node.highlighted) { border-color: #fbbf24 !important; box-shadow: 0 0 15px rgba(251,191,36,0.3); }
+  .root-page { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); }
+  .root-page:hover { border-color: rgba(239,68,68,0.6); }
+  .internal-page { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); }
+  .internal-page:hover { border-color: rgba(59,130,246,0.6); }
+  .leaf-page { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); }
+  .leaf-page:hover { border-color: rgba(34,197,94,0.6); }
+  .page-type { font-size: 0.7rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+  .page-size { font-size: 0.65rem; color: #666; }
+  .page-keys, .page-docs { font-size: 0.75rem; color: #ddd; margin-top: 4px; font-family: 'Monaco','Menlo',monospace; }
+
+  .page-inspector { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .inspector-title { font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .inspector-hint { color: #666; font-size: 0.9rem; }
+  :global(.inspector-field) { margin-bottom: 8px; }
+  :global(.inspector-field-label) { font-size: 0.75rem; color: #888; display: block; }
+  :global(.inspector-field-value) { font-size: 0.9rem; color: #fff; font-family: 'Monaco','Menlo',monospace; }
+
+  /* MVCC */
+  .mvcc-container { display: grid; grid-template-columns: 1fr 280px; gap: 20px; margin-bottom: 20px; }
+  .mvcc-doc { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; }
+  .mvcc-doc-header { font-weight: 700; color: #fff; margin-bottom: 14px; font-family: 'Monaco','Menlo',monospace; }
+  .mvcc-versions { display: flex; flex-direction: column; gap: 8px; }
+  :global(.mvcc-version) { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; animation: eventAppear 0.3s ease-out; }
+  :global(.current-version) { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.08); }
+  :global(.old-version) { opacity: 0.6; }
+  :global(.version-ts) { color: #f59e0b; font-weight: 600; min-width: 50px; }
+  :global(.version-data) { color: #ccc; flex: 1; }
+  :global(.version-badge) { font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; background: rgba(34,197,94,0.2); color: #4ade80; }
+  .mvcc-snapshots { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .snapshot-header { font-weight: 700; color: #fff; margin-bottom: 12px; }
+  :global(.snapshot-item) { padding: 10px; border-radius: 8px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); margin-bottom: 8px; font-size: 0.8rem; animation: eventAppear 0.3s ease-out; }
+  :global(.snapshot-item .snap-ts) { color: #60a5fa; font-weight: 600; }
+  :global(.snapshot-item .snap-sees) { color: #aaa; font-size: 0.75rem; margin-top: 4px; }
+  .snapshot-empty { color: #666; font-size: 0.85rem; }
+
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Checkpoint */
+  .checkpoint-controls { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .checkpoint-viz { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 10px; align-items: start; margin-bottom: 20px; }
+  .cp-section-col { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; }
+  .cp-label { font-weight: 600; color: #aaa; font-size: 0.85rem; margin-bottom: 12px; text-align: center; }
+  .cp-arrow { display: flex; align-items: center; justify-content: center; font-size: 1.5rem; padding-top: 40px; }
+  .cp-pages { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  :global(.cp-page) { padding: 10px; border-radius: 8px; font-size: 0.8rem; text-align: center; transition: all 0.3s; }
+  :global(.cp-page.clean) { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #86efac; }
+  :global(.cp-page.dirty) { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
+  :global(.cp-status) { font-size: 0.65rem; display: block; margin-top: 2px; opacity: 0.7; }
+  .cp-disk { display: flex; flex-direction: column; gap: 6px; }
+  :global(.cp-disk-item) { padding: 8px 12px; border-radius: 6px; font-size: 0.75rem; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); color: #93c5fd; animation: eventAppear 0.3s ease-out; }
+  .cp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+
+  /* Cache & Eviction */
+  .cache-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .cache-meter-container { margin-bottom: 16px; }
+  .cache-meter-label { font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .cache-meter { height: 28px; background: rgba(255,255,255,0.05); border-radius: 14px; overflow: hidden; position: relative; }
+  .cache-meter-fill { height: 100%; border-radius: 14px; transition: width 0.5s, background 0.3s; background: linear-gradient(90deg, #22c55e, #4ade80); }
+  :global(.cache-meter-fill.warning) { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  :global(.cache-meter-fill.critical) { background: linear-gradient(90deg, #ef4444, #f87171); }
+  .cache-meter-target { position: absolute; top: 0; bottom: 0; left: 80%; width: 2px; background: rgba(255,255,255,0.4); }
+  .cache-meter-info { font-size: 0.85rem; color: #888; margin-top: 6px; display: flex; gap: 8px; align-items: center; }
+  .cache-pct { font-weight: 700; color: #fff; }
+  .cache-slots { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 12px; }
+  :global(.cache-slot) { height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; transition: all 0.3s; }
+  :global(.cache-slot.empty) { background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.1); color: #555; }
+  :global(.cache-slot.clean) { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #86efac; }
+  :global(.cache-slot.dirty) { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
+  :global(.cache-slot.evicting) { animation: evictFlash 0.5s ease-out; }
+  @keyframes evictFlash { 0% { background: rgba(239,68,68,0.3); } 100% { background: rgba(255,255,255,0.03); } }
+  .cache-legend { display: flex; gap: 20px; justify-content: center; }
+  .legend-item { font-size: 0.8rem; color: #888; display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 4px; }
+  .clean-dot { background: rgba(34,197,94,0.4); }
+  .dirty-dot { background: rgba(245,158,11,0.4); }
+  .empty-dot { background: rgba(255,255,255,0.1); border: 1px dashed rgba(255,255,255,0.2); }
+
+  /* Compression */
+  .compression-demo { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+  .comp-input { margin-bottom: 20px; }
+  .comp-label { font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .comp-bar { height: 28px; background: rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; }
+  .comp-fill { height: 100%; border-radius: 8px; display: flex; align-items: center; padding: 0 10px; font-size: 0.75rem; color: white; font-weight: 600; transition: width 0.5s; }
+  .original-bar .comp-fill { background: linear-gradient(90deg, #6b7280, #9ca3af); }
+  .comp-none { background: linear-gradient(90deg, #6b7280, #9ca3af); }
+  .comp-snappy { background: linear-gradient(90deg, #22c55e, #4ade80); }
+  .comp-zlib { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .comp-zstd { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+  .comp-results { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .comp-row { display: grid; grid-template-columns: 160px 1fr 140px; gap: 12px; align-items: center; }
+  .comp-algo { }
+  .comp-name { display: block; font-size: 0.9rem; color: #fff; font-weight: 600; }
+  .active-algo { color: #4ade80; }
+  .comp-desc { font-size: 0.75rem; color: #666; }
+  .comp-bar-wrap { }
+  .comp-metrics { text-align: right; }
+  .comp-ratio { display: block; font-size: 1rem; font-weight: 700; color: #fff; }
+  .comp-cpu { font-size: 0.75rem; color: #888; }
+
+  .comp-toggle-area { margin-bottom: 20px; }
+  .comp-toggle-area label { display: block; color: #aaa; margin-bottom: 8px; font-size: 0.9rem; }
+  .key-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  .key-btn { padding: 10px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .key-btn:hover { border-color: rgba(34,197,94,0.5); }
+  .key-btn.active { border-color: #22c55e; background: rgba(34,197,94,0.15); color: #4ade80; }
+
+  .comp-prefix { padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .comp-prefix h4 { color: #fff; font-size: 0.95rem; margin-bottom: 12px; }
+  .prefix-demo { display: grid; grid-template-columns: 1fr 40px 1fr; gap: 10px; align-items: center; }
+  .prefix-label { font-size: 0.75rem; color: #888; margin-bottom: 6px; }
+  .prefix-demo code { display: block; font-size: 0.8rem; color: #4ade80; margin-bottom: 2px; }
+  .prefix-size { font-size: 0.75rem; color: #f59e0b; font-weight: 600; margin-top: 4px; display: block; }
+  .prefix-arrow { text-align: center; font-size: 1.5rem; color: #555; }
+
+  /* Journal (WAL) */
+  .wal-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+  .wal-flow { display: flex; align-items: flex-start; gap: 8px; overflow-x: auto; }
+  .wal-stage { flex: 1; min-width: 120px; }
+  .wal-stage-label { font-size: 0.75rem; color: #888; text-align: center; margin-bottom: 8px; }
+  .wal-stage-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; padding: 14px; min-height: 80px; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s; }
+  :global(.wal-stage-box.flash) { border-color: rgba(34,197,94,0.6); background: rgba(34,197,94,0.08); }
+  .synced-box { border-color: rgba(59,130,246,0.3); }
+  .checkpoint-box { border-color: rgba(139,92,246,0.3); }
+  .wal-arrow { color: #555; font-size: 1.2rem; padding-top: 40px; }
+  .wal-pending { font-size: 0.85rem; color: #aaa; }
+  .wal-buffer-entries { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  :global(.wal-entry) { width: 8px; height: 8px; border-radius: 2px; background: #f59e0b; animation: eventAppear 0.2s ease-out; }
+  :global(.wal-entry.synced) { background: #3b82f6; }
+
+  /* Ops */
+  .ops-section { margin-bottom: 50px; }
+  .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .ops-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ops-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 10px; }
+  .ops-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.7rem; color: #4ade80; margin-bottom: 10px; overflow-x: auto; word-break: break-all; }
+  .ops-card p { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #4ade80; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .tree-compare { grid-template-columns: 1fr; }
+    .page-tree-container { grid-template-columns: 1fr; }
+    .mvcc-container { grid-template-columns: 1fr; }
+    .checkpoint-viz { grid-template-columns: 1fr; }
+    .cp-arrow { transform: rotate(90deg); padding: 10px 0; }
+    .comp-row { grid-template-columns: 1fr; gap: 6px; }
+    .prefix-demo { grid-template-columns: 1fr; }
+    .prefix-arrow { transform: rotate(90deg); }
+    .wal-flow { flex-direction: column; }
+    .wal-arrow { transform: rotate(90deg); padding: 0; text-align: center; }
+    .cache-slots { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
+
+<script is:inline>
+  // === Utility ===
+  function addLog(logId, msg, cls) {
+    var el = document.getElementById(logId);
+    if (!el) return;
+    var entry = document.createElement('div');
+    entry.className = 'log-entry ' + (cls || '');
+    entry.textContent = msg;
+    el.insertBefore(entry, el.firstChild);
+    if (el.children.length > 30 && el.lastChild) el.removeChild(el.lastChild);
+  }
+
+  // === B-Tree vs LSM-Tree ===
+  (function() {
+    var btreeData = [];
+    var lsmMemtable = [];
+    var lsmLevels = [[], []];
+    var btreeWrites = 0;
+    var btreeReads = 0;
+    var lsmWrites = 0;
+    var lsmReads = 0;
+    var nextKey = 1;
+
+    function renderBTree() {
+      var canvas = document.getElementById('btreeCanvas');
+      if (!canvas) return;
+      if (btreeData.length === 0) {
+        canvas.innerHTML = '<div style="color:#555;text-align:center;padding:20px;">Empty B-Tree. Insert keys to build.</div>';
+        return;
+      }
+      var sorted = btreeData.slice().sort(function(a, b) { return a - b; });
+      var pageSize = 4;
+      var leaves = [];
+      for (var i = 0; i < sorted.length; i += pageSize) {
+        leaves.push(sorted.slice(i, i + pageSize));
+      }
+      var html = '<div style="text-align:center;margin-bottom:8px;color:#ef4444;font-weight:600;">Root: [';
+      var rootKeys = [];
+      for (var j = 1; j < leaves.length; j++) {
+        rootKeys.push(leaves[j][0]);
+      }
+      html += rootKeys.join(', ') + ']</div>';
+      html += '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">';
+      for (var k = 0; k < leaves.length; k++) {
+        html += '<div style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);border-radius:6px;padding:6px 8px;font-size:0.7rem;">';
+        html += '🍃 [' + leaves[k].join(', ') + ']</div>';
+      }
+      html += '</div>';
+      canvas.innerHTML = html;
+    }
+
+    function renderLSM() {
+      var canvas = document.getElementById('lsmCanvas');
+      if (!canvas) return;
+      var html = '';
+      html += '<div style="margin-bottom:6px;"><span style="color:#a78bfa;font-weight:600;">Memtable: </span>';
+      if (lsmMemtable.length === 0) {
+        html += '<span style="color:#555;">empty</span>';
+      } else {
+        html += '[' + lsmMemtable.join(', ') + ']';
+      }
+      html += '</div>';
+      for (var i = 0; i < lsmLevels.length; i++) {
+        html += '<div style="margin-bottom:4px;"><span style="color:#60a5fa;">L' + i + ': </span>';
+        if (lsmLevels[i].length === 0) {
+          html += '<span style="color:#555;">empty</span>';
+        } else {
+          html += '[' + lsmLevels[i].join(', ') + ']';
+        }
+        html += '</div>';
+      }
+      canvas.innerHTML = html;
+    }
+
+    function updateTreeStats() {
+      var el;
+      el = document.getElementById('btreeWrites'); if (el) el.textContent = btreeWrites;
+      el = document.getElementById('btreeReads'); if (el) el.textContent = btreeReads;
+      el = document.getElementById('lsmWrites'); if (el) el.textContent = lsmWrites;
+      el = document.getElementById('lsmReads'); if (el) el.textContent = lsmReads;
+    }
+
+    function treeWrite() {
+      var key = nextKey++;
+      // B-Tree: in-place insert
+      btreeData.push(key);
+      btreeWrites++;
+      // LSM: append to memtable, flush when full
+      lsmMemtable.push(key);
+      lsmWrites++;
+      if (lsmMemtable.length >= 5) {
+        var flushed = lsmMemtable.slice().sort(function(a, b) { return a - b; });
+        lsmLevels[0] = lsmLevels[0].concat(flushed).sort(function(a, b) { return a - b; });
+        lsmMemtable = [];
+        addLog('treeLog', 'LSM: Memtable full → flushed to L0', 'warn');
+        if (lsmLevels[0].length >= 15) {
+          lsmLevels[1] = lsmLevels[1].concat(lsmLevels[0]).sort(function(a, b) { return a - b; });
+          lsmLevels[0] = [];
+          addLog('treeLog', 'LSM: L0 compaction → merged into L1', 'warn');
+        }
+      }
+      addLog('treeLog', 'Wrote key ' + key + ' — B-Tree: in-place insert, LSM: append to memtable', 'good');
+      renderBTree();
+      renderLSM();
+      updateTreeStats();
+    }
+
+    function treeRead() {
+      if (btreeData.length === 0) {
+        addLog('treeLog', 'No data to read. Write some keys first.', 'bad');
+        return;
+      }
+      var key = btreeData[Math.floor(Math.random() * btreeData.length)];
+      btreeReads++;
+      lsmReads++;
+      var lsmChecked = 0;
+      if (lsmMemtable.indexOf(key) >= 0) lsmChecked = 1;
+      else {
+        lsmChecked = 1;
+        for (var i = 0; i < lsmLevels.length; i++) {
+          lsmChecked++;
+          if (lsmLevels[i].indexOf(key) >= 0) break;
+        }
+      }
+      addLog('treeLog', 'Read key ' + key + ' — B-Tree: 1 lookup (O(log n)), LSM: checked ' + lsmChecked + ' level(s)', 'good');
+      updateTreeStats();
+    }
+
+    document.getElementById('treeWriteBtn').addEventListener('click', treeWrite);
+    document.getElementById('treeReadBtn').addEventListener('click', treeRead);
+    document.getElementById('treeBurstBtn').addEventListener('click', function() {
+      for (var i = 0; i < 10; i++) treeWrite();
+    });
+    document.getElementById('treeResetBtn').addEventListener('click', function() {
+      btreeData = []; lsmMemtable = []; lsmLevels = [[], []];
+      btreeWrites = 0; btreeReads = 0; lsmWrites = 0; lsmReads = 0; nextKey = 1;
+      renderBTree(); renderLSM(); updateTreeStats();
+      document.getElementById('treeLog').innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+    });
+
+    renderBTree();
+    renderLSM();
+  })();
+
+  // === Page Structure Inspector ===
+  (function() {
+    var pageData = {
+      root: { type: 'Internal (Root)', size: '4KB', keys: ['F', 'N'], children: 3, depth: 0, desc: 'Routes queries to child internal pages based on key ranges.' },
+      'int-left': { type: 'Internal', size: '4KB', keys: ['C'], children: 2, depth: 1, desc: 'Routes to leaf pages for keys < F.' },
+      'int-mid': { type: 'Internal', size: '4KB', keys: ['J'], children: 2, depth: 1, desc: 'Routes to leaf pages for keys [F, N).' },
+      'int-right': { type: 'Internal', size: '4KB', keys: ['R'], children: 2, depth: 1, desc: 'Routes to leaf pages for keys >= N.' },
+      'leaf-0': { type: 'Leaf', size: '32KB', docs: ['A', 'B'], depth: 2, desc: 'Stores documents with keys < C. Each doc is a BSON blob with MVCC versions.' },
+      'leaf-1': { type: 'Leaf', size: '32KB', docs: ['C', 'D', 'E'], depth: 2, desc: 'Stores documents with keys [C, F). Modified pages are marked dirty.' },
+      'leaf-2': { type: 'Leaf', size: '32KB', docs: ['F', 'G', 'H'], depth: 2, desc: 'Stores documents with keys [F, J). In WiredTiger cache when accessed.' },
+      'leaf-3': { type: 'Leaf', size: '32KB', docs: ['J', 'K', 'L', 'M'], depth: 2, desc: 'Stores documents with keys [J, N). May have overflow pages for large docs.' },
+      'leaf-4': { type: 'Leaf', size: '32KB', docs: ['N', 'O', 'P', 'Q'], depth: 2, desc: 'Stores documents with keys [N, R). Block-compressed on disk.' },
+      'leaf-5': { type: 'Leaf', size: '32KB', docs: ['R', 'S', 'T', 'U'], depth: 2, desc: 'Stores documents with keys >= R. Last leaf in this B-Tree.' }
+    };
+
+    document.querySelectorAll('.page-node').forEach(function(node) {
+      node.addEventListener('click', function() {
+        document.querySelectorAll('.page-node').forEach(function(n) { n.classList.remove('highlighted'); });
+        node.classList.add('highlighted');
+        var id = node.getAttribute('data-page');
+        var data = pageData[id];
+        if (!data) return;
+        var body = document.getElementById('inspectorBody');
+        var html = '';
+        html += '<div class="inspector-field"><span class="inspector-field-label">Type</span><span class="inspector-field-value">' + data.type + '</span></div>';
+        html += '<div class="inspector-field"><span class="inspector-field-label">Page Size</span><span class="inspector-field-value">' + data.size + '</span></div>';
+        html += '<div class="inspector-field"><span class="inspector-field-label">Depth</span><span class="inspector-field-value">' + data.depth + '</span></div>';
+        if (data.keys) {
+          html += '<div class="inspector-field"><span class="inspector-field-label">Separator Keys</span><span class="inspector-field-value">[' + data.keys.join(', ') + ']</span></div>';
+          html += '<div class="inspector-field"><span class="inspector-field-label">Children</span><span class="inspector-field-value">' + data.children + ' pages</span></div>';
+        }
+        if (data.docs) {
+          html += '<div class="inspector-field"><span class="inspector-field-label">Documents</span><span class="inspector-field-value">[' + data.docs.join(', ') + ']</span></div>';
+          html += '<div class="inspector-field"><span class="inspector-field-label">Doc Count</span><span class="inspector-field-value">' + data.docs.length + '</span></div>';
+        }
+        html += '<div class="inspector-field" style="margin-top:10px;"><span class="inspector-field-label">Description</span><span class="inspector-field-value" style="font-family:inherit;color:#aaa;font-size:0.8rem;">' + data.desc + '</span></div>';
+        body.innerHTML = html;
+      });
+    });
+  })();
+
+  // === MVCC & Snapshots ===
+  (function() {
+    var currentTs = 1;
+    var versions = [{ ts: 1, data: '{ name: "Alice", age: 30 }' }];
+    var snapshots = [];
+    var fields = [
+      ['name: "Alice"', 'name: "Bob"', 'name: "Charlie"', 'name: "Diana"'],
+      ['age: 30', 'age: 25', 'age: 35', 'age: 42'],
+      ['city: "NYC"', 'city: "SF"', 'city: "London"', 'city: "Tokyo"']
+    ];
+
+    function renderMVCC() {
+      var container = document.getElementById('mvccVersions');
+      var html = '';
+      for (var i = versions.length - 1; i >= 0; i--) {
+        var v = versions[i];
+        var isCurrent = (i === versions.length - 1);
+        html += '<div class="mvcc-version ' + (isCurrent ? 'current-version' : 'old-version') + '">';
+        html += '<div class="version-ts">ts: ' + v.ts + '</div>';
+        html += '<div class="version-data">' + v.data + '</div>';
+        if (isCurrent) html += '<div class="version-badge">current</div>';
+        html += '</div>';
+      }
+      container.innerHTML = html;
+    }
+
+    function renderSnapshots() {
+      var list = document.getElementById('snapshotList');
+      if (snapshots.length === 0) {
+        list.innerHTML = '<div class="snapshot-empty">No active snapshots.</div>';
+        return;
+      }
+      var html = '';
+      for (var i = snapshots.length - 1; i >= 0; i--) {
+        var s = snapshots[i];
+        html += '<div class="snapshot-item">';
+        html += '<div class="snap-ts">Snapshot @ ts ' + s.ts + '</div>';
+        html += '<div class="snap-sees">Sees: ' + s.sees + '</div>';
+        html += '</div>';
+      }
+      list.innerHTML = html;
+    }
+
+    document.getElementById('mvccWriteBtn').addEventListener('click', function() {
+      currentTs++;
+      var fIdx = Math.floor(Math.random() * fields.length);
+      var vIdx = Math.floor(Math.random() * fields[fIdx].length);
+      var newData = '{ ' + fields[fIdx][vIdx] + ' }';
+      versions.push({ ts: currentTs, data: newData });
+      if (versions.length > 6) versions.shift();
+      addLog('mvccLog', 'Txn ts:' + currentTs + ' wrote new version: ' + newData, 'good');
+      renderMVCC();
+    });
+
+    document.getElementById('mvccReadBtn').addEventListener('click', function() {
+      var snapTs = currentTs;
+      var visible = null;
+      for (var i = versions.length - 1; i >= 0; i--) {
+        if (versions[i].ts <= snapTs) { visible = versions[i]; break; }
+      }
+      if (visible) {
+        snapshots.push({ ts: snapTs, sees: visible.data });
+        if (snapshots.length > 5) snapshots.shift();
+        addLog('mvccLog', 'Snapshot read @ ts:' + snapTs + ' → sees version ts:' + visible.ts, 'good');
+      }
+      renderSnapshots();
+    });
+
+    document.getElementById('mvccConcurrentBtn').addEventListener('click', function() {
+      // Take snapshot first, then write — snapshot shouldn't see the new write
+      var snapTs = currentTs;
+      currentTs++;
+      var newData = '{ status: "updated-concurrent" }';
+      versions.push({ ts: currentTs, data: newData });
+      if (versions.length > 6) versions.shift();
+
+      var visible = null;
+      for (var i = versions.length - 1; i >= 0; i--) {
+        if (versions[i].ts <= snapTs) { visible = versions[i]; break; }
+      }
+      if (visible) {
+        snapshots.push({ ts: snapTs, sees: visible.data });
+        if (snapshots.length > 5) snapshots.shift();
+      }
+      addLog('mvccLog', 'Concurrent: write ts:' + currentTs + ' + snapshot @ ts:' + snapTs + ' (does NOT see the new write!)', 'warn');
+      renderMVCC();
+      renderSnapshots();
+    });
+
+    document.getElementById('mvccResetBtn').addEventListener('click', function() {
+      currentTs = 1;
+      versions = [{ ts: 1, data: '{ name: "Alice", age: 30 }' }];
+      snapshots = [];
+      renderMVCC(); renderSnapshots();
+      document.getElementById('mvccLog').innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+    });
+  })();
+
+  // === Checkpointing ===
+  (function() {
+    var pages = ['A', 'B', 'C', 'D'];
+    var dirty = [false, false, false, false];
+    var checkpoints = 0;
+    var journalEntries = 0;
+
+    function renderCP() {
+      var container = document.getElementById('cpPages');
+      var html = '';
+      for (var i = 0; i < pages.length; i++) {
+        var cls = dirty[i] ? 'dirty' : 'clean';
+        var status = dirty[i] ? 'dirty' : 'clean';
+        html += '<div class="cp-page ' + cls + '">Page ' + pages[i] + ' <span class="cp-status">' + status + '</span></div>';
+      }
+      container.innerHTML = html;
+      var dirtyCount = dirty.filter(function(d) { return d; }).length;
+      var el;
+      el = document.getElementById('cpDirtyCount'); if (el) el.textContent = dirtyCount;
+      el = document.getElementById('cpCount'); if (el) el.textContent = checkpoints;
+      el = document.getElementById('cpJournalCount'); if (el) el.textContent = journalEntries;
+    }
+
+    document.getElementById('cpWriteBtn').addEventListener('click', function() {
+      var idx = Math.floor(Math.random() * pages.length);
+      dirty[idx] = true;
+      journalEntries++;
+      addLog('cpLog', 'Write to Page ' + pages[idx] + ' → marked dirty, journal entry #' + journalEntries, 'warn');
+      renderCP();
+    });
+
+    document.getElementById('cpCheckpointBtn').addEventListener('click', function() {
+      var dirtyCount = dirty.filter(function(d) { return d; }).length;
+      if (dirtyCount === 0) {
+        addLog('cpLog', 'No dirty pages — checkpoint skipped.', 'warn');
+        return;
+      }
+      checkpoints++;
+      var dirtyPages = [];
+      for (var i = 0; i < pages.length; i++) {
+        if (dirty[i]) dirtyPages.push(pages[i]);
+        dirty[i] = false;
+      }
+      var disk = document.getElementById('cpDisk');
+      var item = document.createElement('div');
+      item.className = 'cp-disk-item';
+      item.textContent = 'Checkpoint #' + checkpoints + ' — flushed pages: ' + dirtyPages.join(', ');
+      disk.appendChild(item);
+      addLog('cpLog', 'Checkpoint #' + checkpoints + ': flushed ' + dirtyCount + ' dirty page(s) to disk, new root created.', 'good');
+      renderCP();
+    });
+
+    document.getElementById('cpCrashBtn').addEventListener('click', function() {
+      var dirtyCount = dirty.filter(function(d) { return d; }).length;
+      if (dirtyCount > 0) {
+        addLog('cpLog', '💥 CRASH! ' + dirtyCount + ' dirty page(s) lost from cache. Replaying ' + journalEntries + ' journal entries from checkpoint #' + checkpoints + '...', 'bad');
+        // Simulate recovery
+        for (var i = 0; i < pages.length; i++) dirty[i] = false;
+        setTimeout(function() {
+          addLog('cpLog', '✅ Recovery complete. All data restored from journal replay.', 'good');
+        }, 500);
+      } else {
+        addLog('cpLog', '💥 CRASH! No dirty pages — no data loss. Clean restart from checkpoint #' + checkpoints + '.', 'warn');
+      }
+      renderCP();
+    });
+
+    document.getElementById('cpResetBtn').addEventListener('click', function() {
+      dirty = [false, false, false, false];
+      checkpoints = 0; journalEntries = 0;
+      document.getElementById('cpDisk').innerHTML = '<div class="cp-disk-item">Checkpoint #0 (initial) — all clean</div>';
+      document.getElementById('cpLog').innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+      renderCP();
+    });
+
+    renderCP();
+  })();
+
+  // === Cache & Eviction ===
+  (function() {
+    var maxSlots = 16;
+    var evictionTarget = 0.8;
+    var cache = []; // array of { id, dirty }
+    var nextPageId = 1;
+    var evictionCount = 0;
+
+    function renderCache() {
+      var slotsEl = document.getElementById('cacheSlots');
+      var html = '';
+      for (var i = 0; i < maxSlots; i++) {
+        if (i < cache.length) {
+          var item = cache[i];
+          var cls = item.dirty ? 'dirty' : 'clean';
+          html += '<div class="cache-slot ' + cls + '">P' + item.id + '</div>';
+        } else {
+          html += '<div class="cache-slot empty">—</div>';
+        }
+      }
+      slotsEl.innerHTML = html;
+
+      var pct = Math.round((cache.length / maxSlots) * 100);
+      var fillEl = document.getElementById('cacheFill');
+      fillEl.style.width = pct + '%';
+      fillEl.classList.remove('warning', 'critical');
+      if (pct >= 90) fillEl.classList.add('critical');
+      else if (pct >= 70) fillEl.classList.add('warning');
+
+      document.getElementById('cacheUsed').textContent = cache.length;
+      document.getElementById('cachePct').textContent = pct + '%';
+    }
+
+    function evictIfNeeded() {
+      var threshold = Math.floor(maxSlots * evictionTarget);
+      if (cache.length <= threshold) return;
+
+      // Evict clean pages first
+      var evicted = false;
+      for (var i = 0; i < cache.length; i++) {
+        if (!cache[i].dirty) {
+          var removed = cache.splice(i, 1)[0];
+          evictionCount++;
+          addLog('cacheLog', 'Evicted clean page P' + removed.id + ' (eviction #' + evictionCount + ')', 'warn');
+          evicted = true;
+          break;
+        }
+      }
+      if (!evicted && cache.length > threshold) {
+        // Evict dirty page (must flush first)
+        var removed = cache.shift();
+        evictionCount++;
+        addLog('cacheLog', 'Evicted DIRTY page P' + removed.id + ' (flushed to disk first, eviction #' + evictionCount + ')', 'bad');
+      }
+    }
+
+    document.getElementById('cacheLoadBtn').addEventListener('click', function() {
+      if (cache.length >= maxSlots) {
+        evictIfNeeded();
+      }
+      var id = nextPageId++;
+      cache.push({ id: id, dirty: false });
+      addLog('cacheLog', 'Loaded clean page P' + id + ' into cache', 'good');
+      evictIfNeeded();
+      renderCache();
+    });
+
+    document.getElementById('cacheBurstBtn').addEventListener('click', function() {
+      for (var b = 0; b < 5; b++) {
+        if (cache.length >= maxSlots) evictIfNeeded();
+        var id = nextPageId++;
+        cache.push({ id: id, dirty: false });
+      }
+      addLog('cacheLog', 'Burst loaded 5 pages into cache', 'good');
+      evictIfNeeded();
+      renderCache();
+    });
+
+    document.getElementById('cacheDirtyBtn').addEventListener('click', function() {
+      if (cache.length === 0) {
+        addLog('cacheLog', 'No pages in cache to dirty. Load some first.', 'bad');
+        return;
+      }
+      var idx = Math.floor(Math.random() * cache.length);
+      cache[idx].dirty = true;
+      addLog('cacheLog', 'Dirtied page P' + cache[idx].id + ' (modified in cache)', 'warn');
+      renderCache();
+    });
+
+    document.getElementById('cacheResetBtn').addEventListener('click', function() {
+      cache = []; nextPageId = 1; evictionCount = 0;
+      document.getElementById('cacheLog').innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+      renderCache();
+    });
+
+    renderCache();
+  })();
+
+  // === Compression Toggle ===
+  (function() {
+    var profiles = {
+      json: { orig: 48, snappy: 28, zlib: 17, zstd: 14, snappyCpu: '0.3ms', zlibCpu: '2.1ms', zstdCpu: '0.5ms' },
+      binary: { orig: 48, snappy: 44, zlib: 42, zstd: 41, snappyCpu: '0.2ms', zlibCpu: '1.8ms', zstdCpu: '0.4ms' },
+      text: { orig: 48, snappy: 22, zlib: 11, zstd: 9, snappyCpu: '0.4ms', zlibCpu: '2.5ms', zstdCpu: '0.6ms' }
+    };
+
+    function updateComp(type) {
+      var p = profiles[type];
+      var rows = document.querySelectorAll('.comp-row');
+      var data = [
+        { size: p.orig, cpu: '0ms' },
+        { size: p.snappy, cpu: p.snappyCpu },
+        { size: p.zlib, cpu: p.zlibCpu },
+        { size: p.zstd, cpu: p.zstdCpu }
+      ];
+      for (var i = 0; i < rows.length; i++) {
+        var fill = rows[i].querySelector('.comp-fill');
+        var ratio = rows[i].querySelector('.comp-ratio');
+        var cpu = rows[i].querySelector('.comp-cpu');
+        var pct = (data[i].size / p.orig) * 100;
+        fill.style.width = pct + '%';
+        fill.textContent = data[i].size + ' KB';
+        ratio.textContent = (p.orig / data[i].size).toFixed(1) + 'x';
+        cpu.textContent = (data[i].cpu === '0ms' ? '⚡' : (parseFloat(data[i].cpu) > 1 ? '🐢' : '⚡')) + ' ' + data[i].cpu + ' CPU';
+      }
+    }
+
+    document.querySelectorAll('[data-comp]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('[data-comp]').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        updateComp(btn.getAttribute('data-comp'));
+      });
+    });
+  })();
+
+  // === Journal (WAL) ===
+  (function() {
+    var bufferCount = 0;
+    var syncedCount = 0;
+    var cpCount = 0;
+    var totalWrites = 0;
+
+    function renderWAL() {
+      document.getElementById('walPending').textContent = totalWrites + ' writes';
+      document.getElementById('walBufferCount').textContent = bufferCount + ' entries';
+      document.getElementById('walDiskCount').textContent = syncedCount + ' synced';
+      document.getElementById('walCpCount').textContent = cpCount + ' checkpoints';
+
+      var entries = document.getElementById('walBufferEntries');
+      var html = '';
+      for (var i = 0; i < Math.min(bufferCount, 20); i++) {
+        html += '<div class="wal-entry"></div>';
+      }
+      entries.innerHTML = html;
+    }
+
+    function flashStage(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('flash');
+      setTimeout(function() { el.classList.remove('flash'); }, 400);
+    }
+
+    document.getElementById('walWriteBtn').addEventListener('click', function() {
+      totalWrites++;
+      bufferCount++;
+      flashStage('walBuffer');
+      addLog('walLog', 'Write #' + totalWrites + ' → journal buffer (not yet synced, j:false)', 'warn');
+      renderWAL();
+    });
+
+    document.getElementById('walWriteSyncBtn').addEventListener('click', function() {
+      totalWrites++;
+      bufferCount++;
+      // Immediate sync
+      syncedCount += bufferCount;
+      bufferCount = 0;
+      flashStage('walBuffer');
+      setTimeout(function() { flashStage('walDisk'); }, 200);
+      addLog('walLog', 'Write #' + totalWrites + ' → journal buffer → immediately synced to disk (j:true)', 'good');
+      renderWAL();
+    });
+
+    document.getElementById('walSyncBtn').addEventListener('click', function() {
+      if (bufferCount === 0) {
+        addLog('walLog', 'Nothing in buffer to sync.', 'warn');
+        return;
+      }
+      var count = bufferCount;
+      syncedCount += bufferCount;
+      bufferCount = 0;
+      flashStage('walDisk');
+      addLog('walLog', '50ms sync: flushed ' + count + ' journal entries to disk', 'good');
+
+      // Auto checkpoint if enough synced
+      if (syncedCount >= 10 && (syncedCount - (syncedCount % 10)) > (cpCount * 10)) {
+        cpCount++;
+        flashStage('walCheckpoint');
+        addLog('walLog', 'Auto checkpoint #' + cpCount + ' triggered (journal threshold)', 'good');
+      }
+      renderWAL();
+    });
+
+    document.getElementById('walResetBtn').addEventListener('click', function() {
+      bufferCount = 0; syncedCount = 0; cpCount = 0; totalWrites = 0;
+      document.getElementById('walLog').innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+      renderWAL();
+    });
+
+    renderWAL();
+  })();
+</script>

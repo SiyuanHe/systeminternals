@@ -1,0 +1,1640 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Cassandra Compaction Strategies"
+  description="Interactive visualization of Cassandra's LSM-Tree compaction strategies: Size-Tiered (STCS), Leveled (LCS), and Time-Window (TWCS)"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Cassandra", href: "/cassandra/" },
+    { label: "Compaction Strategies", href: "/cassandra/compaction/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🗜️ Cassandra Compaction Strategies</h1>
+    <p class="subtitle">How Cassandra Merges SSTables to Keep Reads Fast</p>
+  </header>
+
+  <!-- Overview -->
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        Cassandra uses an <strong>LSM-Tree</strong> (Log-Structured Merge Tree) storage engine.
+        Writes go to an in-memory <em>MemTable</em>, which flushes to immutable on-disk <em>SSTables</em>.
+        Over time, SSTables accumulate — reads must check multiple files, increasing <strong>read amplification</strong>.
+        <strong>Compaction</strong> merges SSTables, removes tombstones, and consolidates data to keep reads efficient.
+        Cassandra offers three main strategies: <em>Size-Tiered (STCS)</em>, <em>Leveled (LCS)</em>, and <em>Time-Window (TWCS)</em>.
+      </p>
+    </div>
+  </section>
+
+  <!-- LSM-Tree Write Flow -->
+  <section class="flow-section">
+    <h2>📝 LSM-Tree Write Flow</h2>
+    <p class="section-desc">Watch writes flow through the LSM-Tree: MemTable fills up, flushes to disk as an immutable SSTable, and SSTables pile up over time.</p>
+
+    <div class="flow-controls">
+      <button id="writeBtn" class="action-btn primary-btn">✍ Write Data</button>
+      <button id="flushBtn" class="action-btn step-btn" disabled>💾 Flush to Disk</button>
+      <button id="autoWriteBtn" class="action-btn auto-btn">⚡ Auto-Play</button>
+      <button id="resetLsmBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="lsmStatus">
+      <span class="status-badge idle" id="lsmBadge">Ready</span>
+      <span class="status-text" id="lsmStatusText">Click "Write Data" to add entries to the MemTable</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="lsmCanvas" width="820" height="400"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="lsmTimeline"></div>
+  </section>
+
+  <!-- LSM-Tree Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📥 Write Path</h3>
+        <p>
+          Every write goes to the <strong>commit log</strong> (for durability) and then to the
+          <em>MemTable</em> (in-memory sorted structure). When the MemTable reaches its threshold,
+          it's flushed to disk as an <strong>immutable SSTable</strong>. Writes are always sequential
+          — no random I/O — making Cassandra extremely <em>write-optimized</em>.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📖 Read Path</h3>
+        <p>
+          Reads check the <strong>MemTable first</strong>, then SSTables from newest to oldest.
+          <em>Bloom filters</em> skip SSTables that definitely don't contain the key. Without compaction,
+          reads degrade as SSTables accumulate — this is <strong>read amplification</strong>.
+          Compaction reduces the number of SSTables a read must check.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Size-Tiered Compaction (STCS) -->
+  <section class="flow-section">
+    <h2>📦 Size-Tiered Compaction (STCS)</h2>
+    <p class="section-desc">The default strategy. SSTables of similar size are grouped and merged. Watch SSTables accumulate and trigger compaction when enough similar-sized tables exist.</p>
+
+    <div class="flow-controls">
+      <button id="stcsAddBtn" class="action-btn primary-btn">➕ Add SSTable</button>
+      <button id="stcsCompactBtn" class="action-btn step-btn" disabled>🗜️ Compact</button>
+      <button id="stcsAutoBtn" class="action-btn auto-btn">⚡ Auto-Play</button>
+      <button id="stcsResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="stcsStatus">
+      <span class="status-badge idle" id="stcsBadge">Ready</span>
+      <span class="status-text" id="stcsStatusText">Add SSTables to see size-tiered compaction in action</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="stcsCanvas" width="820" height="350"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="stcsTimeline"></div>
+  </section>
+
+  <!-- STCS Explainer -->
+  <section class="explain-section">
+    <div class="explain-card highlight-card">
+      <h3>💡 How STCS Works</h3>
+      <p>
+        SSTables are grouped into <strong>buckets by size</strong>. When a bucket has
+        <em>min_threshold</em> (default 4) SSTables of similar size, they're merged into
+        one larger SSTable. This new SSTable may then join a higher-size bucket.
+        <strong>Pros:</strong> excellent write throughput, simple logic.
+        <strong>Cons:</strong> temporary <em>2× space amplification</em> during compaction
+        (old + new SSTables coexist), and SSTables can grow very large.
+      </p>
+    </div>
+  </section>
+
+  <!-- Leveled Compaction (LCS) -->
+  <section class="flow-section">
+    <h2>📊 Leveled Compaction (LCS)</h2>
+    <p class="section-desc">SSTables are organized into levels. Each level is 10× bigger than the previous. No overlapping key ranges within a level (except L0). Watch data promote through levels.</p>
+
+    <div class="flow-controls">
+      <button id="lcsAddBtn" class="action-btn primary-btn">➕ Add to L0</button>
+      <button id="lcsCompactBtn" class="action-btn step-btn" disabled>⬆️ Promote</button>
+      <button id="lcsAutoBtn" class="action-btn auto-btn">⚡ Auto-Play</button>
+      <button id="lcsResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="lcsStatus">
+      <span class="status-badge idle" id="lcsBadge">Ready</span>
+      <span class="status-text" id="lcsStatusText">Add SSTables to L0 and watch them promote through levels</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="lcsCanvas" width="820" height="400"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="lcsTimeline"></div>
+  </section>
+
+  <!-- LCS Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>⬆️ Level Promotion</h3>
+        <p>
+          New SSTables land in <strong>L0</strong>. When L0 has enough SSTables, they're merged
+          with <em>overlapping SSTables in L1</em>. L1 can hold up to <strong>10 SSTables</strong>
+          (each ~160MB). L2 holds 100, L3 holds 1000, etc. Each level is <em>10× the previous</em>.
+          Within each level (except L0), <strong>key ranges never overlap</strong>.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📈 Trade-offs</h3>
+        <p>
+          <strong>Pros:</strong> Reads check at most <em>one SSTable per level</em> — bounded
+          read amplification. Predictable latency. Less space overhead (only ~10% temporary).
+          <strong>Cons:</strong> Higher <em>write amplification</em> — each piece of data may be
+          rewritten ~10× as it promotes through levels. Not ideal for write-heavy workloads.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Time-Window Compaction (TWCS) -->
+  <section class="flow-section">
+    <h2>⏰ Time-Window Compaction (TWCS)</h2>
+    <p class="section-desc">Designed for time-series data. SSTables are grouped by time window. Within each window, STCS is used. Once a window closes, its SSTables are frozen.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Speed: <strong id="twcsSpeedLabel">1×</strong></label>
+        <input type="range" id="twcsSpeedSlider" min="1" max="5" value="1" class="slot-slider">
+      </div>
+      <button id="twcsStartBtn" class="action-btn primary-btn">▶ Start</button>
+      <button id="twcsResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="twcsStatus">
+      <span class="status-badge idle" id="twcsBadge">Ready</span>
+      <span class="status-text" id="twcsStatusText">Start the simulation to see time-window compaction</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="twcsCanvas" width="820" height="380"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="twcsTimeline"></div>
+  </section>
+
+  <!-- TWCS Explainer -->
+  <section class="explain-section">
+    <div class="explain-card highlight-card">
+      <h3>💡 Why Time-Window?</h3>
+      <p>
+        Time-series data has a natural ordering by time. TWCS groups SSTables into
+        <strong>time windows</strong> (e.g., 1 hour). Within the active window, <em>STCS</em>
+        is used for compaction. Once a window closes (no more writes expected), SSTables are
+        <strong>frozen</strong> — never compacted again. This avoids wasting I/O on old, static data.
+        <em>TTL-expired data</em> is efficiently dropped when entire windows expire.
+        <strong>Caveat:</strong> works best with <em>time-ordered writes</em> — out-of-order writes
+        can land in wrong windows and prevent efficient cleanup.
+      </p>
+    </div>
+  </section>
+
+  <!-- Comparison & Selection -->
+  <section class="flow-section">
+    <h2>⚖️ Strategy Comparison</h2>
+    <p class="section-desc">Select a workload type to see which compaction strategy is recommended, with metrics comparison.</p>
+
+    <div class="flow-controls">
+      <button id="wlWriteBtn" class="action-btn workload-btn" data-workload="write-heavy">📝 Write-Heavy</button>
+      <button id="wlReadBtn" class="action-btn workload-btn" data-workload="read-heavy">📖 Read-Heavy</button>
+      <button id="wlTimeBtn" class="action-btn workload-btn" data-workload="time-series">⏰ Time-Series</button>
+      <button id="wlMixedBtn" class="action-btn workload-btn" data-workload="mixed">🔀 Mixed</button>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="compareCanvas" width="820" height="420"></canvas>
+    </div>
+
+    <div class="recommendation-box" id="recommendationBox"></div>
+  </section>
+
+  <!-- Decision Tree -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>🌳 Decision Tree</h3>
+        <p>
+          <strong>Is your data time-series?</strong> → Use <em>TWCS</em>.<br>
+          <strong>Is your workload read-heavy?</strong> → Use <em>LCS</em>.<br>
+          <strong>Is your workload write-heavy?</strong> → Use <em>STCS</em>.<br>
+          <strong>Mixed workload?</strong> → Start with <em>STCS</em> (default), benchmark, then consider
+          <em>LCS</em> if read latency is a problem.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📊 Key Metrics</h3>
+        <p>
+          <strong>Write Amplification:</strong> How many times data is rewritten. STCS ≈ <em>2-4×</em>,
+          LCS ≈ <em>10-30×</em>, TWCS ≈ <em>2-4×</em>.<br>
+          <strong>Read Amplification:</strong> SSTables checked per read. STCS ≈ <em>many</em>,
+          LCS ≈ <em>1 per level</em>, TWCS ≈ <em>few per window</em>.<br>
+          <strong>Space Amplification:</strong> STCS ≈ <em>2×</em>, LCS ≈ <em>1.1×</em>, TWCS ≈ <em>1×</em>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://cassandra.apache.org/doc/latest/cassandra/operating/compaction/" target="_blank">Apache Cassandra Compaction Documentation</a> and <a href="https://www.datastax.com/blog/leveled-compaction-in-apache-cassandra" target="_blank">DataStax Compaction Guides</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Cassandra%20compaction%20strategies%20(STCS%2C%20LCS%2C%20TWCS)&url=https://systeminternals.dev/cassandra/compaction/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/cassandra/compaction/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/cassandra/compaction/&t=Interactive%20Cassandra%20Compaction%20Strategies%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f97316, #eab308, #22c55e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(234, 179, 8, 0.05));
+    border: 1px solid rgba(249, 115, 22, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(249, 115, 22, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .auto-btn {
+    background: linear-gradient(135deg, #eab308, #ca8a04);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  .workload-btn {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccc;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  .workload-btn:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+
+  .workload-btn.active {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+    border-color: transparent;
+  }
+
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.writing { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+  .status-badge.flushing { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.compacting { background: rgba(168, 85, 247, 0.2); color: #a855f7; }
+  .status-badge.done { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.active { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+  .status-badge.frozen { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-group label {
+    color: #ccc;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .slider-group strong {
+    color: #f97316;
+  }
+
+  .slot-slider {
+    width: 120px;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .slot-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #f97316;
+    cursor: pointer;
+  }
+
+  .topology-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  .failover-timeline {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+  }
+
+  :global(.failover-step) {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.failover-step.write-step) { background: rgba(249, 115, 22, 0.1); color: #fed7aa; border-left: 3px solid #f97316; }
+  :global(.failover-step.flush-step) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.failover-step.compact-step) { background: rgba(168, 85, 247, 0.1); color: #d8b4fe; border-left: 3px solid #a855f7; }
+  :global(.failover-step.info-step) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.failover-step.promote-step) { background: rgba(34, 197, 94, 0.15); color: #86efac; border-left: 3px solid #22c55e; }
+  :global(.failover-step.window-step) { background: rgba(234, 179, 8, 0.1); color: #fde68a; border-left: 3px solid #eab308; }
+  :global(.failover-step.freeze-step) { background: rgba(96, 165, 250, 0.15); color: #93c5fd; border-left: 3px solid #60a5fa; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #f97316; }
+  .explain-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.08), rgba(234, 179, 8, 0.08));
+    border-color: rgba(249, 115, 22, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .recommendation-box {
+    padding: 20px 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 60px;
+    font-size: 0.95rem;
+    color: #ccc;
+    line-height: 1.7;
+  }
+
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+// ========== HELPERS ==========
+function addEntry(timeline, text, cls) {
+  var el = document.createElement('div');
+  el.className = 'failover-step ' + cls;
+  el.textContent = text;
+  timeline.appendChild(el);
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
+function sleep(ms) {
+  return new Promise(function(r) { setTimeout(r, ms); });
+}
+
+// SSTable colors by size tier
+var TIER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316', '#ef4444', '#eab308'];
+
+// ========== LSM-TREE WRITE FLOW ==========
+var lsmCanvas = document.getElementById('lsmCanvas');
+var lsmCtx = lsmCanvas.getContext('2d');
+var lsmTimeline = document.getElementById('lsmTimeline');
+var lsmBadge = document.getElementById('lsmBadge');
+var lsmStatusText = document.getElementById('lsmStatusText');
+
+var memtableEntries = [];
+var sstables = [];
+var memtableMax = 6;
+var writeCounter = 0;
+var lsmAutoPlaying = false;
+
+function drawLsm() {
+  var ctx = lsmCtx;
+  var w = lsmCanvas.width;
+  var h = lsmCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // MemTable area
+  var mtX = 40;
+  var mtY = 30;
+  var mtW = 200;
+  var mtH = 320;
+
+  ctx.fillStyle = 'rgba(34, 197, 94, 0.08)';
+  ctx.strokeStyle = 'rgba(34, 197, 94, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(mtX, mtY, mtW, mtH, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#22c55e';
+  ctx.font = 'bold 13px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('MemTable (RAM)', mtX + mtW / 2, mtY - 8);
+
+  // Capacity bar
+  var fill = memtableEntries.length / memtableMax;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.beginPath();
+  ctx.roundRect(mtX + 10, mtY + mtH - 30, mtW - 20, 20, 6);
+  ctx.fill();
+
+  var barColor = fill > 0.8 ? '#ef4444' : fill > 0.5 ? '#eab308' : '#22c55e';
+  ctx.fillStyle = barColor + '60';
+  ctx.beginPath();
+  ctx.roundRect(mtX + 10, mtY + mtH - 30, (mtW - 20) * fill, 20, 6);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = '10px Monaco, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(memtableEntries.length + '/' + memtableMax, mtX + mtW / 2, mtY + mtH - 16);
+
+  // MemTable entries
+  for (var i = 0; i < memtableEntries.length; i++) {
+    var ey = mtY + 15 + i * 42;
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.15)';
+    ctx.beginPath();
+    ctx.roundRect(mtX + 15, ey, mtW - 30, 34, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(mtX + 15, ey, mtW - 30, 34, 8);
+    ctx.stroke();
+
+    ctx.fillStyle = '#22c55e';
+    ctx.font = '11px Monaco, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(memtableEntries[i], mtX + 25, ey + 21);
+  }
+
+  // Arrow from MemTable to SSTables
+  var arrowX = mtX + mtW + 20;
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.moveTo(arrowX, h / 2);
+  ctx.lineTo(arrowX + 60, h / 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Arrow head
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  ctx.moveTo(arrowX + 60, h / 2 - 6);
+  ctx.lineTo(arrowX + 72, h / 2);
+  ctx.lineTo(arrowX + 60, h / 2 + 6);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#888';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('flush', arrowX + 36, h / 2 - 10);
+
+  // SSTables area
+  var ssX = arrowX + 80;
+  var ssY = 30;
+  var ssW = w - ssX - 30;
+  var ssH = 320;
+
+  ctx.fillStyle = 'rgba(96, 165, 250, 0.05)';
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(ssX, ssY, ssW, ssH, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#60a5fa';
+  ctx.font = 'bold 13px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('SSTables (Disk)', ssX + ssW / 2, ssY - 8);
+
+  // Draw SSTables as blocks
+  var cols = 4;
+  var padding = 12;
+  var blockW = (ssW - padding * (cols + 1)) / cols;
+  var blockH = 55;
+
+  for (var j = 0; j < sstables.length; j++) {
+    var col = j % cols;
+    var row = Math.floor(j / cols);
+    var bx = ssX + padding + col * (blockW + padding);
+    var by = ssY + padding + row * (blockH + padding);
+
+    var tier = Math.min(Math.floor(sstables[j].size / 6), TIER_COLORS.length - 1);
+    var color = TIER_COLORS[tier];
+
+    ctx.fillStyle = color + '25';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, blockW, blockH, 8);
+    ctx.fill();
+    ctx.strokeStyle = color + '80';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, blockW, blockH, 8);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(sstables[j].name, bx + blockW / 2, by + 22);
+
+    ctx.fillStyle = color;
+    ctx.font = '10px Monaco, monospace';
+    ctx.fillText(sstables[j].size + ' rows', bx + blockW / 2, by + 40);
+  }
+
+  if (sstables.length === 0) {
+    ctx.fillStyle = '#555';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No SSTables yet', ssX + ssW / 2, ssY + ssH / 2);
+  }
+
+  // Read amplification warning
+  if (sstables.length > 3) {
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+    ctx.beginPath();
+    ctx.roundRect(ssX + 10, ssY + ssH - 35, ssW - 20, 25, 6);
+    ctx.fill();
+    ctx.fillStyle = '#ef4444';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠ Read amplification: must check ' + sstables.length + ' SSTables!', ssX + ssW / 2, ssY + ssH - 18);
+  }
+}
+
+function doWrite() {
+  if (memtableEntries.length >= memtableMax) {
+    lsmBadge.className = 'status-badge flushing';
+    lsmBadge.textContent = 'FULL';
+    lsmStatusText.textContent = 'MemTable is full! Click "Flush to Disk" to create an SSTable.';
+    document.getElementById('flushBtn').disabled = false;
+    document.getElementById('writeBtn').disabled = true;
+    return;
+  }
+  writeCounter++;
+  var key = 'user:' + (1000 + writeCounter);
+  memtableEntries.push(key + ' → data_' + writeCounter);
+
+  lsmBadge.className = 'status-badge writing';
+  lsmBadge.textContent = 'WRITING';
+  lsmStatusText.textContent = 'Wrote ' + key + ' to MemTable (' + memtableEntries.length + '/' + memtableMax + ')';
+  addEntry(lsmTimeline, '✍ Write: ' + key + ' → MemTable (' + memtableEntries.length + '/' + memtableMax + ')', 'write-step');
+
+  if (memtableEntries.length >= memtableMax) {
+    lsmBadge.className = 'status-badge flushing';
+    lsmBadge.textContent = 'FULL';
+    lsmStatusText.textContent = 'MemTable is full! Flush to create an SSTable.';
+    document.getElementById('flushBtn').disabled = false;
+    document.getElementById('writeBtn').disabled = true;
+  }
+  drawLsm();
+}
+
+function doFlush() {
+  if (memtableEntries.length === 0) return;
+  var ssName = 'SST-' + (sstables.length + 1);
+  sstables.push({ name: ssName, size: memtableEntries.length });
+  addEntry(lsmTimeline, '💾 Flush: MemTable → ' + ssName + ' (' + memtableEntries.length + ' rows written to disk)', 'flush-step');
+  memtableEntries = [];
+
+  lsmBadge.className = 'status-badge done';
+  lsmBadge.textContent = 'FLUSHED';
+  lsmStatusText.textContent = ssName + ' created. SSTables on disk: ' + sstables.length;
+  document.getElementById('flushBtn').disabled = true;
+  document.getElementById('writeBtn').disabled = false;
+  drawLsm();
+}
+
+document.getElementById('writeBtn').addEventListener('click', doWrite);
+document.getElementById('flushBtn').addEventListener('click', doFlush);
+
+document.getElementById('autoWriteBtn').addEventListener('click', async function() {
+  if (lsmAutoPlaying) return;
+  lsmAutoPlaying = true;
+  for (var cycle = 0; cycle < 3; cycle++) {
+    for (var i = 0; i < memtableMax; i++) {
+      if (!lsmAutoPlaying) return;
+      doWrite();
+      await sleep(300);
+    }
+    doFlush();
+    await sleep(500);
+  }
+  lsmAutoPlaying = false;
+});
+
+document.getElementById('resetLsmBtn').addEventListener('click', function() {
+  lsmAutoPlaying = false;
+  memtableEntries = [];
+  sstables = [];
+  writeCounter = 0;
+  lsmTimeline.innerHTML = '';
+  lsmBadge.className = 'status-badge idle';
+  lsmBadge.textContent = 'Ready';
+  lsmStatusText.textContent = 'Click "Write Data" to add entries to the MemTable';
+  document.getElementById('writeBtn').disabled = false;
+  document.getElementById('flushBtn').disabled = true;
+  drawLsm();
+});
+
+// ========== SIZE-TIERED COMPACTION (STCS) ==========
+var stcsCanvas = document.getElementById('stcsCanvas');
+var stcsCtx = stcsCanvas.getContext('2d');
+var stcsTimeline = document.getElementById('stcsTimeline');
+var stcsBadge = document.getElementById('stcsBadge');
+var stcsStatusText = document.getElementById('stcsStatusText');
+
+var stcsTables = [];
+var stcsCounter = 0;
+var stcsMinThreshold = 4;
+var stcsAutoPlaying = false;
+
+function drawStcs() {
+  var ctx = stcsCtx;
+  var w = stcsCanvas.width;
+  var h = stcsCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // Group by size tier
+  var tiers = {};
+  for (var i = 0; i < stcsTables.length; i++) {
+    var t = stcsTables[i];
+    var tier = t.tier || 0;
+    if (!tiers[tier]) tiers[tier] = [];
+    tiers[tier].push(t);
+  }
+
+  var tierKeys = Object.keys(tiers).sort(function(a, b) { return Number(a) - Number(b); });
+  var tierCount = tierKeys.length || 1;
+  var tierW = (w - 60) / Math.max(tierCount, 4);
+
+  for (var ti = 0; ti < tierKeys.length; ti++) {
+    var tk = tierKeys[ti];
+    var tierTables = tiers[tk];
+    var tx = 30 + ti * tierW;
+    var tierIdx = Number(tk);
+    var color = TIER_COLORS[Math.min(tierIdx, TIER_COLORS.length - 1)];
+
+    // Tier header
+    var sizeLabel = tierIdx === 0 ? '~6 rows' : tierIdx === 1 ? '~24 rows' : tierIdx === 2 ? '~96 rows' : '~' + (6 * Math.pow(4, tierIdx)) + ' rows';
+    ctx.fillStyle = color;
+    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Tier ' + tierIdx, tx + tierW / 2, 25);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px Monaco, monospace';
+    ctx.fillText(sizeLabel, tx + tierW / 2, 40);
+
+    // Tier background
+    ctx.fillStyle = color + '08';
+    ctx.strokeStyle = color + '30';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.roundRect(tx + 5, 50, tierW - 10, h - 80, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Threshold indicator
+    if (tierTables.length >= stcsMinThreshold) {
+      ctx.fillStyle = color + '30';
+      ctx.beginPath();
+      ctx.roundRect(tx + 5, 50, tierW - 10, h - 80, 10);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.font = 'bold 10px Inter, sans-serif';
+      ctx.fillText('⚡ READY TO COMPACT', tx + tierW / 2, h - 20);
+    } else {
+      ctx.fillStyle = '#555';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tierTables.length + '/' + stcsMinThreshold, tx + tierW / 2, h - 20);
+    }
+
+    // SSTable blocks
+    var blockW = tierW - 30;
+    var maxBlockH = 50;
+    for (var j = 0; j < tierTables.length; j++) {
+      var blockH = Math.min(maxBlockH, 30 + tierIdx * 5);
+      var bx = tx + 15;
+      var by = 60 + j * (blockH + 8);
+
+      ctx.fillStyle = color + '30';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 8);
+      ctx.fill();
+      ctx.strokeStyle = color + '80';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 8);
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tierTables[j].name, bx + blockW / 2, by + blockH / 2 - 5);
+      ctx.fillStyle = color;
+      ctx.font = '9px Monaco, monospace';
+      ctx.fillText(tierTables[j].size + ' rows', bx + blockW / 2, by + blockH / 2 + 9);
+    }
+  }
+
+  if (stcsTables.length === 0) {
+    ctx.fillStyle = '#555';
+    ctx.font = '14px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Add SSTables to visualize Size-Tiered Compaction', w / 2, h / 2);
+  }
+}
+
+function stcsAdd() {
+  stcsCounter++;
+  stcsTables.push({ name: 'SST-' + stcsCounter, size: 6, tier: 0 });
+
+  // Check if any tier has >= threshold
+  var canCompact = false;
+  var tiers = {};
+  for (var i = 0; i < stcsTables.length; i++) {
+    var tier = stcsTables[i].tier || 0;
+    if (!tiers[tier]) tiers[tier] = [];
+    tiers[tier].push(i);
+    if (tiers[tier].length >= stcsMinThreshold) canCompact = true;
+  }
+
+  document.getElementById('stcsCompactBtn').disabled = !canCompact;
+  stcsBadge.className = 'status-badge writing';
+  stcsBadge.textContent = 'ADDED';
+  stcsStatusText.textContent = 'SST-' + stcsCounter + ' added (tier 0). ' + stcsTables.length + ' total SSTables.';
+  addEntry(stcsTimeline, '➕ SST-' + stcsCounter + ' flushed to disk (6 rows, tier 0)', 'write-step');
+  drawStcs();
+}
+
+function stcsCompact() {
+  // Find first tier with >= threshold
+  var tiers = {};
+  for (var i = 0; i < stcsTables.length; i++) {
+    var tier = stcsTables[i].tier || 0;
+    if (!tiers[tier]) tiers[tier] = [];
+    tiers[tier].push(i);
+  }
+
+  var compactTier = -1;
+  var tierKeys = Object.keys(tiers);
+  for (var k = 0; k < tierKeys.length; k++) {
+    if (tiers[tierKeys[k]].length >= stcsMinThreshold) {
+      compactTier = Number(tierKeys[k]);
+      break;
+    }
+  }
+
+  if (compactTier < 0) return;
+
+  var indices = tiers[compactTier];
+  var names = [];
+  var totalSize = 0;
+  for (var j = 0; j < indices.length; j++) {
+    names.push(stcsTables[indices[j]].name);
+    totalSize += stcsTables[indices[j]].size;
+  }
+
+  // Remove old, add merged
+  var remaining = [];
+  for (var m = 0; m < stcsTables.length; m++) {
+    if (indices.indexOf(m) === -1) remaining.push(stcsTables[m]);
+  }
+  stcsCounter++;
+  remaining.push({ name: 'SST-' + stcsCounter, size: totalSize, tier: compactTier + 1 });
+  stcsTables = remaining;
+
+  addEntry(stcsTimeline, '🗜️ Compacted tier ' + compactTier + ': ' + names.join(' + ') + ' → SST-' + stcsCounter + ' (' + totalSize + ' rows, tier ' + (compactTier + 1) + ')', 'compact-step');
+
+  // Check again
+  var canCompact2 = false;
+  var tiers2 = {};
+  for (var n = 0; n < stcsTables.length; n++) {
+    var t2 = stcsTables[n].tier || 0;
+    if (!tiers2[t2]) tiers2[t2] = [];
+    tiers2[t2].push(n);
+    if (tiers2[t2].length >= stcsMinThreshold) canCompact2 = true;
+  }
+
+  document.getElementById('stcsCompactBtn').disabled = !canCompact2;
+  stcsBadge.className = 'status-badge compacting';
+  stcsBadge.textContent = 'COMPACTED';
+  stcsStatusText.textContent = 'Merged ' + names.length + ' SSTables from tier ' + compactTier + ' into tier ' + (compactTier + 1) + '. ' + stcsTables.length + ' total.';
+  drawStcs();
+}
+
+document.getElementById('stcsAddBtn').addEventListener('click', stcsAdd);
+document.getElementById('stcsCompactBtn').addEventListener('click', stcsCompact);
+
+document.getElementById('stcsAutoBtn').addEventListener('click', async function() {
+  if (stcsAutoPlaying) return;
+  stcsAutoPlaying = true;
+  for (var round = 0; round < 20 && stcsAutoPlaying; round++) {
+    stcsAdd();
+    await sleep(400);
+    // Auto-compact if possible
+    var tiers = {};
+    for (var i = 0; i < stcsTables.length; i++) {
+      var tier = stcsTables[i].tier || 0;
+      if (!tiers[tier]) tiers[tier] = [];
+      tiers[tier].push(i);
+    }
+    for (var tk in tiers) {
+      if (tiers[tk].length >= stcsMinThreshold) {
+        await sleep(600);
+        stcsCompact();
+        break;
+      }
+    }
+  }
+  stcsAutoPlaying = false;
+});
+
+document.getElementById('stcsResetBtn').addEventListener('click', function() {
+  stcsAutoPlaying = false;
+  stcsTables = [];
+  stcsCounter = 0;
+  stcsTimeline.innerHTML = '';
+  stcsBadge.className = 'status-badge idle';
+  stcsBadge.textContent = 'Ready';
+  stcsStatusText.textContent = 'Add SSTables to see size-tiered compaction in action';
+  document.getElementById('stcsCompactBtn').disabled = true;
+  drawStcs();
+});
+
+// ========== LEVELED COMPACTION (LCS) ==========
+var lcsCanvas = document.getElementById('lcsCanvas');
+var lcsCtx = lcsCanvas.getContext('2d');
+var lcsTimeline = document.getElementById('lcsTimeline');
+var lcsBadge = document.getElementById('lcsBadge');
+var lcsStatusText = document.getElementById('lcsStatusText');
+
+var lcsLevels = [[], [], [], []]; // L0, L1, L2, L3
+var lcsMaxPerLevel = [4, 10, 100, 1000];
+var lcsCounter = 0;
+var lcsAutoPlaying = false;
+
+function drawLcs() {
+  var ctx = lcsCtx;
+  var w = lcsCanvas.width;
+  var h = lcsCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  var levelColors = ['#ef4444', '#f97316', '#eab308', '#22c55e'];
+  var levelH = 80;
+  var startY = 20;
+
+  for (var lvl = 0; lvl < lcsLevels.length; lvl++) {
+    var ly = startY + lvl * (levelH + 12);
+    var color = levelColors[lvl];
+    var tables = lcsLevels[lvl];
+    var maxShow = lvl === 0 ? 4 : 10;
+    var sizeLabel = lvl === 0 ? 'Unflushed' : '10^' + lvl + ' capacity';
+
+    // Level background
+    ctx.fillStyle = color + '08';
+    ctx.strokeStyle = color + '30';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(20, ly, w - 40, levelH, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // Level label
+    ctx.fillStyle = color;
+    ctx.font = 'bold 13px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('L' + lvl, 30, ly + 20);
+
+    ctx.fillStyle = '#666';
+    ctx.font = '10px Monaco, monospace';
+    ctx.fillText(lvl === 0 ? 'overlapping OK' : 'no overlap within level', 30, ly + 35);
+
+    // Capacity
+    var capMax = lcsMaxPerLevel[lvl];
+    var capText = tables.length + '/' + (capMax > 99 ? capMax : capMax);
+    ctx.fillStyle = tables.length >= Math.min(capMax, maxShow) ? '#ef4444' : '#888';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(capText, w - 30, ly + 20);
+
+    if (tables.length >= Math.min(capMax, maxShow) && lvl < lcsLevels.length - 1) {
+      ctx.fillStyle = color;
+      ctx.font = 'bold 10px Inter, sans-serif';
+      ctx.fillText('⬆️ PROMOTE', w - 30, ly + 35);
+    }
+
+    // SSTable blocks
+    var blockW = Math.min(65, (w - 120) / Math.max(tables.length, 1));
+    var blockH = 30;
+    var startX = 80;
+
+    for (var j = 0; j < Math.min(tables.length, 10); j++) {
+      var bx = startX + j * (blockW + 6);
+      var by = ly + 42;
+
+      ctx.fillStyle = color + '30';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 6);
+      ctx.fill();
+      ctx.strokeStyle = color + '80';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 6);
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tables[j].name, bx + blockW / 2, by + 12);
+
+      ctx.fillStyle = color;
+      ctx.font = '8px Monaco, monospace';
+      ctx.fillText(tables[j].range, bx + blockW / 2, by + 24);
+    }
+
+    if (tables.length > 10) {
+      ctx.fillStyle = '#888';
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('... +' + (tables.length - 10) + ' more', startX + 10 * (blockW + 6) + 5, ly + 60);
+    }
+
+    // Arrow to next level
+    if (lvl < lcsLevels.length - 1) {
+      var arrowY = ly + levelH + 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(w / 2, arrowY);
+      ctx.lineTo(w / 2, arrowY + 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+}
+
+function lcsAdd() {
+  lcsCounter++;
+  var rangeStart = Math.floor(Math.random() * 900) + 100;
+  lcsLevels[0].push({
+    name: 'S' + lcsCounter,
+    range: rangeStart + '-' + (rangeStart + 99)
+  });
+
+  var canPromote = lcsLevels[0].length >= 4;
+  document.getElementById('lcsCompactBtn').disabled = !canPromote;
+
+  lcsBadge.className = 'status-badge writing';
+  lcsBadge.textContent = 'L0';
+  lcsStatusText.textContent = 'S' + lcsCounter + ' added to L0. ' + lcsLevels[0].length + '/4 before promotion.';
+  addEntry(lcsTimeline, '➕ S' + lcsCounter + ' flushed to L0 (' + lcsLevels[0].length + '/4)', 'write-step');
+
+  if (canPromote) {
+    addEntry(lcsTimeline, '⚡ L0 is full! Ready to promote to L1.', 'info-step');
+  }
+  drawLcs();
+}
+
+function lcsPromote() {
+  // Promote from lowest full level
+  for (var lvl = 0; lvl < lcsLevels.length - 1; lvl++) {
+    var threshold = lvl === 0 ? 4 : 10;
+    if (lcsLevels[lvl].length >= threshold) {
+      var promoted = lcsLevels[lvl].splice(0, threshold);
+      var names = promoted.map(function(t) { return t.name; });
+
+      // Merge into one entry in next level
+      lcsCounter++;
+      lcsLevels[lvl + 1].push({
+        name: 'S' + lcsCounter,
+        range: promoted[0].range.split('-')[0] + '-' + promoted[promoted.length - 1].range.split('-')[1]
+      });
+
+      addEntry(lcsTimeline, '⬆️ L' + lvl + ' → L' + (lvl + 1) + ': merged ' + names.join(', ') + ' → S' + lcsCounter, 'compact-step');
+
+      lcsBadge.className = 'status-badge compacting';
+      lcsBadge.textContent = 'PROMOTED';
+      lcsStatusText.textContent = 'Promoted ' + threshold + ' SSTables from L' + lvl + ' to L' + (lvl + 1);
+
+      // Check cascading promotion
+      if (lcsLevels[lvl + 1].length >= (lvl + 1 === 0 ? 4 : 10) && lvl + 1 < lcsLevels.length - 1) {
+        addEntry(lcsTimeline, '⚡ L' + (lvl + 1) + ' is now full! Cascading promotion...', 'info-step');
+      }
+      break;
+    }
+  }
+
+  // Update button state
+  var canPromote = false;
+  for (var k = 0; k < lcsLevels.length - 1; k++) {
+    var th = k === 0 ? 4 : 10;
+    if (lcsLevels[k].length >= th) canPromote = true;
+  }
+  document.getElementById('lcsCompactBtn').disabled = !canPromote;
+  drawLcs();
+}
+
+document.getElementById('lcsAddBtn').addEventListener('click', lcsAdd);
+document.getElementById('lcsCompactBtn').addEventListener('click', lcsPromote);
+
+document.getElementById('lcsAutoBtn').addEventListener('click', async function() {
+  if (lcsAutoPlaying) return;
+  lcsAutoPlaying = true;
+  for (var round = 0; round < 24 && lcsAutoPlaying; round++) {
+    lcsAdd();
+    await sleep(400);
+    // Auto promote if any level is full
+    var promoted = true;
+    while (promoted && lcsAutoPlaying) {
+      promoted = false;
+      for (var lvl = 0; lvl < lcsLevels.length - 1; lvl++) {
+        var th = lvl === 0 ? 4 : 10;
+        if (lcsLevels[lvl].length >= th) {
+          await sleep(500);
+          lcsPromote();
+          promoted = true;
+          break;
+        }
+      }
+    }
+  }
+  lcsAutoPlaying = false;
+});
+
+document.getElementById('lcsResetBtn').addEventListener('click', function() {
+  lcsAutoPlaying = false;
+  lcsLevels = [[], [], [], []];
+  lcsCounter = 0;
+  lcsTimeline.innerHTML = '';
+  lcsBadge.className = 'status-badge idle';
+  lcsBadge.textContent = 'Ready';
+  lcsStatusText.textContent = 'Add SSTables to L0 and watch them promote through levels';
+  document.getElementById('lcsCompactBtn').disabled = true;
+  drawLcs();
+});
+
+// ========== TIME-WINDOW COMPACTION (TWCS) ==========
+var twcsCanvas = document.getElementById('twcsCanvas');
+var twcsCtx = twcsCanvas.getContext('2d');
+var twcsTimeline = document.getElementById('twcsTimeline');
+var twcsBadge = document.getElementById('twcsBadge');
+var twcsStatusText = document.getElementById('twcsStatusText');
+var twcsSpeedSlider = document.getElementById('twcsSpeedSlider');
+var twcsSpeedLabel = document.getElementById('twcsSpeedLabel');
+
+var twcsWindows = []; // each: { label, tables: [], frozen: bool }
+var twcsSimTime = 0;
+var twcsWindowDuration = 5; // seconds per window
+var twcsRunning = false;
+
+twcsSpeedSlider.addEventListener('input', function() {
+  twcsSpeedLabel.textContent = twcsSpeedSlider.value + '\u00d7';
+});
+
+function drawTwcs() {
+  var ctx = twcsCtx;
+  var w = twcsCanvas.width;
+  var h = twcsCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (twcsWindows.length === 0) {
+    ctx.fillStyle = '#555';
+    ctx.font = '14px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Start the simulation to see Time-Window Compaction', w / 2, h / 2);
+    return;
+  }
+
+  // Timeline bar at top
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.beginPath();
+  ctx.roundRect(20, 10, w - 40, 30, 8);
+  ctx.fill();
+
+  ctx.fillStyle = '#888';
+  ctx.font = '11px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Simulated Time: ' + twcsSimTime.toFixed(1) + 's', w / 2, 30);
+
+  // Draw windows
+  var maxWindows = 6;
+  var startIdx = Math.max(0, twcsWindows.length - maxWindows);
+  var visibleWindows = twcsWindows.slice(startIdx);
+  var winW = (w - 60) / Math.max(visibleWindows.length, 1);
+  var winH = h - 90;
+
+  for (var i = 0; i < visibleWindows.length; i++) {
+    var win = visibleWindows[i];
+    var wx = 30 + i * winW;
+    var wy = 55;
+
+    var isFrozen = win.frozen;
+    var isActive = !isFrozen && i === visibleWindows.length - 1;
+
+    // Window background
+    var bgColor = isFrozen ? 'rgba(96, 165, 250, 0.06)' : isActive ? 'rgba(249, 115, 22, 0.08)' : 'rgba(255,255,255,0.03)';
+    var borderColor = isFrozen ? 'rgba(96, 165, 250, 0.3)' : isActive ? 'rgba(249, 115, 22, 0.4)' : 'rgba(255,255,255,0.1)';
+
+    ctx.fillStyle = bgColor;
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(wx + 4, wy, winW - 8, winH, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // Window label
+    ctx.fillStyle = isFrozen ? '#60a5fa' : isActive ? '#f97316' : '#888';
+    ctx.font = 'bold 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(win.label, wx + winW / 2, wy + 20);
+
+    // Status
+    ctx.fillStyle = isFrozen ? '#60a5fa' : '#22c55e';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.fillText(isFrozen ? '🧊 FROZEN' : isActive ? '🔥 ACTIVE' : 'CLOSED', wx + winW / 2, wy + 35);
+
+    // SSTables in window
+    var tables = win.tables;
+    var blockW = Math.min(winW - 24, 60);
+    var blockH = 28;
+    for (var j = 0; j < tables.length; j++) {
+      var bx = wx + (winW - blockW) / 2;
+      var by = wy + 45 + j * (blockH + 6);
+      var color = isFrozen ? '#60a5fa' : '#22c55e';
+
+      ctx.fillStyle = color + '20';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 6);
+      ctx.fill();
+      ctx.strokeStyle = color + '60';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, blockW, blockH, 6);
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(tables[j].name, bx + blockW / 2, by + 12);
+      ctx.fillStyle = color;
+      ctx.font = '8px Monaco, monospace';
+      ctx.fillText(tables[j].size + ' rows', bx + blockW / 2, by + 23);
+    }
+  }
+}
+
+document.getElementById('twcsStartBtn').addEventListener('click', async function() {
+  if (twcsRunning) {
+    twcsRunning = false;
+    document.getElementById('twcsStartBtn').textContent = '▶ Start';
+    return;
+  }
+  twcsRunning = true;
+  document.getElementById('twcsStartBtn').textContent = '⏸ Pause';
+
+  var tableCounter = 0;
+  var windowCounter = twcsWindows.length;
+
+  while (twcsRunning) {
+    var speed = parseInt(twcsSpeedSlider.value);
+    twcsSimTime += 0.5 * speed;
+
+    // Determine current window
+    var currentWindowIdx = Math.floor(twcsSimTime / twcsWindowDuration);
+
+    // Create windows up to current
+    while (twcsWindows.length <= currentWindowIdx) {
+      // Freeze previous window
+      if (twcsWindows.length > 0) {
+        var prev = twcsWindows[twcsWindows.length - 1];
+        if (!prev.frozen) {
+          // STCS within window: compact all tables into one
+          if (prev.tables.length > 1) {
+            var totalSize = 0;
+            for (var k = 0; k < prev.tables.length; k++) totalSize += prev.tables[k].size;
+            tableCounter++;
+            prev.tables = [{ name: 'C' + tableCounter, size: totalSize }];
+            addEntry(twcsTimeline, '🗜️ Window ' + prev.label + ': STCS compacted → C' + tableCounter + ' (' + totalSize + ' rows)', 'compact-step');
+          }
+          prev.frozen = true;
+          addEntry(twcsTimeline, '🧊 Window ' + prev.label + ' frozen — no more compaction', 'freeze-step');
+        }
+      }
+
+      windowCounter++;
+      twcsWindows.push({
+        label: 'W' + windowCounter,
+        tables: [],
+        frozen: false
+      });
+      addEntry(twcsTimeline, '⏰ New time window opened: W' + windowCounter, 'window-step');
+    }
+
+    // Add SSTable to current window
+    if (Math.random() < 0.6) {
+      tableCounter++;
+      var activeWin = twcsWindows[currentWindowIdx];
+      if (!activeWin.frozen) {
+        activeWin.tables.push({ name: 'S' + tableCounter, size: Math.floor(Math.random() * 8) + 3 });
+        addEntry(twcsTimeline, '✍ S' + tableCounter + ' written to ' + activeWin.label, 'write-step');
+      }
+    }
+
+    twcsBadge.className = 'status-badge active';
+    twcsBadge.textContent = 'W' + (currentWindowIdx + 1);
+    twcsStatusText.textContent = 'Active window: W' + (currentWindowIdx + 1) + ' | Total windows: ' + twcsWindows.length + ' | Time: ' + twcsSimTime.toFixed(1) + 's';
+
+    drawTwcs();
+    await sleep(500 / speed);
+  }
+});
+
+document.getElementById('twcsResetBtn').addEventListener('click', function() {
+  twcsRunning = false;
+  twcsWindows = [];
+  twcsSimTime = 0;
+  twcsTimeline.innerHTML = '';
+  twcsBadge.className = 'status-badge idle';
+  twcsBadge.textContent = 'Ready';
+  twcsStatusText.textContent = 'Start the simulation to see time-window compaction';
+  document.getElementById('twcsStartBtn').textContent = '▶ Start';
+  drawTwcs();
+});
+
+// ========== STRATEGY COMPARISON ==========
+var compareCanvas = document.getElementById('compareCanvas');
+var compareCtx = compareCanvas.getContext('2d');
+var recommendationBox = document.getElementById('recommendationBox');
+
+var workloadData = {
+  'write-heavy': {
+    stcs: { write: 2, read: 8, space: 7, latency: 6 },
+    lcs:  { write: 9, read: 2, space: 2, latency: 3 },
+    twcs: { write: 3, read: 5, space: 3, latency: 5 },
+    recommended: 'STCS',
+    reason: 'Write-heavy workloads benefit from STCS\'s low write amplification. Writes are batched efficiently, and the occasional large compaction is acceptable since reads are less frequent.'
+  },
+  'read-heavy': {
+    stcs: { write: 2, read: 8, space: 7, latency: 7 },
+    lcs:  { write: 9, read: 2, space: 2, latency: 2 },
+    twcs: { write: 3, read: 5, space: 3, latency: 5 },
+    recommended: 'LCS',
+    reason: 'Read-heavy workloads need bounded read amplification. LCS guarantees at most one SSTable per level to check, giving predictable low-latency reads — worth the higher write cost.'
+  },
+  'time-series': {
+    stcs: { write: 2, read: 6, space: 7, latency: 5 },
+    lcs:  { write: 9, read: 2, space: 2, latency: 3 },
+    twcs: { write: 2, read: 3, space: 1, latency: 3 },
+    recommended: 'TWCS',
+    reason: 'Time-series data is naturally ordered by time. TWCS groups SSTables by time window, avoids recompacting old data, and efficiently drops expired TTL data when whole windows age out.'
+  },
+  'mixed': {
+    stcs: { write: 3, read: 6, space: 6, latency: 5 },
+    lcs:  { write: 8, read: 3, space: 2, latency: 3 },
+    twcs: { write: 3, read: 5, space: 3, latency: 5 },
+    recommended: 'STCS (default)',
+    reason: 'For mixed workloads, start with STCS (the default). It\'s simple and handles most cases well. If read latency becomes a problem, benchmark LCS. Monitor write amplification before switching.'
+  }
+};
+
+function drawComparison(workload) {
+  var ctx = compareCtx;
+  var w = compareCanvas.width;
+  var h = compareCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!workload) {
+    ctx.fillStyle = '#555';
+    ctx.font = '14px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Select a workload type above to compare strategies', w / 2, h / 2);
+    return;
+  }
+
+  var data = workloadData[workload];
+  var strategies = [
+    { name: 'STCS', color: '#22c55e', data: data.stcs },
+    { name: 'LCS', color: '#3b82f6', data: data.lcs },
+    { name: 'TWCS', color: '#eab308', data: data.twcs }
+  ];
+  var metrics = ['write', 'read', 'space', 'latency'];
+  var metricLabels = ['Write Amp.', 'Read Amp.', 'Space Amp.', 'Latency'];
+
+  var chartX = 120;
+  var chartW = w - 160;
+  var rowH = 80;
+  var barH = 18;
+  var startY = 40;
+
+  // Title
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Amplification & Latency (lower is better)', w / 2, 25);
+
+  for (var mi = 0; mi < metrics.length; mi++) {
+    var metric = metrics[mi];
+    var my = startY + mi * rowH;
+
+    // Metric label
+    ctx.fillStyle = '#ccc';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(metricLabels[mi], chartX - 15, my + 38);
+
+    // Background track
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.beginPath();
+    ctx.roundRect(chartX, my + 5, chartW, rowH - 15, 8);
+    ctx.fill();
+
+    for (var si = 0; si < strategies.length; si++) {
+      var s = strategies[si];
+      var val = s.data[metric];
+      var barW = (val / 10) * chartW;
+      var by = my + 10 + si * (barH + 4);
+
+      var isRec = s.name === data.recommended || data.recommended.indexOf(s.name) === 0;
+
+      ctx.fillStyle = s.color + (isRec ? '50' : '25');
+      ctx.beginPath();
+      ctx.roundRect(chartX, by, barW, barH, 6);
+      ctx.fill();
+
+      if (isRec) {
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(chartX, by, barW, barH, 6);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(s.name + ': ' + val + '/10', chartX + barW + 8, by + 13);
+    }
+  }
+
+  // Legend
+  var legendY = startY + metrics.length * rowH + 10;
+  for (var li = 0; li < strategies.length; li++) {
+    var lx = w / 2 - 120 + li * 100;
+    ctx.fillStyle = strategies[li].color;
+    ctx.beginPath();
+    ctx.roundRect(lx, legendY, 14, 14, 3);
+    ctx.fill();
+    ctx.fillStyle = '#ccc';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(strategies[li].name, lx + 20, legendY + 12);
+  }
+
+  // Highlight recommended
+  ctx.fillStyle = '#f97316';
+  ctx.font = 'bold 12px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('★ Recommended: ' + data.recommended, w / 2, legendY + 40);
+}
+
+var workloadBtns = document.querySelectorAll('.workload-btn');
+workloadBtns.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    workloadBtns.forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    var wl = btn.getAttribute('data-workload');
+    drawComparison(wl);
+    var data = workloadData[wl];
+    recommendationBox.innerHTML = '<strong style="color: #f97316;">★ ' + data.recommended + '</strong> — ' + data.reason;
+  });
+});
+
+// ========== INITIAL RENDER ==========
+drawLsm();
+drawStcs();
+drawLcs();
+drawTwcs();
+drawComparison(null);
+</script>
+</BaseLayout>

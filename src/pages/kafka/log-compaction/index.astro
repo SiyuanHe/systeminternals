@@ -1,0 +1,1055 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kafka Log Compaction" 
+  description="Interactive visualization of Kafka log compaction: retention vs compaction, tombstones, configuration tuning, and CDC use cases"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kafka", href: "/kafka/" },
+    { label: "Log Compaction", href: "/kafka/log-compaction/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🧹 Log Compaction</h1>
+      <p class="subtitle">Keep the Latest Value Per Key — Forever</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Kafka offers two cleanup policies for managing log growth. <strong>Retention</strong> (<code>cleanup.policy=delete</code>)
+          removes old segments by time or size. <strong>Compaction</strong> (<code>cleanup.policy=compact</code>) keeps only the
+          <em>latest value for each key</em>, guaranteeing that consumers can always reconstruct current state.
+          You can even combine both: <code>cleanup.policy=compact,delete</code>. Compaction is essential for
+          <em>changelog topics</em>, KTables, and CDC streams where you need a full snapshot, not just recent events.
+        </p>
+      </div>
+    </section>
+
+    <!-- Retention vs Compaction -->
+    <section class="retention-section">
+      <h2>🔄 Retention vs Compaction</h2>
+      <p class="section-desc">Toggle between cleanup modes to see how each affects a log over time.</p>
+
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="delete" id="modeDelete">cleanup.policy=delete</button>
+        <button class="mode-btn" data-mode="compact" id="modeCompact">cleanup.policy=compact</button>
+        <button class="mode-btn" data-mode="compact-delete" id="modeCompactDelete">compact,delete</button>
+      </div>
+
+      <div class="retention-viz-wrapper">
+        <div class="retention-timeline" id="retentionTimeline"></div>
+        <div class="retention-info" id="retentionInfo">
+          <strong>Delete mode:</strong> Old segments are removed when they exceed retention.ms or retention.bytes. Data is lost after expiry.
+        </div>
+      </div>
+
+      <div class="retention-controls">
+        <button id="retentionAdvanceBtn" class="action-btn primary-btn">⏩ Advance Time</button>
+        <button id="retentionResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- How Compaction Works -->
+    <section class="compaction-section">
+      <h2>⚙️ How Compaction Works</h2>
+      <p class="section-desc">Step through the Log Cleaner's process: scan dirty segments, build offset map, rewrite compacted segments.</p>
+
+      <div class="compaction-viz-wrapper">
+        <div class="compaction-stage" id="compactionStage">
+          <div class="stage-label" id="stageLabel">Dirty Log (before compaction)</div>
+          <div class="log-entries" id="compactionLog"></div>
+        </div>
+        <div class="offset-map-panel" id="offsetMapPanel" style="display:none">
+          <div class="stage-label">Offset Map (key → latest offset)</div>
+          <div id="offsetMapContent"></div>
+        </div>
+      </div>
+
+      <div class="compaction-status" id="compactionStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="compactionStatusText">Click "Start Compaction" to begin</span>
+      </div>
+
+      <div class="compaction-controls">
+        <button id="startCompactionBtn" class="action-btn primary-btn">▶ Start Compaction</button>
+        <button id="stepCompactionBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="resetCompactionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Compaction Visualizer -->
+    <section class="visualizer-section">
+      <h2>🎨 Compaction Visualizer</h2>
+      <p class="section-desc">Produce messages with duplicate keys, then run compaction to see old values removed.</p>
+
+      <div class="visualizer-controls">
+        <button id="produceBtn" class="action-btn primary-btn">📤 Produce Message</button>
+        <button id="produceBatchBtn" class="action-btn secondary-btn">📦 Produce Batch (5)</button>
+        <button id="runCompactionBtn" class="action-btn compact-btn">🧹 Run Compaction</button>
+        <button id="resetVisualizerBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="before-after-viz">
+        <div class="ba-col">
+          <h4>Before Compaction <span class="segment-size" id="beforeSize">0 entries</span></h4>
+          <div class="log-visual" id="beforeLog"></div>
+        </div>
+        <div class="ba-arrow">→</div>
+        <div class="ba-col">
+          <h4>After Compaction <span class="segment-size" id="afterSize">0 entries</span></h4>
+          <div class="log-visual" id="afterLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tombstones & Deletes -->
+    <section class="tombstone-section">
+      <h2>🪦 Tombstones &amp; Deletes</h2>
+      <p class="section-desc">Produce a null value to create a tombstone. It persists for delete.retention.ms, then the key is fully removed.</p>
+
+      <div class="tombstone-controls">
+        <div class="slider-group">
+          <label>delete.retention.ms: <strong id="deleteRetentionLabel">5000</strong>ms</label>
+          <input type="range" id="deleteRetentionSlider" min="2000" max="15000" value="5000" step="1000">
+        </div>
+        <div class="tombstone-actions">
+          <button id="produceNormalBtn" class="action-btn primary-btn">📤 Produce (key-A = "v3")</button>
+          <button id="produceTombstoneBtn" class="action-btn danger-btn">🪦 Produce Tombstone (key-A = null)</button>
+          <button id="resetTombstoneBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="tombstone-viz" id="tombstoneViz"></div>
+      <div class="tombstone-log" id="tombstoneLog"></div>
+    </section>
+
+    <!-- Configuration Deep Dive -->
+    <section class="config-section">
+      <h2>🎛️ Configuration Deep Dive</h2>
+      <p class="section-desc">Adjust compaction configs and see how they affect behavior.</p>
+
+      <div class="config-grid">
+        <div class="config-card">
+          <div class="config-name">min.cleanable.dirty.ratio</div>
+          <div class="config-value" id="dirtyRatioValue">0.50</div>
+          <input type="range" id="dirtyRatioSlider" min="0" max="100" value="50" step="5">
+          <div class="config-desc">Minimum ratio of dirty (uncompacted) log to total log before cleaner runs. Lower = more frequent compaction.</div>
+          <div class="config-meter">
+            <div class="meter-label">Log State:</div>
+            <div class="meter-bar">
+              <div class="meter-clean" id="meterClean" style="width:50%">Clean</div>
+              <div class="meter-dirty" id="meterDirty" style="width:50%">Dirty</div>
+            </div>
+            <div class="meter-status" id="dirtyRatioStatus">Ratio 0.50 = threshold → compaction triggers ✅</div>
+          </div>
+        </div>
+
+        <div class="config-card">
+          <div class="config-name">min.compaction.lag.ms</div>
+          <div class="config-value" id="minLagValue">0</div>
+          <input type="range" id="minLagSlider" min="0" max="86400000" value="0" step="3600000">
+          <div class="config-desc">Minimum time a message must exist before eligible for compaction. Prevents compaction of very recent writes.</div>
+        </div>
+
+        <div class="config-card">
+          <div class="config-name">max.compaction.lag.ms</div>
+          <div class="config-value" id="maxLagValue">∞</div>
+          <input type="range" id="maxLagSlider" min="0" max="604800000" value="604800000" step="3600000">
+          <div class="config-desc">Maximum time before compaction is forced, regardless of dirty ratio. Guarantees eventual compaction.</div>
+        </div>
+
+        <div class="config-card">
+          <div class="config-name">segment.bytes / segment.ms</div>
+          <div class="config-value" id="segmentValue">1 GB / 7 days</div>
+          <input type="range" id="segmentSlider" min="1" max="5" value="3" step="1">
+          <div class="config-desc">Controls when segments roll over. Smaller segments = more frequent compaction candidates. Active segment is never compacted.</div>
+        </div>
+      </div>
+
+      <div class="config-timeline" id="configTimeline">
+        <div class="config-timeline-label">Compaction Behavior Timeline</div>
+        <div class="config-timeline-bar" id="configTimelineBar"></div>
+      </div>
+    </section>
+
+    <!-- Use Cases -->
+    <section class="usecases-section">
+      <h2>🏗️ Use Cases</h2>
+      <p class="section-desc">Log compaction powers many core Kafka patterns.</p>
+
+      <div class="usecase-tabs">
+        <button class="usecase-tab active" data-uc="cdc">CDC / Debezium</button>
+        <button class="usecase-tab" data-uc="ktable">KTable</button>
+        <button class="usecase-tab" data-uc="snapshot">State Snapshots</button>
+      </div>
+
+      <div class="usecase-viz-wrapper">
+        <div class="usecase-stream" id="usecaseStream"></div>
+        <div class="usecase-state" id="usecaseState">
+          <div class="state-label">Materialized State (after compaction)</div>
+          <div id="stateTable"></div>
+        </div>
+      </div>
+
+      <div class="usecase-controls">
+        <button id="ucProduceBtn" class="action-btn primary-btn">📥 Incoming Event</button>
+        <button id="ucCompactBtn" class="action-btn compact-btn">🧹 Compact</button>
+        <button id="ucResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="usecase-desc" id="usecaseDesc">
+        <strong>CDC (Change Data Capture):</strong> Tools like Debezium capture database changes as Kafka messages keyed by primary key. Compaction ensures the topic always contains the latest row state — a full database snapshot consumers can replay from offset 0.
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Compaction Over Retention?</h3>
+          <p>
+            Retention deletes <strong>entire segments by age</strong> — you lose historical keys forever.
+            Compaction guarantees every key's <em>latest value is always available</em>, no matter how old.
+            A consumer reading from offset 0 can reconstruct complete current state.
+            This is critical for <code>__consumer_offsets</code>, KTables, and CDC topics.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ The Active Segment Exception</h3>
+          <p>
+            The <strong>active (latest) segment is never compacted</strong>. Only closed, immutable segments
+            are eligible. This means very recent writes always survive. The active segment closes
+            when it reaches <code>segment.bytes</code> or <code>segment.ms</code>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 Key Design Requirements</h3>
+          <p>
+            Compaction requires <strong>every message to have a non-null key</strong> (except tombstones).
+            Messages with <code>null</code> keys are retained but never compacted — they accumulate forever
+            unless retention also applies. Choose meaningful, stable keys (e.g., primary keys, entity IDs).
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Monitoring Compaction</h3>
+          <p>
+            Watch the <code>cleaner-offset-checkpoint</code> to track progress. Monitor
+            <code>dirty-ratio</code> per partition. High dirty ratios with no compaction may indicate
+            the cleaner is stuck or under-resourced. Increase <code>log.cleaner.threads</code>
+            or <code>log.cleaner.dedupe.buffer.size</code> if needed.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://kafka.apache.org/documentation/#compaction" target="_blank">Apache Kafka Log Compaction Documentation</a> and <a href="https://kafka.apache.org/documentation/#design_compactionbasics" target="_blank">Design: Log Compaction</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20Log%20Compaction%20Visualizer&url=https://systeminternals.dev/kafka/log-compaction/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/log-compaction/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/log-compaction/&t=Interactive%20Kafka%20Log%20Compaction%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .step-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .compact-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .compact-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #34d399; cursor: pointer; }
+
+  /* Retention Section */
+  .retention-section { margin-bottom: 50px; }
+  .mode-toggle { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .mode-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; font-family: 'Monaco','Menlo',monospace; }
+  .mode-btn.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; font-weight: 600; }
+
+  .retention-viz-wrapper { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; }
+  .retention-timeline { display: flex; gap: 4px; flex-wrap: wrap; min-height: 60px; margin-bottom: 16px; }
+  .retention-info { padding: 14px 18px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .retention-info strong { color: #34d399; }
+  .retention-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  :global(.ret-segment) { padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; text-align: center; min-width: 70px; transition: all 0.5s ease; }
+  :global(.ret-segment.active) { background: rgba(96,165,250,0.2); border: 1px solid rgba(96,165,250,0.4); color: #93c5fd; }
+  :global(.ret-segment.retained) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+  :global(.ret-segment.expired) { background: rgba(239,68,68,0.1); border: 1px dashed rgba(239,68,68,0.3); color: #fca5a5; opacity: 0.5; text-decoration: line-through; }
+  :global(.ret-segment.compacted) { background: rgba(167,139,250,0.15); border: 1px solid rgba(167,139,250,0.3); color: #c4b5fd; }
+
+  /* Compaction Steps Section */
+  .compaction-section { margin-bottom: 50px; }
+  .compaction-viz-wrapper { display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap; }
+  .compaction-stage { flex: 2; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-width: 300px; }
+  .stage-label { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .log-entries { display: flex; flex-direction: column; gap: 4px; }
+  .offset-map-panel { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-width: 200px; }
+
+  :global(.log-entry) { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; transition: all 0.4s ease; }
+  :global(.log-entry.key-a) { background: rgba(96,165,250,0.15); border-left: 3px solid #60a5fa; color: #93c5fd; }
+  :global(.log-entry.key-b) { background: rgba(52,211,153,0.15); border-left: 3px solid #34d399; color: #6ee7b7; }
+  :global(.log-entry.key-c) { background: rgba(239,68,68,0.15); border-left: 3px solid #ef4444; color: #fca5a5; }
+  :global(.log-entry.tombstone) { background: rgba(107,114,128,0.15); border-left: 3px solid #6b7280; color: #9ca3af; font-style: italic; }
+  :global(.log-entry.removing) { opacity: 0.3; transform: translateX(20px); text-decoration: line-through; }
+  :global(.log-entry.kept) { box-shadow: 0 0 8px rgba(52,211,153,0.3); }
+  :global(.log-entry .offset-num) { width: 24px; font-weight: 700; color: #888; }
+  :global(.log-entry .entry-key) { font-weight: 700; }
+  :global(.log-entry .entry-val) { color: inherit; opacity: 0.8; }
+
+  :global(.omap-entry) { padding: 6px 10px; margin-bottom: 4px; border-radius: 6px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; background: rgba(255,255,255,0.05); color: #aaa; }
+  :global(.omap-entry.highlight) { background: rgba(52,211,153,0.15); color: #6ee7b7; }
+
+  .compaction-status { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 16px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+  .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; }
+  .status-badge.idle { background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .status-badge.scanning { background: rgba(251,191,36,0.2); color: #fbbf24; }
+  .status-badge.compacting { background: rgba(167,139,250,0.2); color: #c4b5fd; }
+  .status-badge.done { background: rgba(52,211,153,0.2); color: #34d399; }
+  .status-text { color: #aaa; font-size: 0.95rem; }
+  .compaction-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* Visualizer Section */
+  .visualizer-section { margin-bottom: 50px; }
+  .visualizer-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .before-after-viz { display: flex; gap: 20px; align-items: flex-start; }
+  .ba-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ba-col h4 { font-size: 0.95rem; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .segment-size { font-size: 0.75rem; font-weight: 400; color: #888; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 10px; }
+  .ba-arrow { font-size: 2rem; color: #34d399; align-self: center; flex-shrink: 0; }
+  .log-visual { display: flex; flex-direction: column; gap: 4px; min-height: 40px; max-height: 400px; overflow-y: auto; }
+
+  /* Tombstone Section */
+  .tombstone-section { margin-bottom: 50px; }
+  .tombstone-controls { margin-bottom: 20px; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #34d399; }
+  .slider-group input[type="range"] { max-width: 400px; }
+  .tombstone-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .tombstone-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; min-height: 60px; }
+  .tombstone-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.ts-log-entry) { padding: 3px 0; animation: eventAppear 0.3s ease-out; }
+  :global(.ts-log-entry.info) { color: #93c5fd; }
+  :global(.ts-log-entry.warn) { color: #fde68a; }
+  :global(.ts-log-entry.error) { color: #fca5a5; }
+  :global(.ts-log-entry.ok) { color: #6ee7b7; }
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+  :global(.ts-entry) { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; transition: all 0.5s ease; }
+  :global(.ts-entry.normal) { background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; }
+  :global(.ts-entry.tombstone) { background: rgba(107,114,128,0.15); border: 1px dashed rgba(107,114,128,0.4); color: #9ca3af; }
+  :global(.ts-entry.expired) { opacity: 0; transform: translateX(40px); height: 0; padding: 0; margin: 0; overflow: hidden; }
+  :global(.ts-entry .ts-ttl) { margin-left: auto; font-size: 0.75rem; color: #fbbf24; }
+
+  /* Config Section */
+  .config-section { margin-bottom: 50px; }
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .config-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .config-name { font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; color: #34d399; font-weight: 700; margin-bottom: 8px; }
+  .config-value { font-size: 1.8rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .config-desc { font-size: 0.85rem; color: #888; line-height: 1.5; margin-top: 12px; }
+
+  .config-meter { margin-top: 16px; }
+  .meter-label { font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+  .meter-bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; }
+  .meter-clean { background: rgba(52,211,153,0.3); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #6ee7b7; font-weight: 600; transition: width 0.3s; }
+  .meter-dirty { background: rgba(251,191,36,0.3); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #fde68a; font-weight: 600; transition: width 0.3s; }
+  .meter-status { font-size: 0.8rem; color: #aaa; margin-top: 8px; }
+
+  .config-timeline { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .config-timeline-label { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .config-timeline-bar { display: flex; gap: 2px; height: 36px; }
+  :global(.ct-block) { flex: 1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 600; transition: all 0.3s; }
+  :global(.ct-block.safe) { background: rgba(52,211,153,0.2); color: #6ee7b7; }
+  :global(.ct-block.eligible) { background: rgba(251,191,36,0.2); color: #fde68a; }
+  :global(.ct-block.forced) { background: rgba(239,68,68,0.2); color: #fca5a5; }
+  :global(.ct-block.active-seg) { background: rgba(96,165,250,0.2); color: #93c5fd; }
+
+  /* Use Cases Section */
+  .usecases-section { margin-bottom: 50px; }
+  .usecase-tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .usecase-tab { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .usecase-tab.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; font-weight: 600; }
+
+  .usecase-viz-wrapper { display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap; }
+  .usecase-stream { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-width: 280px; min-height: 80px; display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+  .usecase-state { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-width: 280px; }
+  .state-label { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+
+  :global(.state-row) { display: flex; justify-content: space-between; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; background: rgba(255,255,255,0.03); color: #aaa; transition: all 0.3s; }
+  :global(.state-row.updated) { background: rgba(52,211,153,0.15); color: #6ee7b7; }
+  :global(.state-row .state-key) { font-weight: 700; }
+
+  .usecase-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .usecase-desc { padding: 14px 18px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .usecase-desc strong { color: #34d399; }
+
+  /* Explain Section */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .config-grid { grid-template-columns: 1fr; }
+    .before-after-viz { flex-direction: column; }
+    .ba-arrow { align-self: center; transform: rotate(90deg); }
+    .compaction-viz-wrapper { flex-direction: column; }
+    .usecase-viz-wrapper { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ========== CONSTANTS ==========
+  var KEY_COLORS = {
+    'key-A': { cls: 'key-a', color: '#60a5fa', label: 'key-A' },
+    'key-B': { cls: 'key-b', color: '#34d399', label: 'key-B' },
+    'key-C': { cls: 'key-c', color: '#ef4444', label: 'key-C' }
+  };
+  var KEYS = ['key-A', 'key-B', 'key-C'];
+
+  // ========== RETENTION VS COMPACTION ==========
+  var retMode = 'delete';
+  var retSegments = [];
+  var retTime = 0;
+
+  function initRetention() {
+    retTime = 0;
+    retSegments = [
+      { id: 0, keys: {'key-A': 'v1', 'key-B': 'v1'}, age: 5, status: 'retained' },
+      { id: 1, keys: {'key-A': 'v2', 'key-C': 'v1'}, age: 3, status: 'retained' },
+      { id: 2, keys: {'key-B': 'v2', 'key-C': 'v2'}, age: 1, status: 'retained' },
+      { id: 3, keys: {'key-A': 'v3'}, age: 0, status: 'active' }
+    ];
+  }
+
+  function renderRetention() {
+    var timeline = document.getElementById('retentionTimeline');
+    timeline.innerHTML = '';
+    retSegments.forEach(function(seg) {
+      var el = document.createElement('div');
+      el.className = 'ret-segment ' + seg.status;
+      var keyStr = Object.keys(seg.keys).map(function(k) { return k + '=' + seg.keys[k]; }).join(', ');
+      el.innerHTML = 'Seg ' + seg.id + '<br><span style="font-size:0.65rem;opacity:0.7">age:' + seg.age + ' | ' + keyStr + '</span>';
+      timeline.appendChild(el);
+    });
+  }
+
+  function advanceRetention() {
+    retTime++;
+    retSegments.forEach(function(seg) {
+      if (seg.status !== 'expired') seg.age++;
+    });
+
+    // Make active segment close and create new one
+    var activeSeg = retSegments.find(function(s) { return s.status === 'active'; });
+    if (activeSeg) {
+      activeSeg.status = 'retained';
+      var newKeys = {};
+      var rk = KEYS[Math.floor(Math.random() * KEYS.length)];
+      newKeys[rk] = 'v' + (retTime + 3);
+      retSegments.push({ id: retSegments.length, keys: newKeys, age: 0, status: 'active' });
+    }
+
+    if (retMode === 'delete') {
+      // Delete segments older than 6
+      retSegments.forEach(function(seg) {
+        if (seg.age > 6 && seg.status === 'retained') seg.status = 'expired';
+      });
+    } else if (retMode === 'compact') {
+      // Compact: keep only latest per key in non-active segments
+      var latestKeys = {};
+      for (var i = retSegments.length - 1; i >= 0; i--) {
+        var seg = retSegments[i];
+        if (seg.status === 'expired') continue;
+        var newK = {};
+        Object.keys(seg.keys).forEach(function(k) {
+          if (!latestKeys[k]) {
+            latestKeys[k] = true;
+            newK[k] = seg.keys[k];
+          }
+        });
+        if (Object.keys(newK).length === 0 && seg.status !== 'active') {
+          seg.status = 'expired';
+        } else {
+          seg.keys = Object.keys(newK).length > 0 ? newK : seg.keys;
+          if (seg.status !== 'active') seg.status = 'compacted';
+        }
+      }
+    } else {
+      // compact,delete: compact + delete very old
+      var latestKeys2 = {};
+      for (var j = retSegments.length - 1; j >= 0; j--) {
+        var seg2 = retSegments[j];
+        if (seg2.status === 'expired') continue;
+        if (seg2.age > 8) { seg2.status = 'expired'; continue; }
+        var newK2 = {};
+        Object.keys(seg2.keys).forEach(function(k) {
+          if (!latestKeys2[k]) {
+            latestKeys2[k] = true;
+            newK2[k] = seg2.keys[k];
+          }
+        });
+        if (Object.keys(newK2).length === 0 && seg2.status !== 'active') {
+          seg2.status = 'expired';
+        } else {
+          seg2.keys = Object.keys(newK2).length > 0 ? newK2 : seg2.keys;
+          if (seg2.status !== 'active') seg2.status = 'compacted';
+        }
+      }
+    }
+
+    renderRetention();
+  }
+
+  var modeDescs = {
+    'delete': '<strong>Delete mode:</strong> Old segments are removed when they exceed retention.ms or retention.bytes. Data is lost after expiry — no way to recover old keys.',
+    'compact': '<strong>Compact mode:</strong> The Log Cleaner keeps only the latest value per key. Old duplicates are removed, but every key\'s latest value is preserved forever.',
+    'compact-delete': '<strong>Compact + Delete:</strong> Compaction removes duplicate keys, AND very old segments are deleted by time. Useful when you want latest-per-key but don\'t need infinite history.'
+  };
+
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      retMode = btn.getAttribute('data-mode');
+      document.getElementById('retentionInfo').innerHTML = modeDescs[retMode];
+      initRetention();
+      renderRetention();
+    });
+  });
+
+  document.getElementById('retentionAdvanceBtn').addEventListener('click', advanceRetention);
+  document.getElementById('retentionResetBtn').addEventListener('click', function() {
+    initRetention();
+    renderRetention();
+  });
+
+  // ========== HOW COMPACTION WORKS ==========
+  var compactionEntries = [
+    { offset: 0, key: 'key-A', value: 'v1' },
+    { offset: 1, key: 'key-B', value: 'v1' },
+    { offset: 2, key: 'key-A', value: 'v2' },
+    { offset: 3, key: 'key-C', value: 'v1' },
+    { offset: 4, key: 'key-B', value: 'v2' },
+    { offset: 5, key: 'key-A', value: 'v3' },
+    { offset: 6, key: 'key-C', value: 'v2' },
+    { offset: 7, key: 'key-B', value: 'v3' }
+  ];
+  var compStepIdx = 0;
+  var compSteps = [];
+
+  function getKeyCls(key) {
+    if (key === 'key-A') return 'key-a';
+    if (key === 'key-B') return 'key-b';
+    if (key === 'key-C') return 'key-c';
+    return '';
+  }
+
+  function renderCompactionLog(entries, removedOffsets, keptOffsets) {
+    var container = document.getElementById('compactionLog');
+    container.innerHTML = '';
+    entries.forEach(function(e) {
+      var el = document.createElement('div');
+      var cls = 'log-entry ' + getKeyCls(e.key);
+      if (removedOffsets && removedOffsets.indexOf(e.offset) !== -1) cls += ' removing';
+      if (keptOffsets && keptOffsets.indexOf(e.offset) !== -1) cls += ' kept';
+      el.className = cls;
+      el.innerHTML = '<span class="offset-num">' + e.offset + '</span>' +
+        '<span class="entry-key">' + e.key + '</span>' +
+        '<span class="entry-val">= ' + e.value + '</span>';
+      container.appendChild(el);
+    });
+  }
+
+  function buildCompSteps() {
+    compSteps = [
+      {
+        label: 'Dirty Log (before compaction)',
+        badge: 'Scanning', badgeCls: 'scanning',
+        text: 'Log Cleaner thread starts scanning dirty segments...',
+        removed: [], kept: [], showMap: false
+      },
+      {
+        label: 'Building Offset Map',
+        badge: 'Scanning', badgeCls: 'scanning',
+        text: 'Scanning entries to build offset map: key → latest offset',
+        removed: [], kept: [], showMap: true,
+        map: { 'key-A': 5, 'key-B': 7, 'key-C': 6 }
+      },
+      {
+        label: 'Marking duplicates for removal',
+        badge: 'Compacting', badgeCls: 'compacting',
+        text: 'Entries with older offsets for the same key are marked for removal',
+        removed: [0, 1, 2, 3, 4], kept: [5, 6, 7], showMap: true,
+        map: { 'key-A': 5, 'key-B': 7, 'key-C': 6 }
+      },
+      {
+        label: 'Rewriting compacted segment',
+        badge: 'Compacting', badgeCls: 'compacting',
+        text: 'Cleaner rewrites segment keeping only latest value per key',
+        removed: [0, 1, 2, 3, 4], kept: [5, 6, 7], showMap: true,
+        map: { 'key-A': 5, 'key-B': 7, 'key-C': 6 },
+        compact: true
+      },
+      {
+        label: 'Compaction complete!',
+        badge: 'Done', badgeCls: 'done',
+        text: 'Log reduced from 8 entries to 3. Every key\'s latest value preserved.',
+        removed: [], kept: [5, 6, 7], showMap: false,
+        compact: true
+      }
+    ];
+  }
+
+  function renderCompStep() {
+    var step = compSteps[compStepIdx];
+    document.getElementById('stageLabel').textContent = step.label;
+
+    var badge = document.querySelector('.compaction-status .status-badge');
+    badge.className = 'status-badge ' + step.badgeCls;
+    badge.textContent = step.badge;
+    document.getElementById('compactionStatusText').textContent = step.text;
+
+    var entries = step.compact ? compactionEntries.filter(function(e) {
+      return step.kept.indexOf(e.offset) !== -1;
+    }) : compactionEntries;
+
+    renderCompactionLog(entries, step.removed, step.kept);
+
+    var mapPanel = document.getElementById('offsetMapPanel');
+    if (step.showMap) {
+      mapPanel.style.display = 'block';
+      var mc = document.getElementById('offsetMapContent');
+      mc.innerHTML = '';
+      Object.keys(step.map).forEach(function(k) {
+        var el = document.createElement('div');
+        el.className = 'omap-entry' + (step.kept.indexOf(step.map[k]) !== -1 ? ' highlight' : '');
+        el.textContent = k + ' → offset ' + step.map[k];
+        mc.appendChild(el);
+      });
+    } else {
+      mapPanel.style.display = 'none';
+    }
+  }
+
+  document.getElementById('startCompactionBtn').addEventListener('click', function() {
+    buildCompSteps();
+    compStepIdx = 0;
+    renderCompStep();
+    document.getElementById('stepCompactionBtn').disabled = false;
+  });
+
+  document.getElementById('stepCompactionBtn').addEventListener('click', function() {
+    if (compStepIdx < compSteps.length - 1) {
+      compStepIdx++;
+      renderCompStep();
+      if (compStepIdx >= compSteps.length - 1) {
+        document.getElementById('stepCompactionBtn').disabled = true;
+      }
+    }
+  });
+
+  document.getElementById('resetCompactionBtn').addEventListener('click', function() {
+    compStepIdx = 0;
+    document.getElementById('stageLabel').textContent = 'Dirty Log (before compaction)';
+    var badge = document.querySelector('.compaction-status .status-badge');
+    badge.className = 'status-badge idle';
+    badge.textContent = 'Ready';
+    document.getElementById('compactionStatusText').textContent = 'Click "Start Compaction" to begin';
+    document.getElementById('offsetMapPanel').style.display = 'none';
+    document.getElementById('stepCompactionBtn').disabled = true;
+    renderCompactionLog(compactionEntries, [], []);
+  });
+
+  // ========== COMPACTION VISUALIZER ==========
+  var vizEntries = [];
+  var vizOffset = 0;
+  var vizCompacted = [];
+
+  function randomKey() {
+    return KEYS[Math.floor(Math.random() * KEYS.length)];
+  }
+
+  function renderVizLog(entries, container) {
+    var el = document.getElementById(container);
+    el.innerHTML = '';
+    entries.forEach(function(e) {
+      var div = document.createElement('div');
+      div.className = 'log-entry ' + getKeyCls(e.key);
+      div.innerHTML = '<span class="offset-num">' + e.offset + '</span>' +
+        '<span class="entry-key">' + e.key + '</span>' +
+        '<span class="entry-val">= ' + e.value + '</span>';
+      el.appendChild(div);
+    });
+  }
+
+  function updateVizSizes() {
+    document.getElementById('beforeSize').textContent = vizEntries.length + ' entries';
+    document.getElementById('afterSize').textContent = vizCompacted.length + ' entries';
+  }
+
+  document.getElementById('produceBtn').addEventListener('click', function() {
+    var key = randomKey();
+    var valNum = vizEntries.filter(function(e) { return e.key === key; }).length + 1;
+    vizEntries.push({ offset: vizOffset++, key: key, value: 'v' + valNum });
+    renderVizLog(vizEntries, 'beforeLog');
+    updateVizSizes();
+  });
+
+  document.getElementById('produceBatchBtn').addEventListener('click', function() {
+    for (var i = 0; i < 5; i++) {
+      var key = randomKey();
+      var valNum = vizEntries.filter(function(e) { return e.key === key; }).length + 1;
+      vizEntries.push({ offset: vizOffset++, key: key, value: 'v' + valNum });
+    }
+    renderVizLog(vizEntries, 'beforeLog');
+    updateVizSizes();
+  });
+
+  document.getElementById('runCompactionBtn').addEventListener('click', function() {
+    // Keep only latest per key
+    var latest = {};
+    vizEntries.forEach(function(e) {
+      latest[e.key] = e;
+    });
+    vizCompacted = Object.keys(latest).map(function(k) { return latest[k]; });
+    vizCompacted.sort(function(a, b) { return a.offset - b.offset; });
+    renderVizLog(vizCompacted, 'afterLog');
+    updateVizSizes();
+  });
+
+  document.getElementById('resetVisualizerBtn').addEventListener('click', function() {
+    vizEntries = [];
+    vizCompacted = [];
+    vizOffset = 0;
+    document.getElementById('beforeLog').innerHTML = '';
+    document.getElementById('afterLog').innerHTML = '';
+    updateVizSizes();
+  });
+
+  // ========== TOMBSTONES ==========
+  var tsEntries = [];
+  var tsOffset = 0;
+  var tsTimers = [];
+
+  function renderTombstones() {
+    var viz = document.getElementById('tombstoneViz');
+    viz.innerHTML = '';
+    tsEntries.forEach(function(e) {
+      var div = document.createElement('div');
+      div.className = 'ts-entry ' + e.status;
+      div.setAttribute('data-offset', e.offset);
+      var val = e.value === null ? '🪦 null (tombstone)' : e.value;
+      var ttl = '';
+      if (e.status === 'tombstone' && e.ttl !== undefined) {
+        ttl = '<span class="ts-ttl">TTL: ' + (e.ttl / 1000).toFixed(1) + 's</span>';
+      }
+      div.innerHTML = 'offset ' + e.offset + ' | ' + e.key + ' = ' + val + ttl;
+      viz.appendChild(div);
+    });
+  }
+
+  function addTsLog(text, cls) {
+    var log = document.getElementById('tombstoneLog');
+    var el = document.createElement('div');
+    el.className = 'ts-log-entry ' + cls;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('deleteRetentionSlider').addEventListener('input', function(e) {
+    document.getElementById('deleteRetentionLabel').textContent = e.target.value;
+  });
+
+  document.getElementById('produceNormalBtn').addEventListener('click', function() {
+    tsEntries.push({ offset: tsOffset++, key: 'key-A', value: '"v' + tsOffset + '"', status: 'normal' });
+    renderTombstones();
+    addTsLog('Produced key-A = "v' + tsOffset + '" at offset ' + (tsOffset - 1), 'info');
+  });
+
+  document.getElementById('produceTombstoneBtn').addEventListener('click', function() {
+    var deleteRetention = parseInt(document.getElementById('deleteRetentionSlider').value);
+    var entry = { offset: tsOffset++, key: 'key-A', value: null, status: 'tombstone', ttl: deleteRetention };
+    tsEntries.push(entry);
+    renderTombstones();
+    addTsLog('🪦 Produced tombstone for key-A at offset ' + (tsOffset - 1) + '. TTL: ' + (deleteRetention / 1000) + 's', 'warn');
+
+    // Start countdown
+    var entryOffset = entry.offset;
+    var remaining = deleteRetention;
+    var interval = setInterval(function() {
+      remaining -= 500;
+      var found = tsEntries.find(function(e) { return e.offset === entryOffset; });
+      if (found) {
+        found.ttl = Math.max(0, remaining);
+        if (remaining <= 0) {
+          found.status = 'expired';
+          clearInterval(interval);
+          addTsLog('💀 Tombstone at offset ' + entryOffset + ' expired — key-A fully removed!', 'error');
+          setTimeout(function() { renderTombstones(); }, 100);
+        }
+        renderTombstones();
+      } else {
+        clearInterval(interval);
+      }
+    }, 500);
+    tsTimers.push(interval);
+  });
+
+  document.getElementById('resetTombstoneBtn').addEventListener('click', function() {
+    tsTimers.forEach(function(t) { clearInterval(t); });
+    tsTimers = [];
+    tsEntries = [];
+    tsOffset = 0;
+    document.getElementById('tombstoneViz').innerHTML = '';
+    document.getElementById('tombstoneLog').innerHTML = '';
+  });
+
+  // ========== CONFIGURATION ==========
+  document.getElementById('dirtyRatioSlider').addEventListener('input', function(e) {
+    var val = parseInt(e.target.value) / 100;
+    document.getElementById('dirtyRatioValue').textContent = val.toFixed(2);
+    var cleanPct = (1 - val) * 100;
+    var dirtyPct = val * 100;
+    document.getElementById('meterClean').style.width = cleanPct + '%';
+    document.getElementById('meterDirty').style.width = dirtyPct + '%';
+    if (dirtyPct >= parseInt(e.target.value)) {
+      document.getElementById('dirtyRatioStatus').textContent = 'Ratio ' + val.toFixed(2) + ' = threshold → compaction triggers ✅';
+    } else {
+      document.getElementById('dirtyRatioStatus').textContent = 'Dirty ratio below threshold → compaction skipped';
+    }
+    updateConfigTimeline();
+  });
+
+  document.getElementById('minLagSlider').addEventListener('input', function(e) {
+    var val = parseInt(e.target.value);
+    if (val === 0) {
+      document.getElementById('minLagValue').textContent = '0';
+    } else if (val < 3600000) {
+      document.getElementById('minLagValue').textContent = (val / 60000).toFixed(0) + ' min';
+    } else {
+      document.getElementById('minLagValue').textContent = (val / 3600000).toFixed(0) + ' hr';
+    }
+    updateConfigTimeline();
+  });
+
+  document.getElementById('maxLagSlider').addEventListener('input', function(e) {
+    var val = parseInt(e.target.value);
+    if (val >= 604800000) {
+      document.getElementById('maxLagValue').textContent = '∞';
+    } else if (val < 86400000) {
+      document.getElementById('maxLagValue').textContent = (val / 3600000).toFixed(0) + ' hr';
+    } else {
+      document.getElementById('maxLagValue').textContent = (val / 86400000).toFixed(1) + ' days';
+    }
+    updateConfigTimeline();
+  });
+
+  var segmentLabels = ['256MB / 1d', '512MB / 3d', '1GB / 7d', '2GB / 14d', '4GB / 30d'];
+  document.getElementById('segmentSlider').addEventListener('input', function(e) {
+    document.getElementById('segmentValue').textContent = segmentLabels[parseInt(e.target.value) - 1];
+    updateConfigTimeline();
+  });
+
+  function updateConfigTimeline() {
+    var bar = document.getElementById('configTimelineBar');
+    bar.innerHTML = '';
+    var minLag = parseInt(document.getElementById('minLagSlider').value);
+    var maxLag = parseInt(document.getElementById('maxLagSlider').value);
+    var totalBlocks = 24; // 24 hours
+
+    for (var i = 0; i < totalBlocks; i++) {
+      var block = document.createElement('div');
+      block.className = 'ct-block';
+      var hourMs = i * 3600000;
+
+      if (i === totalBlocks - 1) {
+        block.className += ' active-seg';
+        block.textContent = 'Active';
+      } else if (hourMs < minLag) {
+        block.className += ' safe';
+        block.textContent = i + 'h';
+      } else if (maxLag < 604800000 && hourMs >= maxLag) {
+        block.className += ' forced';
+        block.textContent = i + 'h';
+      } else {
+        block.className += ' eligible';
+        block.textContent = i + 'h';
+      }
+      bar.appendChild(block);
+    }
+  }
+
+  // ========== USE CASES ==========
+  var ucMode = 'cdc';
+  var ucStream = [];
+  var ucOffset = 0;
+  var ucState = {};
+
+  var ucData = {
+    cdc: {
+      desc: '<strong>CDC (Change Data Capture):</strong> Tools like Debezium capture database changes as Kafka messages keyed by primary key. Compaction ensures the topic always contains the latest row state — a full database snapshot consumers can replay from offset 0.',
+      keys: ['user:101', 'user:102', 'user:103', 'order:501', 'order:502'],
+      values: function(key) {
+        var names = { 'user:101': 'Alice', 'user:102': 'Bob', 'user:103': 'Charlie', 'order:501': '$99.00', 'order:502': '$45.50' };
+        var updates = ['email updated', 'status: active', 'addr changed', 'shipped', 'refunded'];
+        return names[key] + ' — ' + updates[Math.floor(Math.random() * updates.length)];
+      }
+    },
+    ktable: {
+      desc: '<strong>KTable Materialization:</strong> Kafka Streams rebuilds KTables by reading the changelog topic from offset 0. Compaction keeps the topic small — only latest value per key — so rebuilds are fast. Without compaction, restoring a KTable would mean replaying the entire history.',
+      keys: ['balance:alice', 'balance:bob', 'balance:carol', 'count:logins', 'count:orders'],
+      values: function(key) {
+        if (key.indexOf('balance') === 0) return '$' + (Math.floor(Math.random() * 10000) / 100).toFixed(2);
+        return String(Math.floor(Math.random() * 1000));
+      }
+    },
+    snapshot: {
+      desc: '<strong>State Store Snapshots:</strong> Application state (configs, feature flags, session data) can be stored in a compacted topic. On restart, read the entire topic to restore state. Each key is a config/session entry — compaction ensures the snapshot stays minimal.',
+      keys: ['config:theme', 'config:lang', 'config:tz', 'flag:dark-mode', 'flag:beta'],
+      values: function(key) {
+        var vals = {
+          'config:theme': ['light', 'dark', 'auto'],
+          'config:lang': ['en', 'fr', 'de', 'ja'],
+          'config:tz': ['UTC', 'PST', 'EST', 'CET'],
+          'flag:dark-mode': ['true', 'false'],
+          'flag:beta': ['enabled', 'disabled']
+        };
+        var options = vals[key];
+        return options[Math.floor(Math.random() * options.length)];
+      }
+    }
+  };
+
+  function renderUcStream() {
+    var container = document.getElementById('usecaseStream');
+    container.innerHTML = '';
+    ucStream.forEach(function(e) {
+      var div = document.createElement('div');
+      div.className = 'log-entry ' + getKeyCls(e.key);
+      // Use generic coloring for non key-A/B/C keys
+      if (!getKeyCls(e.key)) {
+        div.style.background = 'rgba(167,139,250,0.15)';
+        div.style.borderLeft = '3px solid #a78bfa';
+        div.style.color = '#c4b5fd';
+      }
+      div.innerHTML = '<span class="offset-num">' + e.offset + '</span>' +
+        '<span class="entry-key">' + e.key + '</span>' +
+        '<span class="entry-val">= ' + e.value + '</span>';
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function renderUcState() {
+    var table = document.getElementById('stateTable');
+    table.innerHTML = '';
+    Object.keys(ucState).forEach(function(k) {
+      var row = document.createElement('div');
+      row.className = 'state-row' + (ucState[k].updated ? ' updated' : '');
+      row.innerHTML = '<span class="state-key">' + k + '</span><span>' + ucState[k].value + '</span>';
+      table.appendChild(row);
+    });
+    // Clear updated flag after render
+    setTimeout(function() {
+      Object.keys(ucState).forEach(function(k) { ucState[k].updated = false; });
+    }, 600);
+  }
+
+  document.querySelectorAll('.usecase-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.usecase-tab').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      ucMode = btn.getAttribute('data-uc');
+      ucStream = [];
+      ucOffset = 0;
+      ucState = {};
+      document.getElementById('usecaseDesc').innerHTML = ucData[ucMode].desc;
+      renderUcStream();
+      renderUcState();
+    });
+  });
+
+  document.getElementById('ucProduceBtn').addEventListener('click', function() {
+    var data = ucData[ucMode];
+    var key = data.keys[Math.floor(Math.random() * data.keys.length)];
+    var value = data.values(key);
+    ucStream.push({ offset: ucOffset++, key: key, value: value });
+    ucState[key] = { value: value, updated: true };
+    renderUcStream();
+    renderUcState();
+  });
+
+  document.getElementById('ucCompactBtn').addEventListener('click', function() {
+    // Keep only latest per key
+    var latest = {};
+    ucStream.forEach(function(e) { latest[e.key] = e; });
+    ucStream = Object.keys(latest).map(function(k) { return latest[k]; });
+    ucStream.sort(function(a, b) { return a.offset - b.offset; });
+    renderUcStream();
+  });
+
+  document.getElementById('ucResetBtn').addEventListener('click', function() {
+    ucStream = [];
+    ucOffset = 0;
+    ucState = {};
+    renderUcStream();
+    renderUcState();
+  });
+
+  // ========== INIT ==========
+  initRetention();
+  renderRetention();
+  renderCompactionLog(compactionEntries, [], []);
+  updateVizSizes();
+  updateConfigTimeline();
+</script>
+</BaseLayout>
