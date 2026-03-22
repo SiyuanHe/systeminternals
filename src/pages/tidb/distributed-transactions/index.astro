@@ -1,0 +1,1401 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Distributed Transactions: Percolator 2PC" 
+  description="Interactive visualization of TiDB's distributed transaction model — prewrite, commit, lock resolution, and optimizations"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "TiDB", href: "/tidb/" },
+    { label: "Distributed Transactions", href: "/tidb/distributed-transactions/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔐 Distributed Transactions</h1>
+      <p class="subtitle">Percolator 2PC: How TiDB Commits Across Regions</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          TiDB uses a modified version of Google's 
+          <a href="https://research.google/pubs/pub36726/" target="_blank">Percolator</a> 
+          protocol. Every transaction gets a <strong>start timestamp</strong> (snapshot isolation) 
+          and commits via <strong>two-phase commit</strong> — first locking all keys, then making 
+          them visible atomically. The trick: one key is the <em>primary</em>. 
+          If the primary commits, the whole transaction commits.
+        </p>
+      </div>
+    </section>
+
+    <!-- Main Transaction Flow -->
+    <section class="flow-section">
+      <h2>📡 Transaction Flow</h2>
+      <div class="flow-controls">
+        <button id="startTxnBtn" class="action-btn primary-btn">▶ Start Transaction</button>
+        <button id="stepBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="autoBtn" class="action-btn auto-btn" disabled>⚡ Auto-Play</button>
+        <button id="resetFlowBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-status" id="flowStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="flowStatusText">Click "Start Transaction" to begin</span>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-container">
+        <div class="timeline-actors">
+          <div class="actor">
+            <div class="actor-icon">📱</div>
+            <div class="actor-name">Client / TiDB</div>
+          </div>
+          <div class="actor">
+            <div class="actor-icon">⏰</div>
+            <div class="actor-name">PD (TSO)</div>
+          </div>
+          <div class="actor">
+            <div class="actor-icon">📦</div>
+            <div class="actor-name">TiKV Region 1</div>
+          </div>
+          <div class="actor">
+            <div class="actor-icon">📦</div>
+            <div class="actor-name">TiKV Region 2</div>
+          </div>
+        </div>
+
+        <div class="timeline-events" id="timelineEvents">
+          <!-- Events get inserted here by JS -->
+        </div>
+      </div>
+
+      <!-- Column Family View -->
+      <div class="cf-section">
+        <h3>🗃️ Column Families (What's on Disk)</h3>
+        <div class="cf-grid">
+          <div class="cf-card">
+            <div class="cf-header lock-header">🔒 Lock CF</div>
+            <div class="cf-body" id="lockCF">
+              <div class="cf-empty">Empty</div>
+            </div>
+          </div>
+          <div class="cf-card">
+            <div class="cf-header data-header">📄 Default CF (Data)</div>
+            <div class="cf-body" id="dataCF">
+              <div class="cf-empty">Empty</div>
+            </div>
+          </div>
+          <div class="cf-card">
+            <div class="cf-header write-header">✅ Write CF</div>
+            <div class="cf-body" id="writeCF">
+              <div class="cf-empty">Empty</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanation: Why Primary Key? -->
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>💡 Why a Primary Key?</h3>
+        <p>
+          Crash safety without distributed consensus on every commit. The primary key is the 
+          <strong>single source of truth</strong>: if its Write record exists → committed. 
+          If its Lock still exists → either still running or needs cleanup. 
+          Secondary keys just point back to the primary. This means after the primary commits, 
+          the secondaries can be committed <em>asynchronously</em> — even if TiDB crashes, 
+          any reader encountering a secondary lock can resolve it by checking the primary.
+        </p>
+      </div>
+    </section>
+
+    <!-- Conflict Demo -->
+    <section class="conflict-section">
+      <h2>⚔️ Conflict Resolution</h2>
+      <p class="section-desc">What happens when two transactions write to the same key?</p>
+      
+      <div class="conflict-controls">
+        <div class="txn-config">
+          <div class="txn-box txn-a">
+            <h4>Transaction A</h4>
+            <p>UPDATE account SET balance = 100 WHERE id = 'alice'</p>
+            <span class="txn-ts" id="txnATs">start_ts: —</span>
+          </div>
+          <div class="txn-box txn-b">
+            <h4>Transaction B</h4>
+            <p>UPDATE account SET balance = 200 WHERE id = 'alice'</p>
+            <span class="txn-ts" id="txnBTs">start_ts: —</span>
+          </div>
+        </div>
+        
+        <div class="conflict-actions">
+          <button id="startConflictBtn" class="action-btn primary-btn">▶ Run Both</button>
+          <button id="resetConflictBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <div class="lock-toggle">
+          <label>
+            <input type="checkbox" id="pessimisticToggle">
+            <span class="toggle-label">Pessimistic Locking (TiDB 4.0+)</span>
+          </label>
+          <p class="toggle-desc" id="lockModeDesc">
+            Optimistic: locks acquired only at commit time. Conflicts detected late.
+          </p>
+        </div>
+      </div>
+
+      <div class="conflict-timeline" id="conflictTimeline">
+        <!-- Filled by JS -->
+      </div>
+
+      <div class="conflict-result" id="conflictResult"></div>
+    </section>
+
+    <!-- Explanation: Optimistic vs Pessimistic -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🎯 Optimistic (Default pre-4.0)</h3>
+          <p>
+            No locks until commit. Fast if conflicts are rare. But if Txn B tries to commit 
+            and finds Txn A's lock → <strong>Txn B must retry from scratch</strong>. 
+            Wasted work. Bad for hot keys.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔒 Pessimistic (Default 4.0+)</h3>
+          <p>
+            Acquire locks during <code>UPDATE/DELETE</code>, before commit. 
+            If key is locked → <strong>wait</strong> (with timeout). 
+            Less wasted work, behaves like MySQL. But more lock traffic.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- MVCC Timeline -->
+    <section class="mvcc-section">
+      <h2>⏳ MVCC: Versions Over Time</h2>
+      <p class="section-desc">Every write creates a new version. Readers see a consistent snapshot.</p>
+      
+      <div class="mvcc-controls">
+        <button id="mvccWriteBtn" class="action-btn primary-btn">✏️ Write Version</button>
+        <button id="mvccReadBtn" class="action-btn read-btn">🔍 Read at Snapshot</button>
+        <button id="mvccGCBtn" class="action-btn gc-btn">🗑️ GC Cleanup</button>
+        <button id="mvccResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="mvcc-viz">
+        <div class="mvcc-timeline-bar">
+          <div class="mvcc-axis" id="mvccAxis"></div>
+          <div class="mvcc-gc-line" id="mvccGCLine" style="display: none;">
+            <span class="gc-label">GC Safe Point</span>
+          </div>
+          <div class="mvcc-read-line" id="mvccReadLine" style="display: none;">
+            <span class="read-label" id="readLabel">Reading at ts=?</span>
+          </div>
+        </div>
+        <div class="mvcc-versions" id="mvccVersions"></div>
+        <div class="mvcc-result" id="mvccResult"></div>
+      </div>
+    </section>
+
+    <!-- Latency Breakdown -->
+    <section class="latency-section">
+      <h2>📊 Latency Breakdown</h2>
+      <p class="section-desc">Where time goes in a distributed transaction</p>
+
+      <div class="latency-controls">
+        <div class="latency-slider">
+          <label>Network RTT: <strong id="rttValue">1</strong> ms</label>
+          <input type="range" id="rttSlider" min="0" max="50" value="1" step="0.5">
+        </div>
+        <div class="optimization-toggles">
+          <label><input type="checkbox" id="asyncCommitToggle"> Async Commit (5.0+)</label>
+          <label><input type="checkbox" id="onePCToggle"> 1PC (single region)</label>
+        </div>
+      </div>
+
+      <div class="latency-bars" id="latencyBars">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="latency-total">
+        Total: <span id="latencyTotal">6</span> ms
+      </div>
+    </section>
+
+    <!-- Explanation: Optimizations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>⚡ Async Commit (TiDB 5.0)</h3>
+          <p>
+            Instead of waiting for the primary's Write record, TiDB returns success after all 
+            prewrites succeed. The commit_ts is calculated from the max prewrite timestamps. 
+            Saves <strong>one full RTT</strong> — huge for cross-region deployments.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🎯 1PC Optimization</h3>
+          <p>
+            If all keys land in <strong>one TiKV region</strong>, skip the two-phase dance entirely. 
+            Prewrite + Commit in a single RPC. Latency drops to <strong>1 RTT</strong>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/transaction-overview" target="_blank">TiDB Transaction Documentation</a> and <a href="https://research.google/pubs/pub36726/" target="_blank">Google Percolator Paper</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20TiDB%20distributed%20transactions%20(Percolator%202PC)&url=https://systeminternals.dev/tidb/distributed-transactions/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/distributed-transactions/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/tidb/distributed-transactions/&t=Interactive%20TiDB%20Distributed%20Transaction%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f472b6, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(167, 139, 250, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #a78bfa; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .auto-btn {
+    background: linear-gradient(135deg, #f472b6, #ec4899);
+    color: white;
+  }
+
+  .read-btn {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+
+  .gc-btn {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.prewrite { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.commit { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.done { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Timeline */
+  .timeline-container {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    overflow-x: auto;
+    margin-bottom: 30px;
+  }
+
+  .timeline-actors {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+
+  .actor {
+    padding: 10px;
+  }
+
+  .actor-icon {
+    font-size: 2rem;
+    margin-bottom: 4px;
+  }
+
+  .actor-name {
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  .timeline-events {
+    min-height: 200px;
+    position: relative;
+  }
+
+  :global(.timeline-event) {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  :global(.event-cell) {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    border-radius: 8px;
+    position: relative;
+  }
+
+  :global(.event-cell.active) {
+    padding: 8px 6px;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  :global(.event-cell.tso) { background: rgba(251, 191, 36, 0.2); border: 1px solid rgba(251, 191, 36, 0.4); }
+  :global(.event-cell.prewrite) { background: rgba(244, 114, 182, 0.2); border: 1px solid rgba(244, 114, 182, 0.4); }
+  :global(.event-cell.commit) { background: rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.4); }
+  :global(.event-cell.client) { background: rgba(167, 139, 250, 0.2); border: 1px solid rgba(167, 139, 250, 0.4); }
+
+  :global(.event-arrow) {
+    position: absolute;
+    top: 50%;
+    height: 2px;
+    background: rgba(255,255,255,0.3);
+    z-index: 1;
+  }
+
+  /* Column Families */
+  .cf-section {
+    margin-bottom: 30px;
+  }
+
+  .cf-section h3 {
+    color: #aaa;
+    font-size: 1rem;
+    margin-bottom: 16px;
+  }
+
+  .cf-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .cf-card {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .cf-header {
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .lock-header { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+  .data-header { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+  .write-header { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+
+  .cf-body {
+    padding: 12px 14px;
+    min-height: 80px;
+    background: rgba(0,0,0,0.2);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+  }
+
+  .cf-empty {
+    color: #555;
+    font-style: italic;
+  }
+
+  :global(.cf-entry) {
+    padding: 4px 0;
+    color: #ccc;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  :global(.cf-entry.stale) {
+    opacity: 0.4;
+    text-decoration: line-through;
+  }
+
+  @keyframes entryAppear {
+    from { opacity: 0; background: rgba(255,255,255,0.1); }
+    to { opacity: 1; background: transparent; }
+  }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #a78bfa; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(244, 114, 182, 0.08), rgba(167, 139, 250, 0.08));
+    border-color: rgba(244, 114, 182, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Conflict Section */
+  .conflict-section {
+    margin-bottom: 50px;
+  }
+
+  .conflict-controls {
+    margin-bottom: 24px;
+  }
+
+  .txn-config {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .txn-box {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .txn-box h4 {
+    font-size: 1rem;
+    margin-bottom: 8px;
+  }
+
+  .txn-box p {
+    font-size: 0.85rem;
+    color: #aaa;
+    font-family: 'Monaco', 'Menlo', monospace;
+    margin-bottom: 8px;
+  }
+
+  .txn-ts {
+    font-size: 0.8rem;
+    color: #666;
+  }
+
+  .txn-a { background: rgba(244, 114, 182, 0.08); border-color: rgba(244, 114, 182, 0.3); }
+  .txn-a h4 { color: #f472b6; }
+
+  .txn-b { background: rgba(96, 165, 250, 0.08); border-color: rgba(96, 165, 250, 0.3); }
+  .txn-b h4 { color: #60a5fa; }
+
+  .conflict-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .lock-toggle {
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .lock-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .toggle-desc {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 8px;
+  }
+
+  .conflict-timeline {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 150px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  :global(.conflict-step) {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  :global(.conflict-step.txn-a-step) { background: rgba(244, 114, 182, 0.1); color: #f9a8d4; border-left: 3px solid #f472b6; }
+  :global(.conflict-step.txn-b-step) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.conflict-step.conflict-step-alert) { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.conflict-step.success-step) { background: rgba(34, 197, 94, 0.15); color: #86efac; border-left: 3px solid #22c55e; }
+
+  .conflict-result {
+    padding: 16px;
+    border-radius: 12px;
+    font-size: 1rem;
+    text-align: center;
+    min-height: 20px;
+  }
+
+  /* MVCC Section */
+  .mvcc-section {
+    margin-bottom: 50px;
+  }
+
+  .mvcc-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .mvcc-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .mvcc-timeline-bar {
+    position: relative;
+    height: 60px;
+    margin-bottom: 20px;
+  }
+
+  .mvcc-axis {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+  }
+
+  :global(.mvcc-tick) {
+    position: absolute;
+    bottom: 0;
+    width: 3px;
+    height: 20px;
+    background: #a78bfa;
+    border-radius: 2px;
+    transform: translateX(-50%);
+  }
+
+  :global(.mvcc-tick-label) {
+    position: absolute;
+    bottom: 24px;
+    font-size: 0.7rem;
+    color: #aaa;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+
+  .mvcc-gc-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #ef4444;
+    z-index: 5;
+  }
+
+  .gc-label {
+    position: absolute;
+    top: -4px;
+    left: 8px;
+    font-size: 0.7rem;
+    color: #ef4444;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .mvcc-read-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #60a5fa;
+    z-index: 5;
+  }
+
+  .read-label {
+    position: absolute;
+    top: -4px;
+    left: 8px;
+    font-size: 0.7rem;
+    color: #60a5fa;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .mvcc-versions {
+    min-height: 40px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  :global(.mvcc-version) {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  :global(.mvcc-version.visible) {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+  }
+
+  :global(.mvcc-version.invisible) {
+    background: rgba(107, 114, 128, 0.15);
+    border: 1px solid rgba(107, 114, 128, 0.3);
+    color: #9ca3af;
+  }
+
+  :global(.mvcc-version.gc-deleted) {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    text-decoration: line-through;
+    opacity: 0.5;
+  }
+
+  :global(.mvcc-version.read-target) {
+    box-shadow: 0 0 15px rgba(96, 165, 250, 0.5);
+    border-color: #60a5fa;
+  }
+
+  .mvcc-result {
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: #aaa;
+    text-align: center;
+    min-height: 20px;
+  }
+
+  /* Latency Section */
+  .latency-section {
+    margin-bottom: 50px;
+  }
+
+  .latency-controls {
+    display: flex;
+    gap: 30px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .latency-slider {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .latency-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
+  }
+
+  .latency-slider strong {
+    color: #a78bfa;
+  }
+
+  .latency-slider input[type="range"] {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .latency-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #a78bfa;
+    cursor: pointer;
+  }
+
+  .optimization-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .optimization-toggles label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+
+  .latency-bars {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  :global(.latency-row) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  :global(.latency-label) {
+    width: 180px;
+    font-size: 0.85rem;
+    color: #aaa;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  :global(.latency-bar-track) {
+    flex: 1;
+    height: 24px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  :global(.latency-bar-fill) {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease-out;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+    min-width: 40px;
+  }
+
+  :global(.latency-bar-fill.tso-bar) { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  :global(.latency-bar-fill.prewrite-bar) { background: linear-gradient(90deg, #f472b6, #ec4899); }
+  :global(.latency-bar-fill.commit-bar) { background: linear-gradient(90deg, #4ade80, #22c55e); }
+  :global(.latency-bar-fill.skipped) { background: rgba(255,255,255,0.1); opacity: 0.3; }
+
+  :global(.latency-time) {
+    width: 60px;
+    font-size: 0.85rem;
+    color: #888;
+    flex-shrink: 0;
+  }
+
+  .latency-total {
+    text-align: center;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(96, 165, 250, 0.1));
+    border-radius: 10px;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+  }
+
+  .latency-total span {
+    color: #a78bfa;
+    font-size: 1.6rem;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .timeline-actors { grid-template-columns: repeat(2, 1fr); }
+    :global(.timeline-event) { grid-template-columns: repeat(2, 1fr); }
+    .cf-grid { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .txn-config { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== TRANSACTION FLOW ==========
+  let flowStep = 0;
+  let autoPlaying = false;
+  const startTs = 100;
+  const commitTs = 110;
+
+  const flowSteps = [
+    { status: 'prewrite', badge: 'Get TSO', text: `Requesting start_ts from PD → got ts=${startTs}`,
+      cells: [null, 'tso', null, null], cellTexts: [null, `start_ts=${startTs}`, null, null],
+      cf: {} },
+    { status: 'prewrite', badge: 'Prewrite', text: `Prewrite primary key "alice" to Region 1`,
+      cells: [null, null, 'prewrite', null], cellTexts: [null, null, 'Lock alice (primary)', null],
+      cf: { lock: ['alice → lock(start_ts=100, primary)'], data: ['alice@100 → balance=100'] } },
+    { status: 'prewrite', badge: 'Prewrite', text: `Prewrite secondary key "bob" to Region 2`,
+      cells: [null, null, null, 'prewrite'], cellTexts: [null, null, null, 'Lock bob (→alice)'],
+      cf: { lock: ['alice → lock(start_ts=100, primary)', 'bob → lock(start_ts=100, primary=alice)'],
+            data: ['alice@100 → balance=100', 'bob@100 → balance=200'] } },
+    { status: 'commit', badge: 'Get TSO', text: `Requesting commit_ts from PD → got ts=${commitTs}`,
+      cells: [null, 'tso', null, null], cellTexts: [null, `commit_ts=${commitTs}`, null, null],
+      cf: {} },
+    { status: 'commit', badge: 'Commit', text: `Commit primary "alice" — remove lock, write commit record ✅`,
+      cells: [null, null, 'commit', null], cellTexts: [null, null, '✅ Commit alice', null],
+      cf: { lock: ['bob → lock(start_ts=100, primary=alice)'],
+            data: ['alice@100 → balance=100', 'bob@100 → balance=200'],
+            write: ['alice@110 → start_ts=100'] } },
+    { status: 'done', badge: 'Done', text: `Async commit secondary "bob" — transaction complete! 🎉`,
+      cells: [null, null, null, 'commit'], cellTexts: [null, null, null, '✅ Commit bob'],
+      cf: { lock: [],
+            data: ['alice@100 → balance=100', 'bob@100 → balance=200'],
+            write: ['alice@110 → start_ts=100', 'bob@110 → start_ts=100'] } },
+  ];
+
+  function renderFlowStep(stepIdx: number) {
+    const step = flowSteps[stepIdx];
+    const timeline = document.getElementById('timelineEvents')!;
+    const statusBadge = document.querySelector('.status-badge')!;
+    const statusText = document.getElementById('flowStatusText')!;
+
+    statusBadge.className = 'status-badge ' + step.status;
+    statusBadge.textContent = step.badge;
+    statusText.textContent = step.text;
+
+    // Add timeline row
+    const row = document.createElement('div');
+    row.className = 'timeline-event';
+    for (let i = 0; i < 4; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'event-cell' + (step.cells[i] ? ` active ${step.cells[i]}` : '');
+      cell.textContent = step.cellTexts[i] || '';
+      row.appendChild(cell);
+    }
+    timeline.appendChild(row);
+
+    // Update column families if provided
+    if (step.cf.lock !== undefined) renderCF('lockCF', step.cf.lock);
+    if (step.cf.data !== undefined) renderCF('dataCF', step.cf.data);
+    if (step.cf.write !== undefined) renderCF('writeCF', step.cf.write);
+  }
+
+  function renderCF(id: string, entries: string[]) {
+    const el = document.getElementById(id)!;
+    if (entries.length === 0) {
+      el.innerHTML = '<div class="cf-empty">Empty</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => `<div class="cf-entry">${e}</div>`).join('');
+  }
+
+  document.getElementById('startTxnBtn')?.addEventListener('click', () => {
+    flowStep = 0;
+    document.getElementById('timelineEvents')!.innerHTML = '';
+    renderCF('lockCF', []); renderCF('dataCF', []); renderCF('writeCF', []);
+    renderFlowStep(flowStep);
+    (document.getElementById('stepBtn') as HTMLButtonElement).disabled = false;
+    (document.getElementById('autoBtn') as HTMLButtonElement).disabled = false;
+  });
+
+  document.getElementById('stepBtn')?.addEventListener('click', () => {
+    if (flowStep < flowSteps.length - 1) {
+      flowStep++;
+      renderFlowStep(flowStep);
+      if (flowStep >= flowSteps.length - 1) {
+        (document.getElementById('stepBtn') as HTMLButtonElement).disabled = true;
+        (document.getElementById('autoBtn') as HTMLButtonElement).disabled = true;
+      }
+    }
+  });
+
+  document.getElementById('autoBtn')?.addEventListener('click', async () => {
+    if (autoPlaying) return;
+    autoPlaying = true;
+    (document.getElementById('autoBtn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('stepBtn') as HTMLButtonElement).disabled = true;
+    while (flowStep < flowSteps.length - 1) {
+      await new Promise(r => setTimeout(r, 1200));
+      flowStep++;
+      renderFlowStep(flowStep);
+    }
+    autoPlaying = false;
+  });
+
+  document.getElementById('resetFlowBtn')?.addEventListener('click', () => {
+    flowStep = 0;
+    autoPlaying = false;
+    document.getElementById('timelineEvents')!.innerHTML = '';
+    document.querySelector('.status-badge')!.className = 'status-badge idle';
+    document.querySelector('.status-badge')!.textContent = 'Ready';
+    document.getElementById('flowStatusText')!.textContent = 'Click "Start Transaction" to begin';
+    renderCF('lockCF', []); renderCF('dataCF', []); renderCF('writeCF', []);
+    (document.getElementById('stepBtn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('autoBtn') as HTMLButtonElement).disabled = true;
+  });
+
+  // ========== CONFLICT DEMO ==========
+  const pessimisticToggle = document.getElementById('pessimisticToggle') as HTMLInputElement;
+  
+  pessimisticToggle?.addEventListener('change', () => {
+    const desc = document.getElementById('lockModeDesc')!;
+    desc.textContent = pessimisticToggle.checked 
+      ? 'Pessimistic: locks acquired during DML execution. Conflicts detected early (waits).'
+      : 'Optimistic: locks acquired only at commit time. Conflicts detected late.';
+  });
+
+  document.getElementById('startConflictBtn')?.addEventListener('click', async () => {
+    const timeline = document.getElementById('conflictTimeline')!;
+    const result = document.getElementById('conflictResult')!;
+    const pessimistic = pessimisticToggle?.checked;
+    timeline.innerHTML = '';
+    result.innerHTML = '';
+
+    document.getElementById('txnATs')!.textContent = 'start_ts: 50';
+    document.getElementById('txnBTs')!.textContent = 'start_ts: 55';
+
+    const steps = pessimistic ? [
+      { cls: 'txn-a-step', text: '🅰️ Txn A: BEGIN (start_ts=50)' },
+      { cls: 'txn-b-step', text: '🅱️ Txn B: BEGIN (start_ts=55)' },
+      { cls: 'txn-a-step', text: '🅰️ Txn A: UPDATE alice → acquires pessimistic lock on "alice"' },
+      { cls: 'txn-b-step', text: '🅱️ Txn B: UPDATE alice → finds Txn A\'s lock → WAITING...' },
+      { cls: 'txn-a-step', text: '🅰️ Txn A: COMMIT → prewrite + commit succeeds ✅' },
+      { cls: 'success-step', text: '🅱️ Txn B: Lock released → acquires lock → commits ✅' },
+    ] : [
+      { cls: 'txn-a-step', text: '🅰️ Txn A: BEGIN (start_ts=50)' },
+      { cls: 'txn-b-step', text: '🅱️ Txn B: BEGIN (start_ts=55)' },
+      { cls: 'txn-a-step', text: '🅰️ Txn A: UPDATE alice SET balance=100 (buffered locally)' },
+      { cls: 'txn-b-step', text: '🅱️ Txn B: UPDATE alice SET balance=200 (buffered locally)' },
+      { cls: 'txn-a-step', text: '🅰️ Txn A: COMMIT → prewrite locks "alice" → commit ✅' },
+      { cls: 'conflict-step-alert', text: '🅱️ Txn B: COMMIT → prewrite finds Txn A\'s write at ts=50 → WriteConflict!' },
+      { cls: 'conflict-step-alert', text: '💥 Txn B ABORTED — must retry from scratch (new start_ts)' },
+    ];
+
+    for (const step of steps) {
+      await new Promise(r => setTimeout(r, 900));
+      const el = document.createElement('div');
+      el.className = `conflict-step ${step.cls}`;
+      el.textContent = step.text;
+      timeline.appendChild(el);
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    await new Promise(r => setTimeout(r, 500));
+    if (pessimistic) {
+      result.innerHTML = '<div style="color: #4ade80;">✅ Both transactions succeeded — Txn B waited for Txn A\'s lock, then proceeded. No wasted work.</div>';
+    } else {
+      result.innerHTML = '<div style="color: #fca5a5;">❌ Txn B wasted work — all reads and writes discarded. Must retry the entire transaction.</div>';
+    }
+  });
+
+  document.getElementById('resetConflictBtn')?.addEventListener('click', () => {
+    document.getElementById('conflictTimeline')!.innerHTML = '';
+    document.getElementById('conflictResult')!.innerHTML = '';
+    document.getElementById('txnATs')!.textContent = 'start_ts: —';
+    document.getElementById('txnBTs')!.textContent = 'start_ts: —';
+  });
+
+  // ========== MVCC TIMELINE ==========
+  let mvccVersions: Array<{ts: number; value: string; deleted: boolean}> = [];
+  let mvccNextTs = 10;
+  const values = ['$100', '$250', '$75', '$500', '$0', '$1000', '$42'];
+
+  function renderMVCC() {
+    const container = document.getElementById('mvccVersions')!;
+    const axis = document.getElementById('mvccAxis')!;
+    
+    container.innerHTML = '';
+    axis.innerHTML = '';
+
+    if (mvccVersions.length === 0) return;
+
+    const maxTs = Math.max(...mvccVersions.map(v => v.ts)) + 10;
+    
+    mvccVersions.forEach(v => {
+      const pct = (v.ts / maxTs) * 90 + 5;
+      
+      // Tick on axis
+      const tick = document.createElement('div');
+      tick.className = 'mvcc-tick';
+      tick.style.left = pct + '%';
+      axis.appendChild(tick);
+
+      const label = document.createElement('div');
+      label.className = 'mvcc-tick-label';
+      label.style.left = pct + '%';
+      label.textContent = `ts=${v.ts}`;
+      axis.appendChild(label);
+
+      // Version badge
+      const badge = document.createElement('div');
+      badge.className = `mvcc-version ${v.deleted ? 'gc-deleted' : 'visible'}`;
+      badge.textContent = `ts=${v.ts}: ${v.value}`;
+      badge.dataset.ts = String(v.ts);
+      container.appendChild(badge);
+    });
+  }
+
+  document.getElementById('mvccWriteBtn')?.addEventListener('click', () => {
+    const val = values[mvccVersions.length % values.length];
+    mvccVersions.push({ ts: mvccNextTs, value: val, deleted: false });
+    mvccNextTs += Math.floor(Math.random() * 15) + 5;
+    renderMVCC();
+    document.getElementById('mvccResult')!.textContent = `Wrote version at ts=${mvccVersions[mvccVersions.length-1].ts}`;
+    document.getElementById('mvccReadLine')!.style.display = 'none';
+    document.getElementById('mvccGCLine')!.style.display = 'none';
+  });
+
+  document.getElementById('mvccReadBtn')?.addEventListener('click', () => {
+    if (mvccVersions.length === 0) {
+      document.getElementById('mvccResult')!.textContent = 'No versions to read';
+      return;
+    }
+    const active = mvccVersions.filter(v => !v.deleted);
+    if (active.length === 0) {
+      document.getElementById('mvccResult')!.textContent = 'All versions GC\'d!';
+      return;
+    }
+    // Pick a random read timestamp
+    const maxTs = Math.max(...mvccVersions.map(v => v.ts)) + 10;
+    const readTs = Math.floor(Math.random() * maxTs) + 5;
+
+    // Find version visible at readTs (latest version with ts <= readTs)
+    const visible = active.filter(v => v.ts <= readTs).sort((a, b) => b.ts - a.ts);
+
+    const readLine = document.getElementById('mvccReadLine')! as HTMLElement;
+    readLine.style.display = 'block';
+    readLine.style.left = ((readTs / (maxTs + 10)) * 90 + 5) + '%';
+    document.getElementById('readLabel')!.textContent = `Read at ts=${readTs}`;
+
+    // Highlight
+    document.querySelectorAll('.mvcc-version').forEach(el => {
+      el.classList.remove('read-target');
+    });
+
+    if (visible.length > 0) {
+      const target = visible[0];
+      document.querySelectorAll('.mvcc-version').forEach(el => {
+        if ((el as HTMLElement).dataset.ts === String(target.ts)) {
+          el.classList.add('read-target');
+        }
+      });
+      document.getElementById('mvccResult')!.textContent = `Read at ts=${readTs} → sees ts=${target.ts}: ${target.value} (snapshot isolation)`;
+    } else {
+      document.getElementById('mvccResult')!.textContent = `Read at ts=${readTs} → no version visible (all versions are newer)`;
+    }
+  });
+
+  document.getElementById('mvccGCBtn')?.addEventListener('click', () => {
+    const active = mvccVersions.filter(v => !v.deleted);
+    if (active.length <= 1) {
+      document.getElementById('mvccResult')!.textContent = 'Need at least 2 active versions to GC';
+      return;
+    }
+    // GC all but the latest
+    const sorted = [...active].sort((a, b) => b.ts - a.ts);
+    const safePoint = sorted[0].ts;
+    let gcCount = 0;
+    mvccVersions.forEach(v => {
+      if (!v.deleted && v.ts < safePoint) {
+        v.deleted = true;
+        gcCount++;
+      }
+    });
+
+    const gcLine = document.getElementById('mvccGCLine')! as HTMLElement;
+    const maxTs = Math.max(...mvccVersions.map(v => v.ts)) + 10;
+    gcLine.style.display = 'block';
+    gcLine.style.left = ((safePoint / (maxTs + 10)) * 90 + 5) + '%';
+
+    renderMVCC();
+    document.getElementById('mvccResult')!.textContent = `GC cleaned ${gcCount} old version(s). Safe point = ts=${safePoint}`;
+  });
+
+  document.getElementById('mvccResetBtn')?.addEventListener('click', () => {
+    mvccVersions = [];
+    mvccNextTs = 10;
+    document.getElementById('mvccVersions')!.innerHTML = '';
+    document.getElementById('mvccAxis')!.innerHTML = '';
+    document.getElementById('mvccResult')!.textContent = '';
+    document.getElementById('mvccReadLine')!.style.display = 'none';
+    document.getElementById('mvccGCLine')!.style.display = 'none';
+  });
+
+  // ========== LATENCY BREAKDOWN ==========
+  const rttSlider = document.getElementById('rttSlider') as HTMLInputElement;
+  const asyncCommitToggle = document.getElementById('asyncCommitToggle') as HTMLInputElement;
+  const onePCToggle = document.getElementById('onePCToggle') as HTMLInputElement;
+
+  function renderLatency() {
+    const rtt = parseFloat(rttSlider.value);
+    const asyncCommit = asyncCommitToggle.checked;
+    const onePC = onePCToggle.checked;
+
+    document.getElementById('rttValue')!.textContent = rtt.toString();
+
+    let rows: Array<{label: string; ms: number; bar: string; skipped?: boolean}>;
+
+    if (onePC) {
+      rows = [
+        { label: 'Get start_ts (PD)', ms: rtt, bar: 'tso-bar' },
+        { label: 'Prewrite + Commit', ms: rtt, bar: 'commit-bar' },
+        { label: '2nd commit RTT', ms: 0, bar: 'commit-bar', skipped: true },
+      ];
+    } else if (asyncCommit) {
+      rows = [
+        { label: 'Get start_ts (PD)', ms: rtt, bar: 'tso-bar' },
+        { label: 'Prewrite (all keys)', ms: rtt, bar: 'prewrite-bar' },
+        { label: 'Commit (async)', ms: 0, bar: 'commit-bar', skipped: true },
+      ];
+    } else {
+      rows = [
+        { label: 'Get start_ts (PD)', ms: rtt, bar: 'tso-bar' },
+        { label: 'Prewrite (all keys)', ms: rtt, bar: 'prewrite-bar' },
+        { label: 'Get commit_ts (PD)', ms: rtt, bar: 'tso-bar' },
+        { label: 'Commit primary', ms: rtt, bar: 'commit-bar' },
+      ];
+    }
+
+    const maxMs = Math.max(...rows.map(r => r.ms), 1);
+    const container = document.getElementById('latencyBars')!;
+    container.innerHTML = '';
+
+    let total = 0;
+    rows.forEach(r => {
+      total += r.ms;
+      const row = document.createElement('div');
+      row.className = 'latency-row';
+      
+      const pct = r.skipped ? 100 : (r.ms / maxMs) * 100;
+      row.innerHTML = `
+        <div class="latency-label">${r.label}</div>
+        <div class="latency-bar-track">
+          <div class="latency-bar-fill ${r.skipped ? 'skipped' : r.bar}" style="width: ${pct}%">
+            ${r.skipped ? '✕ skipped' : ''}
+          </div>
+        </div>
+        <div class="latency-time">${r.skipped ? '0 ms' : r.ms.toFixed(1) + ' ms'}</div>
+      `;
+      container.appendChild(row);
+    });
+
+    document.getElementById('latencyTotal')!.textContent = total.toFixed(1);
+  }
+
+  rttSlider?.addEventListener('input', renderLatency);
+  asyncCommitToggle?.addEventListener('change', () => {
+    if (asyncCommitToggle.checked) onePCToggle.checked = false;
+    renderLatency();
+  });
+  onePCToggle?.addEventListener('change', () => {
+    if (onePCToggle.checked) asyncCommitToggle.checked = false;
+    renderLatency();
+  });
+
+  // Initial render
+  renderLatency();
+</script>
