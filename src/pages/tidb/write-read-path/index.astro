@@ -1,0 +1,1297 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Write Path & Read Path: End-to-End" 
+  description="Interactive visualization of TiDB's end-to-end write and read paths — from SQL parsing to RocksDB storage engine"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "TiDB", href: "/tidb/" },
+    { label: "Write & Read Path", href: "/tidb/write-read-path/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🛤️ Write Path & Read Path</h1>
+      <p class="subtitle">End-to-End: From SQL to RocksDB and Back</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Every SQL statement in TiDB travels through multiple layers: the <strong>SQL layer</strong> 
+          parses and plans, the <strong>transaction layer</strong> manages MVCC and timestamps, 
+          <strong>2PC</strong> coordinates distributed commits, <strong>Raft</strong> replicates for 
+          durability, and <strong>RocksDB</strong> persists data on disk. Understanding this full 
+          path — for both <em>writes</em> and <em>reads</em> — is key to diagnosing latency and 
+          tuning performance.
+        </p>
+      </div>
+    </section>
+
+    <!-- View Mode Toggle -->
+    <section class="view-toggle-section">
+      <div class="view-toggle">
+        <button id="simpleViewBtn" class="toggle-btn active">📋 Simple View</button>
+        <button id="detailedViewBtn" class="toggle-btn">🔬 Detailed View</button>
+      </div>
+    </section>
+
+    <!-- ==================== WRITE PATH ==================== -->
+    <section class="flow-section">
+      <h2>✏️ Write Path</h2>
+      <p class="section-desc">Trace an INSERT/UPDATE from SQL text to durable storage</p>
+
+      <div class="flow-controls">
+        <button id="startWriteBtn" class="action-btn primary-btn">▶ Start Write</button>
+        <button id="stepWriteBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="autoWriteBtn" class="action-btn auto-btn" disabled>⚡ Auto-Play</button>
+        <button id="resetWriteBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-status" id="writeFlowStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="writeStatusText">Click "Start Write" to begin</span>
+      </div>
+
+      <div class="pipeline-container" id="writePipeline">
+        <div class="pipeline-stages">
+          <div class="stage" id="ws-sql">
+            <div class="stage-icon">📝</div>
+            <div class="stage-label">SQL Layer</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="ws-txn">
+            <div class="stage-icon">🔄</div>
+            <div class="stage-label">Transaction</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="ws-2pc">
+            <div class="stage-icon">🤝</div>
+            <div class="stage-label">2PC</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="ws-raft">
+            <div class="stage-icon">📡</div>
+            <div class="stage-label">Raft</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="ws-engine">
+            <div class="stage-icon">💾</div>
+            <div class="stage-label">RocksDB</div>
+          </div>
+        </div>
+
+        <div class="step-detail-box" id="writeDetailBox">
+          <div class="detail-placeholder">Follow the write as it flows through each layer</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== READ PATH ==================== -->
+    <section class="flow-section">
+      <h2>🔍 Read Path</h2>
+      <p class="section-desc">Trace a SELECT from SQL text to data retrieval</p>
+
+      <div class="flow-controls">
+        <button id="startReadBtn" class="action-btn primary-btn">▶ Start Read</button>
+        <button id="stepReadBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="autoReadBtn" class="action-btn auto-btn" disabled>⚡ Auto-Play</button>
+        <button id="resetReadBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-status" id="readFlowStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="readStatusText">Click "Start Read" to begin</span>
+      </div>
+
+      <div class="pipeline-container" id="readPipeline">
+        <div class="pipeline-stages">
+          <div class="stage" id="rs-sql">
+            <div class="stage-icon">📝</div>
+            <div class="stage-label">SQL Layer</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="rs-cop">
+            <div class="stage-icon">⬇️</div>
+            <div class="stage-label">Coprocessor</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="rs-tikv">
+            <div class="stage-icon">📦</div>
+            <div class="stage-label">TiKV Read</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="rs-mvcc">
+            <div class="stage-icon">⏳</div>
+            <div class="stage-label">MVCC</div>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage" id="rs-engine">
+            <div class="stage-icon">💾</div>
+            <div class="stage-label">RocksDB</div>
+          </div>
+        </div>
+
+        <div class="step-detail-box" id="readDetailBox">
+          <div class="detail-placeholder">Follow the read as it flows through each layer</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== LATENCY BREAKDOWN ==================== -->
+    <section class="latency-section">
+      <h2>📊 Latency Breakdown</h2>
+      <p class="section-desc">Adjust parameters to see how they affect end-to-end latency</p>
+
+      <div class="latency-controls">
+        <div class="latency-slider">
+          <label>Network RTT: <strong id="rttValue">1</strong> ms</label>
+          <input type="range" id="rttSlider" min="0" max="50" value="1" step="0.5">
+        </div>
+        <div class="latency-slider">
+          <label>Disk Latency: <strong id="diskValue">0.1</strong> ms</label>
+          <input type="range" id="diskSlider" min="0.05" max="5" value="0.1" step="0.05">
+        </div>
+        <div class="latency-slider">
+          <label>Raft Replication: <strong id="raftValue">1</strong> ms</label>
+          <input type="range" id="raftSlider" min="0" max="20" value="1" step="0.5">
+        </div>
+      </div>
+
+      <div class="latency-path-tabs">
+        <button id="latWriteTab" class="tab-btn active">✏️ Write Latency</button>
+        <button id="latReadTab" class="tab-btn">🔍 Read Latency</button>
+      </div>
+
+      <div class="latency-bars" id="latencyBars"></div>
+
+      <div class="latency-total">
+        Total: <span id="latencyTotal">0</span> ms
+      </div>
+    </section>
+
+    <!-- ==================== POINT LOOKUP vs RANGE SCAN ==================== -->
+    <section class="comparison-section">
+      <h2>🎯 Point Lookup vs Range Scan</h2>
+      <p class="section-desc">How the read path differs for different query patterns</p>
+
+      <div class="comparison-grid">
+        <div class="comparison-card point-card">
+          <div class="comparison-header">
+            <h3>🎯 Point Lookup</h3>
+            <code>SELECT * FROM t WHERE id = 42</code>
+          </div>
+          <div class="comparison-body">
+            <div class="comp-step">
+              <span class="comp-num">1</span>
+              <div class="comp-text">
+                <strong>Encode key</strong>
+                <span class="detail-text">tablecodec → single key <code>t/42</code></span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">2</span>
+              <div class="comp-text">
+                <strong>Locate region</strong>
+                <span class="detail-text">PD cache → one region, one RPC</span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">3</span>
+              <div class="comp-text">
+                <strong>Bloom filter</strong>
+                <span class="detail-text">Check if key exists → skip SST if absent</span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">4</span>
+              <div class="comp-text">
+                <strong>MemTable → Cache → SST</strong>
+                <span class="detail-text">Single <code>Get()</code> call</span>
+              </div>
+            </div>
+          </div>
+          <div class="comparison-perf">
+            <div class="perf-label">Typical</div>
+            <div class="perf-bar point-bar" style="width: 25%"></div>
+            <div class="perf-value">~1-2 ms</div>
+          </div>
+        </div>
+
+        <div class="comparison-card range-card">
+          <div class="comparison-header">
+            <h3>📑 Range Scan</h3>
+            <code>SELECT * FROM t WHERE id BETWEEN 1 AND 1000</code>
+          </div>
+          <div class="comparison-body">
+            <div class="comp-step">
+              <span class="comp-num">1</span>
+              <div class="comp-text">
+                <strong>Encode range</strong>
+                <span class="detail-text">tablecodec → [<code>t/1</code>, <code>t/1000</code>]</span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">2</span>
+              <div class="comp-text">
+                <strong>Scatter to regions</strong>
+                <span class="detail-text">May span multiple regions → parallel RPCs</span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">3</span>
+              <div class="comp-text">
+                <strong>No bloom filter</strong>
+                <span class="detail-text">Bloom filters only help point lookups</span>
+              </div>
+            </div>
+            <div class="comp-step">
+              <span class="comp-num">4</span>
+              <div class="comp-text">
+                <strong>Iterator merge</strong>
+                <span class="detail-text">Merge MemTable + L0..Lmax iterators</span>
+              </div>
+            </div>
+          </div>
+          <div class="comparison-perf">
+            <div class="perf-label">Typical</div>
+            <div class="perf-bar range-bar" style="width: 80%"></div>
+            <div class="perf-value">~5-50 ms+</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanation Cards -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📦 TableCodec: SQL → KV</h3>
+          <p>
+            TiDB encodes every row as a key-value pair. The key format is 
+            <code>t&#123;tableID&#125;_r&#123;rowID&#125;</code> for row data and 
+            <code>t&#123;tableID&#125;_i&#123;indexID&#125;_&#123;indexValues&#125;</code> for indexes. 
+            This encoding means <strong>range scans map directly to sorted key ranges</strong> 
+            in TiKV — no secondary lookups needed.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Coprocessor Push-down</h3>
+          <p>
+            Instead of pulling all rows to TiDB and filtering there, predicates like 
+            <code>WHERE age > 30</code> and aggregations like <code>COUNT(*)</code> are 
+            <strong>pushed down to TiKV</strong>. Each region processes its chunk locally, 
+            sending only matching/aggregated results back. Huge bandwidth savings.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>💡 LSM-Tree: Why Writes Are Fast, Reads Are Complex</h3>
+        <p>
+          RocksDB uses an <strong>LSM-Tree</strong> (Log-Structured Merge Tree). Writes go to the 
+          WAL (sequential I/O — fast!) then to the MemTable (in-memory). Reads must check the 
+          MemTable, then the block cache, then search through multiple SST file levels. 
+          <em>Compaction</em> merges levels to keep read amplification bounded. This is the 
+          fundamental write-optimized vs read-cost tradeoff in TiKV.
+        </p>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/tidb-architecture" target="_blank">TiDB Architecture Documentation</a> and <a href="https://github.com/facebook/rocksdb/wiki" target="_blank">RocksDB Wiki</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20TiDB%20Write%20%26%20Read%20Paths&url=https://systeminternals.dev/tidb/write-read-path/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/write-read-path/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/tidb/write-read-path/&t=Interactive%20TiDB%20Write%20%26%20Read%20Path%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f472b6, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(167, 139, 250, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #a78bfa; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* View Toggle */
+  .view-toggle-section {
+    margin-bottom: 40px;
+    text-align: center;
+  }
+
+  .view-toggle {
+    display: inline-flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 4px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .toggle-btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: #888;
+    transition: all 0.2s;
+  }
+
+  .toggle-btn.active {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .toggle-btn:hover:not(.active) {
+    color: #ccc;
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .auto-btn {
+    background: linear-gradient(135deg, #f472b6, #ec4899);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.sql { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
+  .status-badge.txn { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.twopc { background: rgba(244, 114, 182, 0.2); color: #f472b6; }
+  .status-badge.raft { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.engine { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.cop { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+  .status-badge.mvcc { background: rgba(244, 114, 182, 0.2); color: #f472b6; }
+  .status-badge.done { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Pipeline */
+  .pipeline-container {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .pipeline-stages {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    border: 2px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.02);
+    transition: all 0.4s ease;
+    min-width: 90px;
+  }
+
+  .stage.active {
+    border-color: #a78bfa;
+    background: rgba(167, 139, 250, 0.15);
+    box-shadow: 0 0 20px rgba(167, 139, 250, 0.3);
+    transform: scale(1.05);
+  }
+
+  .stage.completed {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+  }
+
+  .stage-icon {
+    font-size: 1.8rem;
+  }
+
+  .stage-label {
+    font-size: 0.75rem;
+    color: #888;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .stage.active .stage-label { color: #a78bfa; }
+  .stage.completed .stage-label { color: #4ade80; }
+
+  .stage-arrow {
+    color: #555;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+
+  .step-detail-box {
+    min-height: 120px;
+    padding: 20px;
+    border-radius: 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .detail-placeholder {
+    color: #555;
+    text-align: center;
+    font-style: italic;
+    padding-top: 30px;
+  }
+
+  :global(.step-detail) {
+    animation: detailAppear 0.4s ease-out;
+  }
+
+  :global(.step-title) {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  :global(.step-desc) {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+  }
+
+  :global(.step-desc strong) { color: #00d4ff; }
+  :global(.step-desc code) {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  :global(.step-kv-box) {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    color: #ccc;
+    overflow-x: auto;
+  }
+
+  :global(.step-kv-box .kv-line) {
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  :global(.step-kv-box .kv-line:last-child) { border-bottom: none; }
+
+  :global(.kv-key) { color: #f472b6; }
+  :global(.kv-val) { color: #4ade80; }
+  :global(.kv-arrow) { color: #666; }
+
+  @keyframes detailAppear {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Latency Section */
+  .latency-section {
+    margin-bottom: 50px;
+  }
+
+  .latency-controls {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .latency-slider {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .latency-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
+  }
+
+  .latency-slider strong {
+    color: #a78bfa;
+  }
+
+  .latency-slider input[type="range"] {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .latency-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #a78bfa;
+    cursor: pointer;
+  }
+
+  .latency-path-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+
+  .tab-btn {
+    padding: 8px 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+    color: #888;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .tab-btn.active {
+    background: rgba(167, 139, 250, 0.15);
+    border-color: rgba(167, 139, 250, 0.5);
+    color: #a78bfa;
+  }
+
+  .latency-bars {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  :global(.latency-row) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  :global(.latency-label) {
+    width: 200px;
+    font-size: 0.85rem;
+    color: #aaa;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  :global(.latency-bar-track) {
+    flex: 1;
+    height: 24px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  :global(.latency-bar-fill) {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease-out;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+    min-width: 40px;
+  }
+
+  :global(.bar-sql) { background: linear-gradient(90deg, #a78bfa, #7c3aed); }
+  :global(.bar-tso) { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  :global(.bar-prewrite) { background: linear-gradient(90deg, #f472b6, #ec4899); }
+  :global(.bar-raft) { background: linear-gradient(90deg, #60a5fa, #3b82f6); }
+  :global(.bar-engine) { background: linear-gradient(90deg, #4ade80, #22c55e); }
+  :global(.bar-cop) { background: linear-gradient(90deg, #fb923c, #ea580c); }
+  :global(.bar-mvcc) { background: linear-gradient(90deg, #f472b6, #be185d); }
+
+  :global(.latency-time) {
+    width: 60px;
+    font-size: 0.85rem;
+    color: #888;
+    flex-shrink: 0;
+  }
+
+  .latency-total {
+    text-align: center;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(96, 165, 250, 0.1));
+    border-radius: 10px;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+  }
+
+  .latency-total span {
+    color: #a78bfa;
+    font-size: 1.6rem;
+  }
+
+  /* Comparison Section */
+  .comparison-section {
+    margin-bottom: 50px;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .comparison-card {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .comparison-header {
+    padding: 18px 20px;
+  }
+
+  .comparison-header h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .comparison-header code {
+    font-size: 0.8rem;
+    color: #22c55e;
+    background: rgba(0,0,0,0.3);
+    padding: 4px 8px;
+    border-radius: 6px;
+    display: inline-block;
+  }
+
+  .point-card .comparison-header { background: rgba(34, 197, 94, 0.08); }
+  .range-card .comparison-header { background: rgba(251, 146, 60, 0.08); }
+
+  .comparison-body {
+    padding: 16px 20px;
+    background: rgba(0,0,0,0.2);
+  }
+
+  .comp-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .comp-step:last-child { margin-bottom: 0; }
+
+  .comp-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .point-card .comp-num {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+  }
+
+  .range-card .comp-num {
+    background: rgba(251, 146, 60, 0.2);
+    color: #fb923c;
+    border: 1px solid rgba(251, 146, 60, 0.4);
+  }
+
+  .comp-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .comp-text strong {
+    color: #fff;
+    font-size: 0.9rem;
+  }
+
+  .comp-text .detail-text {
+    color: #888;
+    font-size: 0.8rem;
+  }
+
+  .comp-text code {
+    background: rgba(0,0,0,0.3);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+    color: #22c55e;
+  }
+
+  .comparison-perf {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.15);
+  }
+
+  .perf-label {
+    font-size: 0.8rem;
+    color: #666;
+    width: 50px;
+    flex-shrink: 0;
+  }
+
+  .perf-bar {
+    height: 8px;
+    border-radius: 4px;
+    transition: width 0.5s;
+  }
+
+  .point-bar { background: linear-gradient(90deg, #4ade80, #22c55e); }
+  .range-bar { background: linear-gradient(90deg, #fb923c, #ea580c); }
+
+  .perf-value {
+    font-size: 0.85rem;
+    color: #aaa;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #a78bfa; font-style: normal; font-weight: 500; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(244, 114, 182, 0.08), rgba(167, 139, 250, 0.08));
+    border-color: rgba(244, 114, 182, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .pipeline-stages { gap: 4px; }
+    .stage { min-width: 70px; padding: 10px 12px; }
+    .stage-icon { font-size: 1.4rem; }
+    .stage-arrow { font-size: 0.9rem; }
+    .comparison-grid { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .latency-controls { flex-direction: column; }
+    :global(.latency-label) { width: 140px; }
+  }
+</style>
+
+<script>
+  // ========== VIEW MODE ==========
+  let detailedView = false;
+
+  document.getElementById('simpleViewBtn')?.addEventListener('click', () => {
+    detailedView = false;
+    document.getElementById('simpleViewBtn')!.classList.add('active');
+    document.getElementById('detailedViewBtn')!.classList.remove('active');
+  });
+
+  document.getElementById('detailedViewBtn')?.addEventListener('click', () => {
+    detailedView = true;
+    document.getElementById('detailedViewBtn')!.classList.add('active');
+    document.getElementById('simpleViewBtn')!.classList.remove('active');
+  });
+
+  // ========== WRITE PATH STEPS ==========
+  interface PathStep {
+    badge: string;
+    badgeClass: string;
+    text: string;
+    stageId: string;
+    title: string;
+    descSimple: string;
+    descDetailed: string;
+    kv?: string;
+  }
+
+  const writeSteps: PathStep[] = [
+    {
+      badge: 'SQL', badgeClass: 'sql', stageId: 'ws-sql',
+      text: 'Parse SQL → Build execution plan → Extract KV pairs',
+      title: '📝 SQL Layer: Parse & Plan',
+      descSimple: 'The SQL statement is parsed into an AST, optimized into an execution plan, and <strong>tablecodec</strong> converts rows into KV pairs.',
+      descDetailed: 'The parser tokenizes the SQL and builds an Abstract Syntax Tree. The optimizer (both rule-based and cost-based) produces a physical plan. For <code>INSERT INTO users VALUES (1, "alice", 25)</code>, tablecodec encodes the row into a key-value pair using the table and row ID.',
+      kv: '<div class="kv-line"><span class="kv-key">t80_r1</span> <span class="kv-arrow">→</span> <span class="kv-val">{name: "alice", age: 25}</span></div><div class="kv-line"><span class="kv-key">t80_i1_alice</span> <span class="kv-arrow">→</span> <span class="kv-val">rowID=1</span> (index entry)</div>'
+    },
+    {
+      badge: 'TXN', badgeClass: 'txn', stageId: 'ws-txn',
+      text: 'Begin transaction → Get TSO (start_ts=415) from PD → Buffer writes',
+      title: '🔄 Transaction Layer: Begin & Buffer',
+      descSimple: 'A new transaction begins by fetching a <strong>globally unique timestamp</strong> (TSO) from PD. All writes are buffered in memory — nothing touches TiKV yet.',
+      descDetailed: 'The TSO allocator on PD provides a monotonically increasing timestamp via a batched, pipelined protocol (~1 RTT). The TiDB node keeps a local mutation buffer (membuf). Writes accumulate here until COMMIT. The start_ts provides the <strong>snapshot isolation</strong> read boundary.',
+      kv: '<div class="kv-line">start_ts = <span class="kv-val">415</span> (from PD TSO)</div><div class="kv-line">membuf: [<span class="kv-key">t80_r1</span> <span class="kv-arrow">→</span> <span class="kv-val">{...}</span>]</div>'
+    },
+    {
+      badge: '2PC', badgeClass: 'twopc', stageId: 'ws-2pc',
+      text: 'Prewrite: lock keys on TiKV regions → Commit primary → Async secondaries',
+      title: '🤝 Two-Phase Commit',
+      descSimple: '<strong>Prewrite</strong> sends mutations to TiKV, acquiring locks on each key. Once all prewrites succeed, <strong>Commit</strong> writes the commit record for the primary key. Secondaries commit asynchronously.',
+      descDetailed: 'Phase 1 (Prewrite): For each key, TiKV writes a Lock CF entry and the data to Default CF at start_ts. If any key is already locked → WriteConflict. Phase 2 (Commit): Get commit_ts from PD, remove primary lock, write to Write CF. The commit_ts makes the data visible. Secondary cleanup is async — safe because any reader can resolve by checking the primary.',
+      kv: '<div class="kv-line">Lock CF: <span class="kv-key">t80_r1</span> <span class="kv-arrow">→</span> <span class="kv-val">lock(ts=415, primary)</span></div><div class="kv-line">Default CF: <span class="kv-key">t80_r1@415</span> <span class="kv-arrow">→</span> <span class="kv-val">{name:"alice"}</span></div><div class="kv-line">Write CF: <span class="kv-key">t80_r1@420</span> <span class="kv-arrow">→</span> <span class="kv-val">start_ts=415 ✅</span></div>'
+    },
+    {
+      badge: 'RAFT', badgeClass: 'raft', stageId: 'ws-raft',
+      text: 'Propose to Raft group → Leader replicates to followers → Apply to state machine',
+      title: '📡 Raft Consensus',
+      descSimple: 'Every write to a TiKV region goes through <strong>Raft</strong>. The leader proposes the entry, replicates it to a majority of followers, then applies it to the local state machine.',
+      descDetailed: 'TiKV uses Multi-Raft — each Region (~96MB) has its own Raft group (typically 3 replicas). The leader appends the proposal to its Raft log, sends AppendEntries RPCs to followers. Once a <strong>quorum</strong> (2/3) acknowledges, the entry is committed and applied. Raft guarantees linearizable writes even if one node fails. The apply step triggers the actual RocksDB write.',
+    },
+    {
+      badge: 'ENGINE', badgeClass: 'engine', stageId: 'ws-engine',
+      text: 'Write-Ahead Log → MemTable → Flush to SST → Compaction (L0→Lmax)',
+      title: '💾 RocksDB Storage Engine',
+      descSimple: 'Data is written to the <strong>WAL</strong> (crash safety), then inserted into the <strong>MemTable</strong> (in-memory sorted structure). When the MemTable is full, it flushes to an <strong>SST file</strong> on disk. Background compaction merges levels.',
+      descDetailed: 'The write path in RocksDB: (1) Append to Write-Ahead Log — sequential disk I/O, very fast. (2) Insert into MemTable (skiplist). (3) When MemTable reaches threshold (~64MB), it becomes immutable and a new one is created. (4) Immutable MemTable flushes to L0 SST. (5) Background compaction merges L0→L1→...→Lmax, removing tombstones and old MVCC versions. TiKV uses <strong>3 Column Families</strong>: Lock, Default (data), Write — each is a separate RocksDB instance.',
+      kv: '<div class="kv-line">WAL: <span class="kv-val">append(seq=1042, put t80_r1@415)</span></div><div class="kv-line">MemTable: <span class="kv-key">t80_r1@415</span> <span class="kv-arrow">→</span> <span class="kv-val">{...}</span> (skiplist)</div><div class="kv-line">SST L0: <span class="kv-val">[t80_r1@415, t80_r5@410, ...]</span></div>'
+    },
+  ];
+
+  const readSteps: PathStep[] = [
+    {
+      badge: 'SQL', badgeClass: 'sql', stageId: 'rs-sql',
+      text: 'Parse SQL → Build plan → Determine key ranges',
+      title: '📝 SQL Layer: Parse & Plan',
+      descSimple: 'The SELECT is parsed and the optimizer determines whether to do a <strong>point lookup</strong> or <strong>range scan</strong>, and which key ranges to request from TiKV.',
+      descDetailed: 'For <code>SELECT * FROM users WHERE id = 1</code>, the optimizer recognizes a primary key access → PointGet plan (single key). For <code>WHERE age > 30</code>, it may choose an IndexScan + TableLookup or a full TableScan, depending on statistics. The plan determines the TiKV key ranges and whether to use the Coprocessor.',
+      kv: '<div class="kv-line">PointGet: key = <span class="kv-key">t80_r1</span></div><div class="kv-line">RangeScan: [<span class="kv-key">t80_r1</span>, <span class="kv-key">t80_r∞</span>) with filter age > 30</div>'
+    },
+    {
+      badge: 'COP', badgeClass: 'cop', stageId: 'rs-cop',
+      text: 'Push predicates and aggregations down to TiKV coprocessor',
+      title: '⬇️ Coprocessor Push-down',
+      descSimple: 'Instead of pulling all data to TiDB, <strong>filter conditions</strong> and <strong>aggregations</strong> are sent to TiKV. Each region processes its slice locally.',
+      descDetailed: 'The DistSQL layer in TiDB splits the key range by Region boundaries and sends parallel Coprocessor requests. Each TiKV node runs a local executor that understands Selection (WHERE), Aggregation (GROUP BY, COUNT), TopN, and Limit. Only matching rows or partial aggregates travel back over the network. For simple PointGet plans, the coprocessor is bypassed entirely.',
+    },
+    {
+      badge: 'TIKV', badgeClass: 'raft', stageId: 'rs-tikv',
+      text: 'Region leader handles read at snapshot_ts',
+      title: '📦 TiKV Region Read',
+      descSimple: 'The <strong>Region leader</strong> handles the read request. It creates a consistent snapshot at the requested <strong>snapshot_ts</strong> so readers never block writers.',
+      descDetailed: 'The Region leader verifies it still holds the lease (Raft lease read — no extra Raft round trip needed). It creates a RocksDB snapshot at the requested timestamp. With <strong>Follower Read</strong> (enabled optionally), stale reads can go to followers with a resolved-ts check, reducing leader load. Stale read requests use a <code>max_ts</code> guaranteed to be safe.',
+    },
+    {
+      badge: 'MVCC', badgeClass: 'mvcc', stageId: 'rs-mvcc',
+      text: 'Find correct version, resolve any encountered locks',
+      title: '⏳ MVCC Version Resolution',
+      descSimple: 'The MVCC layer finds the <strong>latest committed version</strong> with commit_ts ≤ snapshot_ts. If it encounters a lock from an in-progress transaction, it must <strong>resolve</strong> it first.',
+      descDetailed: 'Scan Write CF for the key, descending from snapshot_ts. The first Write record with commit_ts ≤ snapshot_ts gives us the start_ts of the visible version. Then read Default CF at that start_ts to get the actual data. If a Lock CF entry is found for the key, check if the lock\'s transaction has committed (check primary key) — if yes, resolve the lock by writing the commit record; if expired/rolled-back, clean it up. This is how TiDB achieves <strong>lock-free reads</strong>.',
+      kv: '<div class="kv-line">Write CF scan: <span class="kv-key">t80_r1@420</span> <span class="kv-arrow">→</span> <span class="kv-val">start_ts=415</span> (commit_ts=420 ≤ snap=425 ✅)</div><div class="kv-line">Default CF get: <span class="kv-key">t80_r1@415</span> <span class="kv-arrow">→</span> <span class="kv-val">{name:"alice", age:25}</span></div>'
+    },
+    {
+      badge: 'ENGINE', badgeClass: 'engine', stageId: 'rs-engine',
+      text: 'MemTable → Block Cache → SST files (bloom filter → index → data block)',
+      title: '💾 RocksDB Read Path',
+      descSimple: 'RocksDB checks the <strong>MemTable</strong> first (fastest), then the <strong>block cache</strong> (in-memory SST blocks), then searches SST files on disk using <strong>bloom filters</strong> to skip irrelevant files.',
+      descDetailed: 'Read order: (1) Active MemTable (2) Immutable MemTables (3) Block cache — LRU cache of SST data blocks and index blocks. (4) SST files: for point lookups, check the <strong>bloom filter</strong> first — if it says "not present", skip the file entirely (saves I/O). Otherwise: binary search the index block → locate the data block → decompress → find the key. For range scans, create a MergingIterator across all levels — bloom filters don\'t help here, so reads touch more files.',
+      kv: '<div class="kv-line">① MemTable: <span class="kv-val">MISS</span></div><div class="kv-line">② Block Cache: <span class="kv-val">MISS</span></div><div class="kv-line">③ SST L0 bloom: <span class="kv-val">NEGATIVE → skip</span></div><div class="kv-line">④ SST L1 bloom: <span class="kv-val">POSITIVE → index → data block</span></div><div class="kv-line">⑤ Result: <span class="kv-key">t80_r1@415</span> <span class="kv-arrow">→</span> <span class="kv-val">{name:"alice"}</span></div>'
+    },
+  ];
+
+  // ========== GENERIC FLOW ENGINE ==========
+  function createFlowEngine(prefix: string, steps: PathStep[], stageIds: string[]) {
+    let step = -1;
+    let playing = false;
+
+    const startBtn = document.getElementById(`start${prefix}Btn`) as HTMLButtonElement;
+    const stepBtn = document.getElementById(`step${prefix}Btn`) as HTMLButtonElement;
+    const autoBtn = document.getElementById(`auto${prefix}Btn`) as HTMLButtonElement;
+    const resetBtn = document.getElementById(`reset${prefix}Btn`) as HTMLButtonElement;
+    const statusEl = document.getElementById(`${prefix.toLowerCase()}FlowStatus`)!;
+    const statusText = document.getElementById(`${prefix.toLowerCase()}StatusText`)!;
+    const detailBox = document.getElementById(`${prefix.toLowerCase()}DetailBox`)!;
+
+    function renderStep() {
+      const s = steps[step];
+      const badge = statusEl.querySelector('.status-badge')!;
+      badge.className = `status-badge ${s.badgeClass}`;
+      badge.textContent = s.badge;
+      statusText.textContent = s.text;
+
+      // Update stage highlights
+      stageIds.forEach((id, idx) => {
+        const el = document.getElementById(id)!;
+        el.classList.remove('active', 'completed');
+        if (idx < step) el.classList.add('completed');
+        else if (idx === step) el.classList.add('active');
+      });
+
+      // Render detail
+      const desc = detailedView ? s.descDetailed : s.descSimple;
+      let html = `<div class="step-detail">
+        <div class="step-title">${s.title}</div>
+        <div class="step-desc">${desc}</div>`;
+      if (s.kv && detailedView) {
+        html += `<div class="step-kv-box">${s.kv}</div>`;
+      }
+      html += '</div>';
+      detailBox.innerHTML = html;
+
+      if (step >= steps.length - 1) {
+        stepBtn.disabled = true;
+        autoBtn.disabled = true;
+        const b2 = statusEl.querySelector('.status-badge')!;
+        b2.className = 'status-badge done';
+        b2.textContent = 'Done';
+      }
+    }
+
+    function reset() {
+      step = -1;
+      playing = false;
+      const badge = statusEl.querySelector('.status-badge')!;
+      badge.className = 'status-badge idle';
+      badge.textContent = 'Ready';
+      statusText.textContent = `Click "Start ${prefix}" to begin`;
+      detailBox.innerHTML = '<div class="detail-placeholder">Follow the ' + prefix.toLowerCase() + ' as it flows through each layer</div>';
+      stageIds.forEach(id => {
+        document.getElementById(id)!.classList.remove('active', 'completed');
+      });
+      stepBtn.disabled = true;
+      autoBtn.disabled = true;
+    }
+
+    startBtn?.addEventListener('click', () => {
+      reset();
+      step = 0;
+      renderStep();
+      stepBtn.disabled = false;
+      autoBtn.disabled = false;
+    });
+
+    stepBtn?.addEventListener('click', () => {
+      if (step < steps.length - 1) {
+        step++;
+        renderStep();
+      }
+    });
+
+    autoBtn?.addEventListener('click', async () => {
+      if (playing) return;
+      playing = true;
+      autoBtn.disabled = true;
+      stepBtn.disabled = true;
+      while (step < steps.length - 1) {
+        await new Promise(r => setTimeout(r, 1500));
+        if (!playing) break;
+        step++;
+        renderStep();
+      }
+      playing = false;
+    });
+
+    resetBtn?.addEventListener('click', reset);
+  }
+
+  createFlowEngine('Write', writeSteps, ['ws-sql', 'ws-txn', 'ws-2pc', 'ws-raft', 'ws-engine']);
+  createFlowEngine('Read', readSteps, ['rs-sql', 'rs-cop', 'rs-tikv', 'rs-mvcc', 'rs-engine']);
+
+  // ========== LATENCY BREAKDOWN ==========
+  const rttSlider = document.getElementById('rttSlider') as HTMLInputElement;
+  const diskSlider = document.getElementById('diskSlider') as HTMLInputElement;
+  const raftSlider = document.getElementById('raftSlider') as HTMLInputElement;
+  const latWriteTab = document.getElementById('latWriteTab') as HTMLButtonElement;
+  const latReadTab = document.getElementById('latReadTab') as HTMLButtonElement;
+
+  let latencyMode: 'write' | 'read' = 'write';
+
+  latWriteTab?.addEventListener('click', () => {
+    latencyMode = 'write';
+    latWriteTab.classList.add('active');
+    latReadTab.classList.remove('active');
+    renderLatency();
+  });
+
+  latReadTab?.addEventListener('click', () => {
+    latencyMode = 'read';
+    latReadTab.classList.add('active');
+    latWriteTab.classList.remove('active');
+    renderLatency();
+  });
+
+  function renderLatency() {
+    const rtt = parseFloat(rttSlider.value);
+    const disk = parseFloat(diskSlider.value);
+    const raft = parseFloat(raftSlider.value);
+
+    document.getElementById('rttValue')!.textContent = rtt.toString();
+    document.getElementById('diskValue')!.textContent = disk.toString();
+    document.getElementById('raftValue')!.textContent = raft.toString();
+
+    let rows: Array<{label: string; ms: number; bar: string}>;
+
+    if (latencyMode === 'write') {
+      rows = [
+        { label: 'SQL Parse & Plan', ms: 0.1, bar: 'bar-sql' },
+        { label: 'Get start_ts (PD)', ms: rtt, bar: 'bar-tso' },
+        { label: 'Prewrite RPCs', ms: rtt, bar: 'bar-prewrite' },
+        { label: 'Raft replication', ms: raft, bar: 'bar-raft' },
+        { label: 'RocksDB WAL + MemTable', ms: disk, bar: 'bar-engine' },
+        { label: 'Get commit_ts (PD)', ms: rtt, bar: 'bar-tso' },
+        { label: 'Commit primary RPC', ms: rtt, bar: 'bar-prewrite' },
+      ];
+    } else {
+      rows = [
+        { label: 'SQL Parse & Plan', ms: 0.1, bar: 'bar-sql' },
+        { label: 'Coprocessor RPC', ms: rtt, bar: 'bar-cop' },
+        { label: 'MVCC version lookup', ms: 0.05, bar: 'bar-mvcc' },
+        { label: 'RocksDB read (cache hit)', ms: 0.02, bar: 'bar-engine' },
+        { label: 'RocksDB read (cache miss)', ms: disk, bar: 'bar-engine' },
+        { label: 'Network response', ms: rtt, bar: 'bar-cop' },
+      ];
+    }
+
+    const maxMs = Math.max(...rows.map(r => r.ms), 0.5);
+    const container = document.getElementById('latencyBars')!;
+    container.innerHTML = '';
+
+    let total = 0;
+    rows.forEach(r => {
+      total += r.ms;
+      const pct = Math.max((r.ms / maxMs) * 100, 3);
+      const row = document.createElement('div');
+      row.className = 'latency-row';
+      row.innerHTML = `
+        <div class="latency-label">${r.label}</div>
+        <div class="latency-bar-track">
+          <div class="latency-bar-fill ${r.bar}" style="width: ${pct}%"></div>
+        </div>
+        <div class="latency-time">${r.ms < 0.1 ? r.ms.toFixed(2) : r.ms.toFixed(1)} ms</div>
+      `;
+      container.appendChild(row);
+    });
+
+    document.getElementById('latencyTotal')!.textContent = total.toFixed(1);
+  }
+
+  rttSlider?.addEventListener('input', renderLatency);
+  diskSlider?.addEventListener('input', renderLatency);
+  raftSlider?.addEventListener('input', renderLatency);
+
+  // Initial render
+  renderLatency();
+</script>

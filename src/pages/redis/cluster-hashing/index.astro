@@ -1,0 +1,1583 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Redis Cluster Hashing & Failover" 
+  description="Interactive visualization of Redis Cluster hash slots, CRC16 routing, topology, MOVED/ASK redirections, and automatic failover"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Redis", href: "/redis/" },
+    { label: "Cluster Hashing", href: "/redis/cluster-hashing/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔴 Cluster Hashing & Failover</h1>
+      <p class="subtitle">How Redis Distributes Keys Across Nodes and Recovers From Failures</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Redis Cluster splits all data into <strong>16,384 hash slots</strong>. Every key is mapped to a slot
+          via <em>CRC16(key) mod 16384</em>. Each master node owns a range of slots, and every node knows the 
+          full slot→node mapping via a <strong>gossip protocol</strong> over the cluster bus. If a client hits 
+          the wrong node, it gets a <em>MOVED</em> or <em>ASK</em> redirection. When a master dies, its replica 
+          automatically promotes itself and takes over.
+        </p>
+      </div>
+    </section>
+
+    <!-- Key → Slot Calculator -->
+    <section class="flow-section">
+      <h2>🔑 Key → Slot Calculator</h2>
+      <p class="section-desc">Type a key to see which hash slot it maps to and which node owns it</p>
+
+      <div class="calculator-container">
+        <div class="calc-input-row">
+          <input type="text" id="keyInput" placeholder="Type a Redis key (e.g. user:1001)" class="key-input" autocomplete="off">
+          <button id="calcBtn" class="action-btn primary-btn">Calculate</button>
+        </div>
+        <div class="calc-result" id="calcResult"></div>
+        <div class="calc-formula" id="calcFormula"></div>
+      </div>
+    </section>
+
+    <!-- Hash Slot Grid -->
+    <section class="flow-section">
+      <h2>📊 Hash Slot Distribution</h2>
+      <p class="section-desc">All 16,384 slots colored by owning node. Adjust cluster size to see redistribution.</p>
+
+      <div class="flow-controls">
+        <div class="slider-group">
+          <label>Masters: <strong id="masterCountLabel">3</strong></label>
+          <input type="range" id="masterSlider" min="3" max="6" value="3" class="slot-slider">
+        </div>
+        <button id="redistributeBtn" class="action-btn primary-btn">🔄 Redistribute</button>
+      </div>
+
+      <div class="node-legend" id="nodeLegend"></div>
+      <div class="slot-grid-wrapper">
+        <canvas id="slotCanvas" width="820" height="200"></canvas>
+      </div>
+      <div class="slot-hover-info" id="slotHoverInfo">Hover over the grid to inspect slots</div>
+    </section>
+
+    <!-- Cluster Topology -->
+    <section class="flow-section">
+      <h2>🌐 Cluster Topology</h2>
+      <p class="section-desc">Click a node to see its slot range, replicas, and connections. Every node knows the full mapping.</p>
+
+      <div class="topology-container">
+        <canvas id="topoCanvas" width="820" height="450"></canvas>
+      </div>
+      <div class="topo-info-panel" id="topoInfoPanel">
+        <p class="topo-hint">Click a node above to inspect it</p>
+      </div>
+    </section>
+
+    <!-- MOVED / ASK Redirections -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>↩️ MOVED Redirection</h3>
+          <p>
+            Client sends <code>GET user:42</code> to Node A, but the slot belongs to Node C. 
+            Node A responds: <code>MOVED 12345 node-c:6379</code>. The client <strong>updates its slot map</strong> 
+            and retries on Node C. Permanent — the slot has moved.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔀 ASK Redirection</h3>
+          <p>
+            During a slot <strong>migration</strong>, some keys may have moved to the target node but the slot 
+            isn't fully transferred yet. The source responds <code>ASK 12345 node-c:6379</code>. 
+            The client sends <code>ASKING</code> then retries — but does <em>not</em> update its map. Temporary.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Failover Section -->
+    <section class="flow-section">
+      <h2>💥 Failover Simulation</h2>
+      <p class="section-desc">Kill a master node and watch the cluster detect the failure and promote a replica</p>
+
+      <div class="flow-controls">
+        <button id="killNodeBtn" class="action-btn kill-btn">💀 Kill Master</button>
+        <button id="stepFailoverBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="autoFailoverBtn" class="action-btn auto-btn" disabled>⚡ Auto-Play</button>
+        <button id="resetFailoverBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-status" id="failoverStatus">
+        <span class="status-badge idle" id="failoverBadge">Ready</span>
+        <span class="status-text" id="failoverStatusText">Click "Kill Master" to begin the failover simulation</span>
+      </div>
+
+      <div class="failover-viz">
+        <canvas id="failoverCanvas" width="820" height="320"></canvas>
+      </div>
+
+      <div class="failover-timeline" id="failoverTimeline"></div>
+    </section>
+
+    <!-- Failover Explainer -->
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>💡 How Failover Works</h3>
+        <p>
+          Every node pings every other node every <strong>1 second</strong> via the cluster bus (port + 10000). 
+          If a node doesn't respond within <code>cluster-node-timeout</code>, the pinging node marks it 
+          <em>PFAIL</em> (subjective failure). When a <strong>majority of masters</strong> agree a node is 
+          PFAIL, it becomes <em>FAIL</em> (objective failure). The dead master's replica then starts an 
+          <strong>election</strong>: it increments the epoch, asks masters to vote, and upon winning promotes 
+          itself — taking over the master's slots. The whole process typically completes in 
+          <strong>1–2 × node-timeout</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Slot Migration -->
+    <section class="flow-section">
+      <h2>📦 Slot Migration</h2>
+      <p class="section-desc">Watch keys migrate from one node to another, slot by slot</p>
+
+      <div class="flow-controls">
+        <button id="startMigrateBtn" class="action-btn primary-btn">▶ Start Migration</button>
+        <button id="resetMigrateBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="migration-viz" id="migrationViz">
+        <div class="migrate-node migrate-source">
+          <h4>Source: Node A</h4>
+          <div class="migrate-slots" id="migrateSource"></div>
+        </div>
+        <div class="migrate-arrow" id="migrateArrow">
+          <div class="migrate-arrow-line"></div>
+          <div class="migrate-key-flying" id="flyingKey" style="display:none;">📦</div>
+        </div>
+        <div class="migrate-node migrate-target">
+          <h4>Target: Node B</h4>
+          <div class="migrate-slots" id="migrateTarget"></div>
+        </div>
+      </div>
+
+      <div class="migrate-log" id="migrateLog"></div>
+    </section>
+
+    <!-- Network Partition -->
+    <section class="flow-section">
+      <h2>🔌 Network Partition</h2>
+      <p class="section-desc">What happens when nodes can't talk to each other?</p>
+
+      <div class="flow-controls">
+        <button id="partitionBtn" class="action-btn kill-btn">⚡ Create Partition</button>
+        <button id="healBtn" class="action-btn primary-btn" disabled>🩹 Heal Partition</button>
+        <button id="resetPartitionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="partition-viz">
+        <canvas id="partitionCanvas" width="820" height="300"></canvas>
+      </div>
+      <div class="partition-log" id="partitionLog"></div>
+    </section>
+
+    <!-- Manual Failover -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🔧 Manual Failover</h3>
+          <p>
+            Run <code>CLUSTER FAILOVER</code> on a replica to gracefully promote it. 
+            The replica tells its master to <strong>stop accepting writes</strong>, waits for replication 
+            offset to match, then swaps roles. <strong>Zero data loss</strong> — unlike automatic failover 
+            where the last few writes may be lost.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📐 Cluster Bus Protocol</h3>
+          <p>
+            Nodes communicate via a binary protocol on <strong>port + 10000</strong>. 
+            Each message carries the sender's view of the cluster: node IDs, slot ownership, 
+            flags (PFAIL/FAIL), and epoch numbers. This is how the <em>gossip protocol</em> 
+            propagates configuration changes — eventually consistent, but fast.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://redis.io/docs/management/scaling/" target="_blank">Redis Cluster Documentation</a> and <a href="https://redis.io/docs/reference/cluster-spec/" target="_blank">Redis Cluster Specification</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Redis%20Cluster%20hashing%20and%20failover&url=https://systeminternals.dev/redis/cluster-hashing/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/redis/cluster-hashing/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/redis/cluster-hashing/&t=Interactive%20Redis%20Cluster%20Hashing%20%26%20Failover%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #ef4444, #f97316, #eab308);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(249, 115, 22, 0.05));
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .auto-btn {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+  }
+
+  .kill-btn {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+    color: white;
+  }
+
+  .kill-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.5);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.detecting { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.electing { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+  .status-badge.promoting { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.done { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.failed { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Calculator */
+  .calculator-container {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .calc-input-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .key-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+    font-size: 1rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .key-input:focus {
+    border-color: #ef4444;
+  }
+
+  .key-input::placeholder {
+    color: #555;
+  }
+
+  .calc-result {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .calc-formula {
+    font-size: 0.9rem;
+    color: #888;
+    font-family: 'Monaco', 'Menlo', monospace;
+    margin-top: 8px;
+    min-height: 24px;
+  }
+
+  /* Slot Grid */
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-group label {
+    color: #ccc;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .slider-group strong {
+    color: #ef4444;
+  }
+
+  .slot-slider {
+    width: 160px;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .slot-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ef4444;
+    cursor: pointer;
+  }
+
+  .node-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  :global(.legend-item) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #ccc;
+  }
+
+  :global(.legend-swatch) {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+  }
+
+  .slot-grid-wrapper {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    overflow-x: auto;
+    margin-bottom: 12px;
+  }
+
+  .slot-hover-info {
+    font-size: 0.9rem;
+    color: #888;
+    text-align: center;
+    padding: 8px;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  /* Topology */
+  .topology-container {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  .topo-info-panel {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    min-height: 80px;
+  }
+
+  .topo-hint {
+    color: #666;
+    font-style: italic;
+    text-align: center;
+  }
+
+  /* Failover */
+  .failover-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  .failover-timeline {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  :global(.failover-step) {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.failover-step.detect-step) { background: rgba(251, 191, 36, 0.1); color: #fde68a; border-left: 3px solid #fbbf24; }
+  :global(.failover-step.fail-step) { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.failover-step.elect-step) { background: rgba(249, 115, 22, 0.1); color: #fed7aa; border-left: 3px solid #f97316; }
+  :global(.failover-step.promote-step) { background: rgba(34, 197, 94, 0.15); color: #86efac; border-left: 3px solid #22c55e; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Migration */
+  .migration-viz {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .migrate-node {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .migrate-node h4 {
+    font-size: 0.95rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .migrate-source { border-color: rgba(96, 165, 250, 0.3); }
+  .migrate-source h4 { color: #60a5fa; }
+  .migrate-target { border-color: rgba(34, 197, 94, 0.3); }
+  .migrate-target h4 { color: #4ade80; }
+
+  .migrate-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 40px;
+  }
+
+  :global(.migrate-slot) {
+    width: 42px;
+    height: 30px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: 'Monaco', 'Menlo', monospace;
+    transition: all 0.3s;
+  }
+
+  :global(.migrate-slot.source-slot) {
+    background: rgba(96, 165, 250, 0.2);
+    border: 1px solid rgba(96, 165, 250, 0.4);
+    color: #93c5fd;
+  }
+
+  :global(.migrate-slot.target-slot) {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+    animation: slotAppear 0.4s ease-out;
+  }
+
+  :global(.migrate-slot.migrating) {
+    background: rgba(251, 191, 36, 0.3);
+    border-color: #fbbf24;
+    color: #fde68a;
+    animation: pulse 0.6s ease-in-out infinite;
+  }
+
+  @keyframes slotAppear {
+    from { opacity: 0; transform: scale(0.5); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+  }
+
+  .migrate-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    width: 80px;
+  }
+
+  .migrate-arrow-line {
+    width: 60px;
+    height: 3px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    position: relative;
+  }
+
+  .migrate-arrow-line::after {
+    content: '▶';
+    position: absolute;
+    right: -14px;
+    top: -8px;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.8rem;
+  }
+
+  .migrate-key-flying {
+    position: absolute;
+    font-size: 1.2rem;
+    animation: flyAcross 0.8s ease-in-out;
+  }
+
+  @keyframes flyAcross {
+    0% { transform: translateX(-30px); opacity: 0; }
+    30% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { transform: translateX(30px); opacity: 0; }
+  }
+
+  .migrate-log {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255,255,255,0.1);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  :global(.migrate-log-entry) {
+    padding: 4px 0;
+    color: #aaa;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  :global(.migrate-log-entry .cmd) { color: #4ade80; }
+  :global(.migrate-log-entry .info) { color: #60a5fa; }
+
+  /* Partition */
+  .partition-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  .partition-log {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255,255,255,0.1);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  :global(.partition-entry) {
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  :global(.partition-entry.warning) { background: rgba(251, 191, 36, 0.1); color: #fde68a; border-left: 3px solid #fbbf24; }
+  :global(.partition-entry.error) { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.partition-entry.success) { background: rgba(34, 197, 94, 0.1); color: #86efac; border-left: 3px solid #22c55e; }
+  :global(.partition-entry.info-entry) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #f97316; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(249, 115, 22, 0.08));
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .migration-viz { grid-template-columns: 1fr; }
+    .migrate-arrow { transform: rotate(90deg); width: auto; height: 50px; }
+    .calc-input-row { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== CONSTANTS ==========
+  const NODE_COLORS = [
+    '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'
+  ];
+  const NODE_NAMES = ['Node A', 'Node B', 'Node C', 'Node D', 'Node E', 'Node F'];
+  const TOTAL_SLOTS = 16384;
+
+  // ========== STATE ==========
+  let masterCount = 3;
+  let slotOwnership: number[] = []; // slotOwnership[i] = which master (0-based) owns slot i
+  let clusterNodes: Array<{
+    id: number; name: string; color: string; isMaster: boolean;
+    masterOf?: number; slots: [number, number]; replicaOf?: number;
+    x: number; y: number;
+  }> = [];
+
+  function distributeSlots(numMasters: number) {
+    slotOwnership = new Array(TOTAL_SLOTS);
+    const perNode = Math.floor(TOTAL_SLOTS / numMasters);
+    for (let i = 0; i < TOTAL_SLOTS; i++) {
+      const owner = Math.min(Math.floor(i / perNode), numMasters - 1);
+      slotOwnership[i] = owner;
+    }
+  }
+
+  function buildCluster(numMasters: number) {
+    clusterNodes = [];
+    const perNode = Math.floor(TOTAL_SLOTS / numMasters);
+    for (let i = 0; i < numMasters; i++) {
+      const startSlot = i * perNode;
+      const endSlot = i === numMasters - 1 ? TOTAL_SLOTS - 1 : (i + 1) * perNode - 1;
+      clusterNodes.push({
+        id: i, name: NODE_NAMES[i], color: NODE_COLORS[i], isMaster: true,
+        slots: [startSlot, endSlot], x: 0, y: 0
+      });
+    }
+    // Add replicas
+    for (let i = 0; i < numMasters; i++) {
+      clusterNodes.push({
+        id: numMasters + i, name: `${NODE_NAMES[i]} Replica`,
+        color: NODE_COLORS[i], isMaster: false, replicaOf: i,
+        slots: [0, 0], x: 0, y: 0
+      });
+    }
+  }
+
+  // ========== CRC16 ==========
+  function crc16(str: string): number {
+    const table = new Uint16Array(256);
+    for (let i = 0; i < 256; i++) {
+      let crc = i << 8;
+      for (let j = 0; j < 8; j++) {
+        crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        crc &= 0xFFFF;
+      }
+      table[i] = crc;
+    }
+    let crc = 0;
+    for (let i = 0; i < str.length; i++) {
+      crc = ((crc << 8) ^ table[((crc >> 8) ^ str.charCodeAt(i)) & 0xFF]) & 0xFFFF;
+    }
+    return crc;
+  }
+
+  function keyToSlot(key: string): number {
+    // Handle hash tags: {tag}
+    const start = key.indexOf('{');
+    if (start !== -1) {
+      const end = key.indexOf('}', start + 1);
+      if (end !== -1 && end !== start + 1) {
+        key = key.substring(start + 1, end);
+      }
+    }
+    return crc16(key) & 16383;
+  }
+
+  // ========== INIT ==========
+  distributeSlots(masterCount);
+  buildCluster(masterCount);
+
+  // ========== KEY CALCULATOR ==========
+  const keyInput = document.getElementById('keyInput') as HTMLInputElement;
+  const calcBtn = document.getElementById('calcBtn')!;
+  const calcResult = document.getElementById('calcResult')!;
+  const calcFormula = document.getElementById('calcFormula')!;
+
+  function calculate() {
+    const key = keyInput.value.trim();
+    if (!key) { calcResult.innerHTML = ''; calcFormula.innerHTML = ''; return; }
+    const slot = keyToSlot(key);
+    const owner = slotOwnership[slot];
+    const node = clusterNodes[owner];
+    calcResult.innerHTML = `
+      <span style="color:${node.color};">●</span>
+      Slot <span style="color:#ef4444;font-family:monospace;">${slot}</span> → 
+      <span style="color:${node.color};font-weight:700;">${node.name}</span>
+      <span style="color:#888;font-size:0.9rem;">(slots ${node.slots[0]}–${node.slots[1]})</span>
+    `;
+    const crcVal = crc16(key);
+    calcFormula.textContent = `CRC16("${key}") = ${crcVal} → ${crcVal} & 16383 = ${slot}`;
+  }
+
+  calcBtn.addEventListener('click', calculate);
+  keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') calculate(); });
+  keyInput.addEventListener('input', calculate);
+
+  // ========== SLOT GRID (Canvas) ==========
+  const slotCanvas = document.getElementById('slotCanvas') as HTMLCanvasElement;
+  const slotCtx = slotCanvas.getContext('2d')!;
+  const slotHoverInfo = document.getElementById('slotHoverInfo')!;
+  const nodeLegend = document.getElementById('nodeLegend')!;
+
+  function renderLegend() {
+    nodeLegend.innerHTML = '';
+    for (let i = 0; i < masterCount; i++) {
+      const item = document.createElement('span');
+      item.className = 'legend-item';
+      const perNode = Math.floor(TOTAL_SLOTS / masterCount);
+      const start = i * perNode;
+      const end = i === masterCount - 1 ? TOTAL_SLOTS - 1 : (i + 1) * perNode - 1;
+      item.innerHTML = `<span class="legend-swatch" style="background:${NODE_COLORS[i]};"></span>${NODE_NAMES[i]} (${start}–${end})`;
+      nodeLegend.appendChild(item);
+    }
+  }
+
+  function renderSlotGrid() {
+    const cols = 128;
+    const rows = Math.ceil(TOTAL_SLOTS / cols);
+    const cellW = slotCanvas.width / cols;
+    const cellH = slotCanvas.height / rows;
+
+    slotCtx.clearRect(0, 0, slotCanvas.width, slotCanvas.height);
+
+    for (let i = 0; i < TOTAL_SLOTS; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const owner = slotOwnership[i];
+      slotCtx.fillStyle = NODE_COLORS[owner];
+      slotCtx.globalAlpha = 0.8;
+      slotCtx.fillRect(col * cellW + 0.5, row * cellH + 0.5, cellW - 1, cellH - 1);
+    }
+    slotCtx.globalAlpha = 1;
+  }
+
+  slotCanvas.addEventListener('mousemove', (e) => {
+    const rect = slotCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cols = 128;
+    const rows = Math.ceil(TOTAL_SLOTS / cols);
+    const cellW = slotCanvas.width / cols;
+    const cellH = slotCanvas.height / rows;
+    const col = Math.floor(x / cellW);
+    const row = Math.floor(y / cellH);
+    const slot = row * cols + col;
+    if (slot >= 0 && slot < TOTAL_SLOTS) {
+      const owner = slotOwnership[slot];
+      slotHoverInfo.textContent = `Slot ${slot} → ${NODE_NAMES[owner]} (${NODE_COLORS[owner]})`;
+    }
+  });
+
+  // Master slider
+  const masterSlider = document.getElementById('masterSlider') as HTMLInputElement;
+  const masterCountLabel = document.getElementById('masterCountLabel')!;
+
+  masterSlider.addEventListener('input', () => {
+    masterCount = parseInt(masterSlider.value);
+    masterCountLabel.textContent = String(masterCount);
+  });
+
+  document.getElementById('redistributeBtn')?.addEventListener('click', () => {
+    masterCount = parseInt(masterSlider.value);
+    distributeSlots(masterCount);
+    buildCluster(masterCount);
+    renderSlotGrid();
+    renderLegend();
+    renderTopology();
+    renderFailoverCanvas();
+    renderPartitionCanvas(false, -1);
+    // Recalculate if key is present
+    if (keyInput.value.trim()) calculate();
+  });
+
+  // ========== TOPOLOGY (Canvas) ==========
+  const topoCanvas = document.getElementById('topoCanvas') as HTMLCanvasElement;
+  const topoCtx = topoCanvas.getContext('2d')!;
+  const topoInfoPanel = document.getElementById('topoInfoPanel')!;
+
+  function renderTopology() {
+    topoCtx.clearRect(0, 0, topoCanvas.width, topoCanvas.height);
+    const cx = topoCanvas.width / 2;
+    const cy = 180;
+    const radius = 140;
+
+    // Position masters in a circle
+    const masters = clusterNodes.filter(n => n.isMaster);
+    const replicas = clusterNodes.filter(n => !n.isMaster);
+
+    masters.forEach((node, i) => {
+      const angle = (Math.PI * 2 * i / masters.length) - Math.PI / 2;
+      node.x = cx + Math.cos(angle) * radius;
+      node.y = cy + Math.sin(angle) * radius;
+    });
+
+    // Position replicas below their masters
+    replicas.forEach(r => {
+      const master = masters[r.replicaOf!];
+      const angle = Math.atan2(master.y - cy, master.x - cx);
+      r.x = master.x + Math.cos(angle) * 80;
+      r.y = master.y + Math.sin(angle) * 80;
+    });
+
+    // Draw gossip connections between masters (dashed)
+    topoCtx.setLineDash([4, 4]);
+    topoCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+    topoCtx.lineWidth = 1;
+    for (let i = 0; i < masters.length; i++) {
+      for (let j = i + 1; j < masters.length; j++) {
+        topoCtx.beginPath();
+        topoCtx.moveTo(masters[i].x, masters[i].y);
+        topoCtx.lineTo(masters[j].x, masters[j].y);
+        topoCtx.stroke();
+      }
+    }
+    topoCtx.setLineDash([]);
+
+    // Draw master→replica connections
+    replicas.forEach(r => {
+      const master = masters[r.replicaOf!];
+      topoCtx.strokeStyle = master.color + '40';
+      topoCtx.lineWidth = 2;
+      topoCtx.beginPath();
+      topoCtx.moveTo(master.x, master.y);
+      topoCtx.lineTo(r.x, r.y);
+      topoCtx.stroke();
+    });
+
+    // Draw nodes
+    clusterNodes.forEach(node => {
+      const r = node.isMaster ? 28 : 18;
+      // Glow
+      topoCtx.shadowColor = node.color;
+      topoCtx.shadowBlur = node.isMaster ? 15 : 8;
+      topoCtx.fillStyle = node.color + '30';
+      topoCtx.beginPath();
+      topoCtx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      topoCtx.fill();
+
+      topoCtx.strokeStyle = node.color;
+      topoCtx.lineWidth = 2;
+      topoCtx.beginPath();
+      topoCtx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      topoCtx.stroke();
+      topoCtx.shadowBlur = 0;
+
+      // Label
+      topoCtx.fillStyle = '#fff';
+      topoCtx.font = node.isMaster ? 'bold 11px Inter' : '10px Inter';
+      topoCtx.textAlign = 'center';
+      topoCtx.textBaseline = 'middle';
+      topoCtx.fillText(node.isMaster ? node.name : 'R', node.x, node.y);
+
+      if (node.isMaster) {
+        topoCtx.fillStyle = '#888';
+        topoCtx.font = '9px Monaco, monospace';
+        topoCtx.fillText(`${node.slots[0]}–${node.slots[1]}`, node.x, node.y + r + 14);
+      }
+    });
+
+    // Center label
+    topoCtx.fillStyle = 'rgba(255,255,255,0.15)';
+    topoCtx.font = '11px Inter';
+    topoCtx.textAlign = 'center';
+    topoCtx.fillText('Cluster Bus (Gossip)', cx, cy);
+  }
+
+  topoCanvas.addEventListener('click', (e) => {
+    const rect = topoCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    for (const node of clusterNodes) {
+      const r = node.isMaster ? 28 : 18;
+      const dist = Math.sqrt((x - node.x) ** 2 + (y - node.y) ** 2);
+      if (dist <= r + 5) {
+        showNodeInfo(node);
+        return;
+      }
+    }
+  });
+
+  function showNodeInfo(node: typeof clusterNodes[0]) {
+    if (node.isMaster) {
+      const replicas = clusterNodes.filter(n => !n.isMaster && n.replicaOf === node.id);
+      const replicaNames = replicas.map(r => r.name).join(', ') || 'None';
+      topoInfoPanel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="width:16px;height:16px;border-radius:50%;background:${node.color};display:inline-block;"></span>
+          <strong style="color:#fff;font-size:1.1rem;">${node.name}</strong>
+          <span style="color:#888;font-size:0.85rem;">Master</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:0.9rem;">
+          <div><span style="color:#888;">Slot range:</span> <span style="color:#fff;font-family:monospace;">${node.slots[0]}–${node.slots[1]}</span></div>
+          <div><span style="color:#888;">Slot count:</span> <span style="color:#fff;">${node.slots[1] - node.slots[0] + 1}</span></div>
+          <div><span style="color:#888;">Replicas:</span> <span style="color:#fff;">${replicaNames}</span></div>
+          <div><span style="color:#888;">Connections:</span> <span style="color:#fff;">${clusterNodes.filter(n => n.isMaster).length - 1} masters</span></div>
+        </div>
+      `;
+    } else {
+      const master = clusterNodes[node.replicaOf!];
+      topoInfoPanel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <span style="width:16px;height:16px;border-radius:50%;background:${node.color};opacity:0.6;display:inline-block;"></span>
+          <strong style="color:#fff;font-size:1.1rem;">${node.name}</strong>
+          <span style="color:#888;font-size:0.85rem;">Replica</span>
+        </div>
+        <div style="font-size:0.9rem;">
+          <span style="color:#888;">Replicates:</span> 
+          <span style="color:${master.color};font-weight:600;">${master.name}</span> 
+          <span style="color:#888;">(slots ${master.slots[0]}–${master.slots[1]})</span>
+        </div>
+        <div style="font-size:0.85rem;color:#888;margin-top:8px;">
+          Read-only. Receives replication stream from master. Promotes on master failure.
+        </div>
+      `;
+    }
+  }
+
+  // ========== FAILOVER ==========
+  const failoverCanvas = document.getElementById('failoverCanvas') as HTMLCanvasElement;
+  const failoverCtx = failoverCanvas.getContext('2d')!;
+  const failoverTimeline = document.getElementById('failoverTimeline')!;
+  const failoverBadge = document.getElementById('failoverBadge')!;
+  const failoverStatusText = document.getElementById('failoverStatusText')!;
+
+  let failoverStep = 0;
+  let killedNode = -1;
+  let failoverAutoPlaying = false;
+
+  const failoverSteps = [
+    { badge: 'failed', badgeText: '💀 NODE DOWN', cls: 'fail-step',
+      text: (n: string) => `💀 ${n} has crashed! No more heartbeats from this node.` },
+    { badge: 'detecting', badgeText: 'PFAIL', cls: 'detect-step',
+      text: (n: string) => `⏱ After ~1s: Nodes notice ${n} isn't responding → mark as PFAIL (subjective failure)` },
+    { badge: 'detecting', badgeText: 'PFAIL GOSSIP', cls: 'detect-step',
+      text: (n: string) => `📡 Gossip spreads: nodes share PFAIL status for ${n} via cluster bus` },
+    { badge: 'failed', badgeText: 'FAIL', cls: 'fail-step',
+      text: (n: string) => `❌ Majority of masters agree ${n} is unreachable → marked FAIL (objective failure)` },
+    { badge: 'electing', badgeText: 'ELECTION', cls: 'elect-step',
+      text: (n: string) => `🗳 ${n}'s replica starts election: increments epoch, requests votes from masters` },
+    { badge: 'electing', badgeText: 'VOTING', cls: 'elect-step',
+      text: (_n: string) => `✅ Majority of masters vote YES — replica wins the election` },
+    { badge: 'promoting', badgeText: 'PROMOTED', cls: 'promote-step',
+      text: (n: string) => `🎉 Replica promoted to master! Takes over ${n}'s slots. Cluster is healthy again.` },
+  ];
+
+  function renderFailoverCanvas() {
+    failoverCtx.clearRect(0, 0, failoverCanvas.width, failoverCanvas.height);
+    const masters = clusterNodes.filter(n => n.isMaster);
+    const spacing = failoverCanvas.width / (masters.length + 1);
+    const y = 100;
+
+    masters.forEach((node, i) => {
+      const x = spacing * (i + 1);
+      const isDead = killedNode === node.id && failoverStep >= 0;
+      const isPromoted = killedNode === node.id && failoverStep >= 6;
+
+      // Draw node
+      failoverCtx.shadowColor = isDead && !isPromoted ? '#ef4444' : node.color;
+      failoverCtx.shadowBlur = 12;
+
+      failoverCtx.fillStyle = isDead && !isPromoted ? 'rgba(239,68,68,0.1)' : node.color + '30';
+      failoverCtx.beginPath();
+      failoverCtx.arc(x, y, 35, 0, Math.PI * 2);
+      failoverCtx.fill();
+
+      failoverCtx.strokeStyle = isDead && !isPromoted ? '#ef4444' : node.color;
+      failoverCtx.lineWidth = isDead && !isPromoted ? 1 : 2;
+      failoverCtx.setLineDash(isDead && !isPromoted ? [4, 4] : []);
+      failoverCtx.beginPath();
+      failoverCtx.arc(x, y, 35, 0, Math.PI * 2);
+      failoverCtx.stroke();
+      failoverCtx.setLineDash([]);
+      failoverCtx.shadowBlur = 0;
+
+      // X mark if dead
+      if (isDead && !isPromoted) {
+        failoverCtx.strokeStyle = '#ef4444';
+        failoverCtx.lineWidth = 3;
+        failoverCtx.beginPath();
+        failoverCtx.moveTo(x - 15, y - 15); failoverCtx.lineTo(x + 15, y + 15);
+        failoverCtx.moveTo(x + 15, y - 15); failoverCtx.lineTo(x - 15, y + 15);
+        failoverCtx.stroke();
+      }
+
+      // Label
+      failoverCtx.fillStyle = isDead && !isPromoted ? '#666' : '#fff';
+      failoverCtx.font = 'bold 12px Inter';
+      failoverCtx.textAlign = 'center';
+      failoverCtx.textBaseline = 'middle';
+      failoverCtx.fillText(node.name, x, y);
+
+      // Replica below
+      const replicaY = y + 110;
+      const replica = clusterNodes.find(n => !n.isMaster && n.replicaOf === node.id);
+      if (replica) {
+        const promoted = killedNode === node.id && failoverStep >= 6;
+
+        // Connection line
+        failoverCtx.strokeStyle = promoted ? '#22c55e' : 'rgba(255,255,255,0.15)';
+        failoverCtx.lineWidth = promoted ? 2 : 1;
+        failoverCtx.setLineDash(promoted ? [] : [3, 3]);
+        failoverCtx.beginPath();
+        failoverCtx.moveTo(x, y + 35);
+        failoverCtx.lineTo(x, replicaY - 22);
+        failoverCtx.stroke();
+        failoverCtx.setLineDash([]);
+
+        // Replica circle
+        const rColor = promoted ? '#22c55e' : node.color;
+        failoverCtx.shadowColor = rColor;
+        failoverCtx.shadowBlur = promoted ? 15 : 6;
+        failoverCtx.fillStyle = rColor + (promoted ? '40' : '20');
+        failoverCtx.beginPath();
+        failoverCtx.arc(x, replicaY, promoted ? 28 : 22, 0, Math.PI * 2);
+        failoverCtx.fill();
+        failoverCtx.strokeStyle = rColor;
+        failoverCtx.lineWidth = promoted ? 2 : 1;
+        failoverCtx.beginPath();
+        failoverCtx.arc(x, replicaY, promoted ? 28 : 22, 0, Math.PI * 2);
+        failoverCtx.stroke();
+        failoverCtx.shadowBlur = 0;
+
+        failoverCtx.fillStyle = '#fff';
+        failoverCtx.font = promoted ? 'bold 11px Inter' : '10px Inter';
+        failoverCtx.fillText(promoted ? 'New Master' : 'Replica', x, replicaY);
+
+        if (promoted) {
+          failoverCtx.fillStyle = '#22c55e';
+          failoverCtx.font = 'bold 11px Inter';
+          failoverCtx.fillText('★ PROMOTED', x, replicaY + 40);
+        }
+      }
+    });
+  }
+
+  document.getElementById('killNodeBtn')?.addEventListener('click', () => {
+    killedNode = 0; // Kill Node A
+    failoverStep = 0;
+    failoverTimeline.innerHTML = '';
+
+    const step = failoverSteps[0];
+    failoverBadge.className = `status-badge ${step.badge}`;
+    failoverBadge.textContent = step.badgeText;
+    failoverStatusText.textContent = step.text(NODE_NAMES[killedNode]);
+
+    const el = document.createElement('div');
+    el.className = `failover-step ${step.cls}`;
+    el.textContent = step.text(NODE_NAMES[killedNode]);
+    failoverTimeline.appendChild(el);
+
+    renderFailoverCanvas();
+    (document.getElementById('stepFailoverBtn') as HTMLButtonElement).disabled = false;
+    (document.getElementById('autoFailoverBtn') as HTMLButtonElement).disabled = false;
+  });
+
+  document.getElementById('stepFailoverBtn')?.addEventListener('click', () => {
+    if (failoverStep < failoverSteps.length - 1) {
+      failoverStep++;
+      const step = failoverSteps[failoverStep];
+      failoverBadge.className = `status-badge ${step.badge}`;
+      failoverBadge.textContent = step.badgeText;
+      failoverStatusText.textContent = step.text(NODE_NAMES[killedNode]);
+
+      const el = document.createElement('div');
+      el.className = `failover-step ${step.cls}`;
+      el.textContent = step.text(NODE_NAMES[killedNode]);
+      failoverTimeline.appendChild(el);
+      failoverTimeline.scrollTop = failoverTimeline.scrollHeight;
+
+      renderFailoverCanvas();
+      if (failoverStep >= failoverSteps.length - 1) {
+        (document.getElementById('stepFailoverBtn') as HTMLButtonElement).disabled = true;
+        (document.getElementById('autoFailoverBtn') as HTMLButtonElement).disabled = true;
+      }
+    }
+  });
+
+  document.getElementById('autoFailoverBtn')?.addEventListener('click', async () => {
+    if (failoverAutoPlaying) return;
+    failoverAutoPlaying = true;
+    (document.getElementById('autoFailoverBtn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('stepFailoverBtn') as HTMLButtonElement).disabled = true;
+    while (failoverStep < failoverSteps.length - 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      failoverStep++;
+      const step = failoverSteps[failoverStep];
+      failoverBadge.className = `status-badge ${step.badge}`;
+      failoverBadge.textContent = step.badgeText;
+      failoverStatusText.textContent = step.text(NODE_NAMES[killedNode]);
+
+      const el = document.createElement('div');
+      el.className = `failover-step ${step.cls}`;
+      el.textContent = step.text(NODE_NAMES[killedNode]);
+      failoverTimeline.appendChild(el);
+      failoverTimeline.scrollTop = failoverTimeline.scrollHeight;
+      renderFailoverCanvas();
+    }
+    failoverAutoPlaying = false;
+  });
+
+  document.getElementById('resetFailoverBtn')?.addEventListener('click', () => {
+    killedNode = -1;
+    failoverStep = 0;
+    failoverAutoPlaying = false;
+    failoverTimeline.innerHTML = '';
+    failoverBadge.className = 'status-badge idle';
+    failoverBadge.textContent = 'Ready';
+    failoverStatusText.textContent = 'Click "Kill Master" to begin the failover simulation';
+    (document.getElementById('stepFailoverBtn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('autoFailoverBtn') as HTMLButtonElement).disabled = true;
+    renderFailoverCanvas();
+  });
+
+  // ========== SLOT MIGRATION ==========
+  const migrateSource = document.getElementById('migrateSource')!;
+  const migrateTarget = document.getElementById('migrateTarget')!;
+  const migrateLog = document.getElementById('migrateLog')!;
+  const flyingKey = document.getElementById('flyingKey')!;
+
+  let migrationSlots = [100, 101, 102, 103, 104, 105, 106, 107];
+  let migratedSlots: number[] = [];
+
+  function renderMigrationSlots() {
+    migrateSource.innerHTML = '';
+    migrateTarget.innerHTML = '';
+    migrationSlots.filter(s => !migratedSlots.includes(s)).forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'migrate-slot source-slot';
+      el.textContent = String(s);
+      migrateSource.appendChild(el);
+    });
+    migratedSlots.forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'migrate-slot target-slot';
+      el.textContent = String(s);
+      migrateTarget.appendChild(el);
+    });
+  }
+
+  document.getElementById('startMigrateBtn')?.addEventListener('click', async () => {
+    (document.getElementById('startMigrateBtn') as HTMLButtonElement).disabled = true;
+    migrateLog.innerHTML = '';
+    migratedSlots = [];
+    renderMigrationSlots();
+
+    const addLog = (html: string) => {
+      const entry = document.createElement('div');
+      entry.className = 'migrate-log-entry';
+      entry.innerHTML = html;
+      migrateLog.appendChild(entry);
+      migrateLog.scrollTop = migrateLog.scrollHeight;
+    };
+
+    addLog('<span class="cmd">CLUSTER SETSLOT 100-107 IMPORTING</span> on Node B');
+    await new Promise(r => setTimeout(r, 600));
+    addLog('<span class="cmd">CLUSTER SETSLOT 100-107 MIGRATING</span> on Node A');
+    await new Promise(r => setTimeout(r, 600));
+
+    for (const slot of migrationSlots) {
+      addLog(`<span class="info">CLUSTER GETKEYSINSLOT ${slot} 100</span> → found keys`);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Show flying animation
+      flyingKey.style.display = 'block';
+      flyingKey.style.animation = 'none';
+      void flyingKey.offsetWidth;
+      flyingKey.style.animation = 'flyAcross 0.6s ease-in-out';
+
+      addLog(`<span class="cmd">MIGRATE</span> Node-B 6379 "" 0 5000 KEYS key:${slot}:*`);
+      await new Promise(r => setTimeout(r, 600));
+      flyingKey.style.display = 'none';
+
+      migratedSlots.push(slot);
+      renderMigrationSlots();
+    }
+
+    addLog('<span class="cmd">CLUSTER SETSLOT 100-107 NODE</span> Node-B-id → complete ✅');
+    (document.getElementById('startMigrateBtn') as HTMLButtonElement).disabled = false;
+  });
+
+  document.getElementById('resetMigrateBtn')?.addEventListener('click', () => {
+    migratedSlots = [];
+    migrateLog.innerHTML = '';
+    renderMigrationSlots();
+    (document.getElementById('startMigrateBtn') as HTMLButtonElement).disabled = false;
+  });
+
+  // ========== NETWORK PARTITION ==========
+  const partitionCanvas = document.getElementById('partitionCanvas') as HTMLCanvasElement;
+  const partitionCtx = partitionCanvas.getContext('2d')!;
+  const partitionLog = document.getElementById('partitionLog')!;
+  let isPartitioned = false;
+
+  function renderPartitionCanvas(partitioned: boolean, splitAt: number) {
+    partitionCtx.clearRect(0, 0, partitionCanvas.width, partitionCanvas.height);
+    const masters = clusterNodes.filter(n => n.isMaster);
+    const spacing = partitionCanvas.width / (masters.length + 1);
+    const y = 150;
+
+    // Draw partition line
+    if (partitioned && splitAt >= 0) {
+      const lineX = spacing * (splitAt + 1) + spacing / 2;
+      partitionCtx.strokeStyle = '#ef4444';
+      partitionCtx.lineWidth = 3;
+      partitionCtx.setLineDash([8, 6]);
+      partitionCtx.beginPath();
+      partitionCtx.moveTo(lineX, 20);
+      partitionCtx.lineTo(lineX, partitionCanvas.height - 20);
+      partitionCtx.stroke();
+      partitionCtx.setLineDash([]);
+
+      // Labels
+      partitionCtx.fillStyle = '#ef4444';
+      partitionCtx.font = 'bold 11px Inter';
+      partitionCtx.textAlign = 'center';
+      partitionCtx.fillText('⚡ PARTITION ⚡', lineX, 15);
+
+      // Minority/majority labels
+      const leftCount = splitAt + 1;
+      const rightCount = masters.length - leftCount;
+      const leftLabel = leftCount <= masters.length / 2 ? 'MINORITY' : 'MAJORITY';
+      const rightLabel = rightCount <= masters.length / 2 ? 'MINORITY' : 'MAJORITY';
+
+      partitionCtx.fillStyle = leftLabel === 'MINORITY' ? '#ef4444' : '#22c55e';
+      partitionCtx.fillText(leftLabel, lineX / 2, partitionCanvas.height - 10);
+      partitionCtx.fillStyle = rightLabel === 'MINORITY' ? '#ef4444' : '#22c55e';
+      partitionCtx.fillText(rightLabel, lineX + (partitionCanvas.width - lineX) / 2, partitionCanvas.height - 10);
+    }
+
+    // Draw connections
+    for (let i = 0; i < masters.length; i++) {
+      for (let j = i + 1; j < masters.length; j++) {
+        const x1 = spacing * (i + 1);
+        const x2 = spacing * (j + 1);
+        const crossesPartition = partitioned && splitAt >= 0 && i <= splitAt && j > splitAt;
+
+        partitionCtx.strokeStyle = crossesPartition ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.1)';
+        partitionCtx.lineWidth = 1;
+        partitionCtx.setLineDash(crossesPartition ? [2, 4] : [3, 3]);
+        partitionCtx.beginPath();
+        partitionCtx.moveTo(x1, y);
+        partitionCtx.lineTo(x2, y);
+        partitionCtx.stroke();
+      }
+    }
+    partitionCtx.setLineDash([]);
+
+    // Draw nodes
+    masters.forEach((node, i) => {
+      const x = spacing * (i + 1);
+      const inMinority = partitioned && splitAt >= 0 && i <= splitAt && (splitAt + 1) <= masters.length / 2;
+
+      partitionCtx.shadowColor = inMinority ? '#ef4444' : node.color;
+      partitionCtx.shadowBlur = 12;
+      partitionCtx.fillStyle = (inMinority ? '#ef4444' : node.color) + '30';
+      partitionCtx.beginPath();
+      partitionCtx.arc(x, y, 32, 0, Math.PI * 2);
+      partitionCtx.fill();
+
+      partitionCtx.strokeStyle = inMinority ? '#ef4444' : node.color;
+      partitionCtx.lineWidth = 2;
+      partitionCtx.beginPath();
+      partitionCtx.arc(x, y, 32, 0, Math.PI * 2);
+      partitionCtx.stroke();
+      partitionCtx.shadowBlur = 0;
+
+      partitionCtx.fillStyle = '#fff';
+      partitionCtx.font = 'bold 12px Inter';
+      partitionCtx.textAlign = 'center';
+      partitionCtx.textBaseline = 'middle';
+      partitionCtx.fillText(node.name, x, y);
+
+      if (inMinority) {
+        partitionCtx.fillStyle = '#ef4444';
+        partitionCtx.font = '10px Inter';
+        partitionCtx.fillText('⚠ Read-only', x, y + 46);
+      }
+    });
+  }
+
+  document.getElementById('partitionBtn')?.addEventListener('click', async () => {
+    isPartitioned = true;
+    partitionLog.innerHTML = '';
+    (document.getElementById('partitionBtn') as HTMLButtonElement).disabled = true;
+    (document.getElementById('healBtn') as HTMLButtonElement).disabled = false;
+
+    const splitAt = 0; // Node A gets isolated
+
+    renderPartitionCanvas(true, splitAt);
+
+    const addLog = (html: string, cls: string) => {
+      const entry = document.createElement('div');
+      entry.className = `partition-entry ${cls}`;
+      entry.innerHTML = html;
+      partitionLog.appendChild(entry);
+      partitionLog.scrollTop = partitionLog.scrollHeight;
+    };
+
+    addLog('⚡ Network partition created — Node A is isolated from Nodes B and C', 'error');
+    await new Promise(r => setTimeout(r, 1000));
+    addLog(`⏱ After cluster-node-timeout: B and C mark A as PFAIL`, 'warning');
+    await new Promise(r => setTimeout(r, 1000));
+    addLog(`❌ Majority agrees: A marked FAIL. Its replica starts election.`, 'error');
+    await new Promise(r => setTimeout(r, 1000));
+    addLog(`🗳 A's replica wins election, promoted to master in the majority partition`, 'info-entry');
+    await new Promise(r => setTimeout(r, 800));
+    addLog(`⚠ Node A (minority) can still receive reads but REJECTS writes — not enough masters reachable`, 'warning');
+    await new Promise(r => setTimeout(r, 800));
+    addLog(`📝 Clients connected to minority partition get CLUSTERDOWN errors on writes`, 'error');
+  });
+
+  document.getElementById('healBtn')?.addEventListener('click', async () => {
+    (document.getElementById('healBtn') as HTMLButtonElement).disabled = true;
+
+    renderPartitionCanvas(false, -1);
+
+    const addLog = (html: string, cls: string) => {
+      const entry = document.createElement('div');
+      entry.className = `partition-entry ${cls}`;
+      entry.innerHTML = html;
+      partitionLog.appendChild(entry);
+      partitionLog.scrollTop = partitionLog.scrollHeight;
+    };
+
+    addLog('🩹 Network healed — all nodes can communicate again', 'success');
+    await new Promise(r => setTimeout(r, 800));
+    addLog('📡 Node A discovers it lost mastership → becomes replica of promoted node', 'info-entry');
+    await new Promise(r => setTimeout(r, 800));
+    addLog('✅ Cluster fully healthy. All slots served. Node A syncing as replica.', 'success');
+
+    isPartitioned = false;
+    (document.getElementById('partitionBtn') as HTMLButtonElement).disabled = false;
+  });
+
+  document.getElementById('resetPartitionBtn')?.addEventListener('click', () => {
+    isPartitioned = false;
+    partitionLog.innerHTML = '';
+    renderPartitionCanvas(false, -1);
+    (document.getElementById('partitionBtn') as HTMLButtonElement).disabled = false;
+    (document.getElementById('healBtn') as HTMLButtonElement).disabled = true;
+  });
+
+  // ========== INITIAL RENDER ==========
+  renderLegend();
+  renderSlotGrid();
+  renderTopology();
+  renderFailoverCanvas();
+  renderMigrationSlots();
+  renderPartitionCanvas(false, -1);
+</script>

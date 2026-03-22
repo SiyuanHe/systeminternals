@@ -1,0 +1,859 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kafka Consumer Groups & Rebalancing" 
+  description="Interactive visualization of Kafka consumer groups, partition assignment strategies, rebalancing protocols, and the rebalance storm problem"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kafka", href: "/kafka/" },
+    { label: "Consumer Groups", href: "/kafka/consumer-groups/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>👥 Consumer Groups & Rebalancing</h1>
+      <p class="subtitle">How Kafka Distributes Work — and What Happens When Things Change</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A <strong>consumer group</strong> is a set of consumers that cooperate to consume a topic.
+          Each partition is assigned to <em>exactly one consumer</em> in the group — this is how Kafka parallelizes consumption.
+          Consumers track their progress via <strong>committed offsets</strong> stored in the internal
+          <code>__consumer_offsets</code> topic. When consumers join, leave, or crash, Kafka triggers a
+          <em>rebalance</em> to redistribute partitions.
+        </p>
+      </div>
+    </section>
+
+    <!-- Interactive Partition Assignment -->
+    <section class="assignment-section">
+      <h2>📊 Partition → Consumer Assignment</h2>
+      <p class="section-desc">Adjust partitions, consumers, and strategy to see how assignments change in real-time.</p>
+
+      <div class="assign-controls">
+        <div class="slider-group">
+          <label>Partitions: <strong id="partLabel">6</strong></label>
+          <input type="range" id="partSlider" min="1" max="12" value="6">
+        </div>
+        <div class="slider-group">
+          <label>Consumers: <strong id="consLabel">3</strong></label>
+          <input type="range" id="consSlider" min="1" max="8" value="3">
+        </div>
+        <div class="strategy-group">
+          <label>Strategy:</label>
+          <div class="strategy-buttons">
+            <button class="strat-btn active" data-strat="range">Range</button>
+            <button class="strat-btn" data-strat="roundrobin">Round Robin</button>
+            <button class="strat-btn" data-strat="sticky">Sticky</button>
+            <button class="strat-btn" data-strat="cooperative">CooperativeSticky</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="assign-viz-wrapper">
+        <div class="assign-viz" id="assignViz"></div>
+        <div class="assign-legend" id="assignLegend"></div>
+      </div>
+
+      <div class="strategy-desc" id="strategyDesc">
+        <strong>Range Assignor (default):</strong> Partitions are divided by range per topic. Each consumer gets a contiguous block. Uneven splits give extra partitions to earlier consumers.
+      </div>
+
+      <div class="assign-actions">
+        <button id="addConsumerBtn" class="action-btn primary-btn">➕ Add Consumer</button>
+        <button id="killConsumerBtn" class="action-btn danger-btn">💀 Kill Consumer</button>
+        <button id="addPartBtn" class="action-btn secondary-btn">📦 Add Partition</button>
+      </div>
+
+      <div class="idle-warning" id="idleWarning" style="display:none">
+        ⚠️ <strong id="idleCount">0</strong> idle consumer(s) — more consumers than partitions!
+      </div>
+    </section>
+
+    <!-- Offset Tracking -->
+    <section class="offset-section">
+      <h2>📍 Offset Tracking</h2>
+      <p class="section-desc">Each consumer commits its position per partition to __consumer_offsets.</p>
+
+      <div class="offset-viz" id="offsetViz"></div>
+
+      <div class="offset-controls">
+        <button id="consumeMsgsBtn" class="action-btn primary-btn">📥 Consume Messages</button>
+        <button id="commitOffsetsBtn" class="action-btn commit-btn">✅ Commit Offsets</button>
+        <button id="resetOffsetsBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="offset-info" id="offsetInfo">Click "Consume Messages" to advance consumer positions</div>
+    </section>
+
+    <!-- Rebalancing Deep Dive -->
+    <section class="rebalance-section">
+      <h2>🔄 Rebalancing Deep Dive</h2>
+      <p class="section-desc">Step through a rebalance event to see eager vs. cooperative protocols.</p>
+
+      <div class="rebalance-controls">
+        <div class="rebalance-toggle">
+          <button class="rebal-mode-btn active" data-mode="eager">Eager (Stop-the-World)</button>
+          <button class="rebal-mode-btn" data-mode="cooperative">Cooperative (Incremental)</button>
+        </div>
+        <div class="rebalance-trigger">
+          <label>Trigger:</label>
+          <select id="rebalTrigger">
+            <option value="join">Consumer joins</option>
+            <option value="leave">Consumer leaves/crashes</option>
+            <option value="partitions">New partitions added</option>
+          </select>
+        </div>
+        <div class="rebalance-actions">
+          <button id="startRebalBtn" class="action-btn primary-btn">▶ Start Rebalance</button>
+          <button id="stepRebalBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+          <button id="resetRebalBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="rebalance-status" id="rebalStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="rebalStatusText">Choose a trigger and click "Start Rebalance"</span>
+      </div>
+
+      <div class="rebalance-timeline" id="rebalTimeline"></div>
+
+      <div class="lag-meter">
+        <div class="lag-label">Consumer Lag During Rebalance</div>
+        <div class="lag-bar-track">
+          <div class="lag-bar-fill" id="lagBar" style="width:0%"></div>
+        </div>
+        <div class="lag-value" id="lagValue">0 msgs</div>
+      </div>
+
+      <div class="before-after" id="beforeAfter" style="display:none">
+        <div class="ba-col">
+          <h4>Before</h4>
+          <div id="baBefore"></div>
+        </div>
+        <div class="ba-arrow">→</div>
+        <div class="ba-col">
+          <h4>After</h4>
+          <div id="baAfter"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Rebalance Storm -->
+    <section class="storm-section">
+      <h2>🌪️ The Rebalance Storm</h2>
+      <p class="section-desc">When a slow consumer triggers cascading rebalances.</p>
+
+      <div class="storm-controls">
+        <div class="slider-group">
+          <label>session.timeout.ms: <strong id="sessionTimeoutLabel">10000</strong></label>
+          <input type="range" id="sessionTimeoutSlider" min="5000" max="30000" value="10000" step="1000">
+        </div>
+        <div class="slider-group">
+          <label>max.poll.interval.ms: <strong id="pollIntervalLabel">300000</strong></label>
+          <input type="range" id="pollIntervalSlider" min="10000" max="600000" value="300000" step="10000">
+        </div>
+        <button id="startStormBtn" class="action-btn danger-btn">🌪️ Trigger Storm</button>
+        <button id="resetStormBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="storm-viz" id="stormViz"></div>
+      <div class="storm-log" id="stormLog"></div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Cooperative Rebalancing?</h3>
+          <p>
+            Eager rebalancing <strong>revokes ALL partitions</strong> from ALL consumers before reassigning.
+            During this window, <em>no consumption happens</em> — a full stop-the-world event.
+            Cooperative rebalancing only revokes the partitions that actually need to move,
+            so unaffected consumers keep processing. This dramatically reduces lag spikes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Avoiding Rebalance Storms</h3>
+          <p>
+            A slow consumer exceeds <code>max.poll.interval.ms</code> → gets kicked →
+            triggers rebalance → other consumers pause → <em>they</em> might exceed the interval →
+            more kicks → more rebalances. Fix: increase <code>max.poll.interval.ms</code>,
+            reduce <code>max.poll.records</code>, or speed up processing.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 Static Group Membership</h3>
+          <p>
+            Set <code>group.instance.id</code> per consumer. When a consumer restarts,
+            it reclaims its old partitions without triggering a rebalance.
+            The group coordinator waits <code>session.timeout.ms</code> before reassigning.
+            Great for rolling deployments.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Monitoring Consumer Groups</h3>
+          <p>
+            <code>kafka-consumer-groups.sh --describe</code> shows current assignment,
+            committed offset, log-end offset, and <strong>lag</strong> per partition.
+            Alert when total lag exceeds your SLA threshold. Track lag trend, not just absolute value.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://kafka.apache.org/documentation/#consumerconfigs" target="_blank">Apache Kafka Consumer Documentation</a> and <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-429%3A+Kafka+Consumer+Incremental+Rebalance+Protocol" target="_blank">KIP-429: Incremental Rebalance Protocol</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20Consumer%20Groups%20%26%20Rebalancing%20Visualizer&url=https://systeminternals.dev/kafka/consumer-groups/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/consumer-groups/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/consumer-groups/&t=Interactive%20Kafka%20Consumer%20Groups%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .step-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .commit-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #34d399; cursor: pointer; }
+
+  /* Assignment Section */
+  .assignment-section { margin-bottom: 50px; }
+  .assign-controls { margin-bottom: 24px; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #34d399; }
+  .slider-group input[type="range"] { max-width: 400px; }
+
+  .strategy-group { margin-bottom: 16px; }
+  .strategy-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .strategy-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  .strat-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .strat-btn.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; font-weight: 600; }
+
+  .assign-viz-wrapper { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; }
+  .assign-viz { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .assign-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+
+  :global(.assign-row) { display: flex; align-items: center; gap: 12px; height: 44px; }
+  :global(.assign-part-label) { width: 36px; font-size: 0.85rem; font-weight: 700; color: #60a5fa; flex-shrink: 0; }
+  :global(.assign-bar) { flex: 1; height: 36px; border-radius: 8px; display: flex; align-items: center; padding: 0 14px; font-size: 0.85rem; font-weight: 600; color: #fff; transition: all 0.5s ease; position: relative; overflow: hidden; }
+  :global(.assign-bar::after) { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 60%, rgba(255,255,255,0.05)); }
+  :global(.assign-bar.unassigned) { background: rgba(107,114,128,0.2); border: 1px dashed rgba(107,114,128,0.4); color: #6b7280; }
+  :global(.assign-bar.moving) { animation: partMove 0.6s ease-in-out; }
+  @keyframes partMove { 0% { transform: translateX(0); opacity: 1; } 50% { transform: translateX(10px); opacity: 0.4; } 100% { transform: translateX(0); opacity: 1; } }
+
+  :global(.legend-item) { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #aaa; }
+  :global(.legend-dot) { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  .strategy-desc { padding: 14px 18px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; margin-bottom: 16px; }
+  .strategy-desc strong { color: #34d399; }
+
+  .assign-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .idle-warning { padding: 12px 16px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; color: #fbbf24; font-size: 0.9rem; }
+
+  /* Offset Section */
+  .offset-section { margin-bottom: 50px; }
+  .offset-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 60px; }
+  :global(.offset-row) { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  :global(.offset-part) { width: 36px; font-size: 0.8rem; font-weight: 700; color: #60a5fa; flex-shrink: 0; }
+  :global(.offset-track) { flex: 1; height: 28px; background: rgba(255,255,255,0.05); border-radius: 6px; position: relative; overflow: hidden; }
+  :global(.offset-log-end) { position: absolute; top: 0; left: 0; height: 100%; background: rgba(107,114,128,0.2); border-radius: 6px; transition: width 0.3s; }
+  :global(.offset-committed) { position: absolute; top: 0; left: 0; height: 100%; background: rgba(52,211,153,0.3); border-radius: 6px; transition: width 0.3s; }
+  :global(.offset-current) { position: absolute; top: 0; left: 0; height: 100%; background: rgba(96,165,250,0.4); border-radius: 6px; transition: width 0.3s; }
+  :global(.offset-labels) { width: 160px; font-size: 0.7rem; color: #888; flex-shrink: 0; font-family: 'Monaco','Menlo',monospace; }
+  .offset-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .offset-info { font-size: 0.9rem; color: #888; text-align: center; padding: 8px; }
+
+  /* Rebalance Section */
+  .rebalance-section { margin-bottom: 50px; }
+  .rebalance-controls { margin-bottom: 20px; }
+  .rebalance-toggle { display: flex; gap: 10px; margin-bottom: 16px; }
+  .rebal-mode-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .rebal-mode-btn.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; font-weight: 600; }
+  .rebalance-trigger { margin-bottom: 16px; }
+  .rebalance-trigger label { color: #ccc; font-size: 0.95rem; margin-right: 10px; }
+  .rebalance-trigger select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.9rem; }
+  .rebalance-trigger select option { background: #1a1a2e; }
+  .rebalance-actions { display: flex; gap: 12px; }
+
+  .rebalance-status { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 12px 16px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+  .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; }
+  .status-badge.idle { background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .status-badge.revoking { background: rgba(239,68,68,0.2); color: #f87171; }
+  .status-badge.assigning { background: rgba(251,191,36,0.2); color: #fbbf24; }
+  .status-badge.stable { background: rgba(52,211,153,0.2); color: #34d399; }
+  .status-text { color: #aaa; font-size: 0.95rem; }
+
+  .rebalance-timeline { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 20px; min-height: 100px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; max-height: 300px; overflow-y: auto; }
+  :global(.rebal-step) { padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; font-size: 0.9rem; animation: eventAppear 0.4s ease-out; }
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.rebal-step.info) { background: rgba(96,165,250,0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.rebal-step.revoke) { background: rgba(239,68,68,0.1); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.rebal-step.assign) { background: rgba(52,211,153,0.1); color: #6ee7b7; border-left: 3px solid #34d399; }
+  :global(.rebal-step.warn) { background: rgba(251,191,36,0.1); color: #fde68a; border-left: 3px solid #fbbf24; }
+  :global(.rebal-step.done) { background: rgba(167,139,250,0.1); color: #c4b5fd; border-left: 3px solid #a78bfa; }
+
+  .lag-meter { margin-bottom: 20px; }
+  .lag-label { font-size: 0.85rem; color: #888; margin-bottom: 8px; }
+  .lag-bar-track { height: 24px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+  .lag-bar-fill { height: 100%; background: linear-gradient(90deg, #34d399, #fbbf24, #ef4444); border-radius: 6px; transition: width 0.5s ease; }
+  .lag-value { font-size: 0.85rem; color: #aaa; text-align: right; }
+
+  .before-after { display: flex; gap: 20px; align-items: flex-start; }
+  .ba-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); }
+  .ba-col h4 { font-size: 0.9rem; color: #fff; margin-bottom: 10px; }
+  .ba-arrow { font-size: 2rem; color: #34d399; align-self: center; flex-shrink: 0; }
+  :global(.ba-entry) { font-size: 0.8rem; color: #aaa; padding: 4px 0; font-family: 'Monaco','Menlo',monospace; }
+  :global(.ba-entry.moved) { color: #fbbf24; }
+
+  /* Storm Section */
+  .storm-section { margin-bottom: 50px; }
+  .storm-controls { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .storm-controls .slider-group { flex: 1; min-width: 200px; }
+  .storm-viz { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; min-height: 60px; }
+  :global(.storm-consumer) { padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); min-width: 110px; text-align: center; transition: all 0.3s; }
+  :global(.storm-consumer.healthy) { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+  :global(.storm-consumer.slow) { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.08); animation: pulse 1s ease-in-out infinite; }
+  :global(.storm-consumer.kicked) { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); opacity: 0.5; }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  :global(.storm-name) { font-weight: 700; font-size: 0.85rem; color: #fff; margin-bottom: 4px; }
+  :global(.storm-status) { font-size: 0.75rem; color: #888; }
+
+  .storm-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 60px; max-height: 250px; overflow-y: auto; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.storm-log-entry) { padding: 3px 0; animation: eventAppear 0.3s ease-out; }
+  :global(.storm-log-entry.error) { color: #fca5a5; }
+  :global(.storm-log-entry.warning) { color: #fde68a; }
+  :global(.storm-log-entry.ok) { color: #6ee7b7; }
+
+  /* Explain Section */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .before-after { flex-direction: column; }
+    .ba-arrow { align-self: center; transform: rotate(90deg); }
+    .storm-controls { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== CONSTANTS ==========
+  const CONSUMER_COLORS = [
+    '#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f97316', '#06b6d4', '#e879f9'
+  ];
+  const CONSUMER_BG = [
+    'rgba(52,211,153,0.25)', 'rgba(96,165,250,0.25)', 'rgba(244,114,182,0.25)',
+    'rgba(251,191,36,0.25)', 'rgba(167,139,250,0.25)', 'rgba(249,115,22,0.25)',
+    'rgba(6,182,212,0.25)', 'rgba(232,121,249,0.25)'
+  ];
+
+  // ========== STATE ==========
+  let partCount = 6;
+  let consCount = 3;
+  let strategy = 'range';
+  let assignments: number[] = []; // partition -> consumer index (-1 = unassigned)
+
+  // ========== ASSIGNMENT STRATEGIES ==========
+  function assignRange(p: number, c: number): number[] {
+    const result = new Array(p).fill(-1);
+    if (c === 0) return result;
+    const active = Math.min(c, p);
+    const base = Math.floor(p / active);
+    const extra = p % active;
+    let idx = 0;
+    for (let ci = 0; ci < active; ci++) {
+      const count = base + (ci < extra ? 1 : 0);
+      for (let j = 0; j < count; j++) {
+        result[idx++] = ci;
+      }
+    }
+    return result;
+  }
+
+  function assignRoundRobin(p: number, c: number): number[] {
+    const result = new Array(p).fill(-1);
+    if (c === 0) return result;
+    const active = Math.min(c, p);
+    for (let i = 0; i < p; i++) {
+      result[i] = i % active;
+    }
+    return result;
+  }
+
+  function assignSticky(p: number, c: number): number[] {
+    // Same as round-robin for initial, but preserves existing assignments on changes
+    if (assignments.length === 0) return assignRoundRobin(p, c);
+    const result = new Array(p).fill(-1);
+    const active = Math.min(c, p);
+    // Keep existing assignments where valid
+    const consumerLoad: number[] = new Array(c).fill(0);
+    for (let i = 0; i < Math.min(p, assignments.length); i++) {
+      if (assignments[i] >= 0 && assignments[i] < active) {
+        result[i] = assignments[i];
+        consumerLoad[assignments[i]]++;
+      }
+    }
+    // Assign unassigned partitions to least-loaded consumers
+    for (let i = 0; i < p; i++) {
+      if (result[i] === -1) {
+        let minLoad = Infinity, minC = 0;
+        for (let ci = 0; ci < active; ci++) {
+          if (consumerLoad[ci] < minLoad) { minLoad = consumerLoad[ci]; minC = ci; }
+        }
+        result[i] = minC;
+        consumerLoad[minC]++;
+      }
+    }
+    return result;
+  }
+
+  function computeAssignments(): number[] {
+    switch (strategy) {
+      case 'range': return assignRange(partCount, consCount);
+      case 'roundrobin': return assignRoundRobin(partCount, consCount);
+      case 'sticky': return assignSticky(partCount, consCount);
+      case 'cooperative': return assignSticky(partCount, consCount); // same logic, diff rebalance protocol
+      default: return assignRange(partCount, consCount);
+    }
+  }
+
+  // ========== RENDER ASSIGNMENT VIZ ==========
+  function renderAssignment() {
+    const oldAssignments = [...assignments];
+    assignments = computeAssignments();
+    const viz = document.getElementById('assignViz')!;
+    const legend = document.getElementById('assignLegend')!;
+    viz.innerHTML = '';
+
+    for (let i = 0; i < partCount; i++) {
+      const ci = assignments[i];
+      const moved = oldAssignments.length > 0 && i < oldAssignments.length && oldAssignments[i] !== ci;
+      const row = document.createElement('div');
+      row.className = 'assign-row';
+      const bar = ci >= 0
+        ? `<div class="assign-bar ${moved ? 'moving' : ''}" style="background:${CONSUMER_BG[ci]};border:1px solid ${CONSUMER_COLORS[ci]}44">C${ci}</div>`
+        : `<div class="assign-bar unassigned">unassigned</div>`;
+      row.innerHTML = `<div class="assign-part-label">P${i}</div>${bar}`;
+      viz.appendChild(row);
+    }
+
+    // Legend
+    const active = Math.min(consCount, partCount);
+    legend.innerHTML = '';
+    for (let i = 0; i < consCount; i++) {
+      const item = document.createElement('span');
+      item.className = 'legend-item';
+      const idle = i >= partCount;
+      item.innerHTML = `<span class="legend-dot" style="background:${idle ? '#6b7280' : CONSUMER_COLORS[i]}"></span>C${i}${idle ? ' (idle)' : ''}`;
+      legend.appendChild(item);
+    }
+
+    // Idle warning
+    const idle = Math.max(0, consCount - partCount);
+    document.getElementById('idleWarning')!.style.display = idle > 0 ? 'block' : 'none';
+    document.getElementById('idleCount')!.textContent = String(idle);
+  }
+
+  // ========== OFFSET TRACKING ==========
+  let offsetState: Array<{logEnd: number; current: number; committed: number}> = [];
+  const MAX_LOG = 100;
+
+  function initOffsets() {
+    offsetState = [];
+    for (let i = 0; i < partCount; i++) {
+      offsetState.push({ logEnd: Math.floor(Math.random() * 40) + 20, current: 0, committed: 0 });
+    }
+    offsetState.forEach(o => { o.current = Math.floor(o.logEnd * 0.6); o.committed = Math.floor(o.current * 0.8); });
+  }
+
+  function renderOffsets() {
+    const viz = document.getElementById('offsetViz')!;
+    viz.innerHTML = '';
+    if (offsetState.length === 0) { initOffsets(); }
+
+    offsetState.forEach((o, i) => {
+      const row = document.createElement('div');
+      row.className = 'offset-row';
+      const pct = (v: number) => (v / MAX_LOG * 100).toFixed(1);
+      row.innerHTML = `
+        <div class="offset-part">P${i}</div>
+        <div class="offset-track">
+          <div class="offset-log-end" style="width:${pct(o.logEnd)}%"></div>
+          <div class="offset-current" style="width:${pct(o.current)}%"></div>
+          <div class="offset-committed" style="width:${pct(o.committed)}%"></div>
+        </div>
+        <div class="offset-labels">end:${o.logEnd} cur:${o.current} com:${o.committed}</div>
+      `;
+      viz.appendChild(row);
+    });
+  }
+
+  document.getElementById('consumeMsgsBtn')?.addEventListener('click', () => {
+    if (offsetState.length === 0) initOffsets();
+    offsetState.forEach(o => {
+      const advance = Math.floor(Math.random() * 8) + 2;
+      o.logEnd = Math.min(MAX_LOG, o.logEnd + Math.floor(Math.random() * 5) + 1);
+      o.current = Math.min(o.logEnd, o.current + advance);
+    });
+    renderOffsets();
+    document.getElementById('offsetInfo')!.textContent = 'Consumed messages — current position advanced (blue). Committed offset (green) unchanged.';
+  });
+
+  document.getElementById('commitOffsetsBtn')?.addEventListener('click', () => {
+    offsetState.forEach(o => { o.committed = o.current; });
+    renderOffsets();
+    document.getElementById('offsetInfo')!.textContent = 'Offsets committed! ✅ Green bar caught up to blue. If consumer crashes now, it resumes from here.';
+  });
+
+  document.getElementById('resetOffsetsBtn')?.addEventListener('click', () => {
+    initOffsets();
+    renderOffsets();
+    document.getElementById('offsetInfo')!.textContent = 'Reset to initial state.';
+  });
+
+  // ========== REBALANCE ANIMATION ==========
+  let rebalMode = 'eager';
+  let rebalSteps: Array<{cls: string; text: string; lag: number; badge?: string; badgeCls?: string}> = [];
+  let rebalStepIdx = 0;
+
+  function buildRebalSteps() {
+    const trigger = (document.getElementById('rebalTrigger') as HTMLSelectElement).value;
+    const triggerText = trigger === 'join' ? 'New consumer C3 joining group...'
+      : trigger === 'leave' ? 'Consumer C2 left the group (heartbeat timeout)...'
+      : 'New partition P6 added to topic...';
+
+    rebalSteps = [];
+    if (rebalMode === 'eager') {
+      rebalSteps = [
+        { cls: 'info', text: `🔔 Trigger: ${triggerText}`, lag: 0, badge: 'Triggered', badgeCls: 'revoking' },
+        { cls: 'revoke', text: '🛑 Group coordinator sends JoinGroup response — ALL consumers revoke ALL partitions', lag: 5 },
+        { cls: 'revoke', text: '⏸️ C0: revoking P0, P1 — consumption STOPPED', lag: 15 },
+        { cls: 'revoke', text: '⏸️ C1: revoking P2, P3 — consumption STOPPED', lag: 30 },
+        { cls: 'revoke', text: '⏸️ C2: revoking P4, P5 — consumption STOPPED', lag: 50, badge: 'Revoked', badgeCls: 'revoking' },
+        { cls: 'warn', text: '⏳ All consumers send SyncGroup — leader computes new assignment...', lag: 60, badge: 'Assigning', badgeCls: 'assigning' },
+        { cls: 'assign', text: '✅ C0 assigned: P0, P1' + (trigger === 'leave' ? ', P4' : ''), lag: 45 },
+        { cls: 'assign', text: '✅ C1 assigned: P2, P3' + (trigger === 'leave' ? ', P5' : ''), lag: 30 },
+        ...(trigger !== 'leave' ? [{ cls: 'assign' as const, text: '✅ C2 assigned: P4, P5', lag: 15 }] : []),
+        ...(trigger === 'join' ? [{ cls: 'assign' as const, text: '✅ C3 assigned: takes some partitions from others', lag: 10 }] : []),
+        { cls: 'done', text: '🎉 Rebalance complete — consumption resumes', lag: 5, badge: 'Stable', badgeCls: 'stable' },
+        { cls: 'done', text: `📊 Total downtime: ~${trigger === 'leave' ? '8' : '5'} seconds. All consumers were paused.`, lag: 0 },
+      ];
+    } else {
+      rebalSteps = [
+        { cls: 'info', text: `🔔 Trigger: ${triggerText}`, lag: 0, badge: 'Triggered', badgeCls: 'revoking' },
+        { cls: 'info', text: '📋 Round 1: Group coordinator asks consumers for current assignment', lag: 2 },
+        { cls: 'warn', text: '🔄 Leader computes diff — only partitions that need to move are revoked', lag: 5, badge: 'Assigning', badgeCls: 'assigning' },
+        ...(trigger === 'leave' ? [
+          { cls: 'revoke' as const, text: '⏸️ Only P4, P5 need new owners (C2 left) — C0, C1 keep consuming!', lag: 10 },
+        ] : [
+          { cls: 'revoke' as const, text: '⏸️ Only 1-2 partitions revoked for redistribution — others keep consuming!', lag: 8 },
+        ]),
+        { cls: 'assign', text: '✅ Round 2: Revoked partitions assigned to new owners', lag: 5 },
+        { cls: 'assign', text: '✅ Unaffected consumers never stopped — zero downtime for them', lag: 2 },
+        { cls: 'done', text: '🎉 Incremental rebalance complete', lag: 0, badge: 'Stable', badgeCls: 'stable' },
+        { cls: 'done', text: '📊 Only moved partitions experienced brief pause. ~70% less lag than eager.', lag: 0 },
+      ];
+    }
+  }
+
+  function renderRebalStep() {
+    const step = rebalSteps[rebalStepIdx];
+    const timeline = document.getElementById('rebalTimeline')!;
+    const el = document.createElement('div');
+    el.className = `rebal-step ${step.cls}`;
+    el.textContent = step.text;
+    timeline.appendChild(el);
+    timeline.scrollTop = timeline.scrollHeight;
+
+    // Update lag
+    const lagBar = document.getElementById('lagBar')!;
+    const lagValue = document.getElementById('lagValue')!;
+    lagBar.style.width = step.lag + '%';
+    lagValue.textContent = Math.round(step.lag * 50) + ' msgs';
+
+    if (step.badge) {
+      const badge = document.querySelector('.rebalance-status .status-badge')!;
+      badge.className = `status-badge ${step.badgeCls}`;
+      badge.textContent = step.badge;
+    }
+    document.getElementById('rebalStatusText')!.textContent = step.text.replace(/^[^\s]+\s/, '');
+  }
+
+  document.getElementById('startRebalBtn')?.addEventListener('click', () => {
+    document.getElementById('rebalTimeline')!.innerHTML = '';
+    buildRebalSteps();
+    rebalStepIdx = 0;
+    renderRebalStep();
+    (document.getElementById('stepRebalBtn') as HTMLButtonElement).disabled = false;
+    document.getElementById('beforeAfter')!.style.display = 'none';
+  });
+
+  document.getElementById('stepRebalBtn')?.addEventListener('click', () => {
+    if (rebalStepIdx < rebalSteps.length - 1) {
+      rebalStepIdx++;
+      renderRebalStep();
+      if (rebalStepIdx >= rebalSteps.length - 1) {
+        (document.getElementById('stepRebalBtn') as HTMLButtonElement).disabled = true;
+        showBeforeAfter();
+      }
+    }
+  });
+
+  function showBeforeAfter() {
+    const ba = document.getElementById('beforeAfter')!;
+    ba.style.display = 'flex';
+    const trigger = (document.getElementById('rebalTrigger') as HTMLSelectElement).value;
+    const before = ['P0,P1 → C0', 'P2,P3 → C1', 'P4,P5 → C2'];
+    let after: string[];
+    if (trigger === 'leave') {
+      after = ['P0,P1,P4 → C0', 'P2,P3,P5 → C1'];
+    } else if (trigger === 'join') {
+      after = ['P0,P1 → C0', 'P2 → C1', 'P3,P4 → C2', 'P5 → C3'];
+    } else {
+      after = ['P0,P1 → C0', 'P2,P3 → C1', 'P4,P5,P6 → C2'];
+    }
+    document.getElementById('baBefore')!.innerHTML = before.map(s => `<div class="ba-entry">${s}</div>`).join('');
+    document.getElementById('baAfter')!.innerHTML = after.map((s, i) =>
+      `<div class="ba-entry${i >= before.length || s !== before[i] ? ' moved' : ''}">${s}</div>`
+    ).join('');
+  }
+
+  document.getElementById('resetRebalBtn')?.addEventListener('click', () => {
+    document.getElementById('rebalTimeline')!.innerHTML = '';
+    document.getElementById('lagBar')!.style.width = '0%';
+    document.getElementById('lagValue')!.textContent = '0 msgs';
+    const badge = document.querySelector('.rebalance-status .status-badge')!;
+    badge.className = 'status-badge idle';
+    badge.textContent = 'Ready';
+    document.getElementById('rebalStatusText')!.textContent = 'Choose a trigger and click "Start Rebalance"';
+    (document.getElementById('stepRebalBtn') as HTMLButtonElement).disabled = true;
+    document.getElementById('beforeAfter')!.style.display = 'none';
+    rebalStepIdx = 0;
+  });
+
+  // Rebalance mode toggle
+  document.querySelectorAll('.rebal-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.rebal-mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      rebalMode = (btn as HTMLElement).dataset.mode!;
+    });
+  });
+
+  // ========== REBALANCE STORM ==========
+  let stormRunning = false;
+
+  document.getElementById('sessionTimeoutSlider')?.addEventListener('input', (e) => {
+    document.getElementById('sessionTimeoutLabel')!.textContent = (e.target as HTMLInputElement).value;
+  });
+  document.getElementById('pollIntervalSlider')?.addEventListener('input', (e) => {
+    document.getElementById('pollIntervalLabel')!.textContent = (e.target as HTMLInputElement).value;
+  });
+
+  document.getElementById('startStormBtn')?.addEventListener('click', async () => {
+    if (stormRunning) return;
+    stormRunning = true;
+    const sessionTimeout = parseInt((document.getElementById('sessionTimeoutSlider') as HTMLInputElement).value);
+    const pollInterval = parseInt((document.getElementById('pollIntervalSlider') as HTMLInputElement).value);
+    const viz = document.getElementById('stormViz')!;
+    const log = document.getElementById('stormLog')!;
+    viz.innerHTML = ''; log.innerHTML = '';
+
+    // Setup 4 consumers
+    const consumers = [
+      { name: 'C0', status: 'healthy', processing: 2000 },
+      { name: 'C1', status: 'healthy', processing: 3000 },
+      { name: 'C2 (slow)', status: 'healthy', processing: pollInterval * 0.8 }, // borderline slow
+      { name: 'C3', status: 'healthy', processing: 4000 },
+    ];
+
+    function renderStorm() {
+      viz.innerHTML = '';
+      consumers.forEach(c => {
+        const el = document.createElement('div');
+        el.className = `storm-consumer ${c.status}`;
+        el.innerHTML = `<div class="storm-name">${c.name}</div><div class="storm-status">${
+          c.status === 'healthy' ? '✅ Healthy' : c.status === 'slow' ? '🐌 Processing...' : '💀 Kicked'
+        }</div>`;
+        viz.appendChild(el);
+      });
+    }
+
+    function addLog(text: string, cls: string) {
+      const el = document.createElement('div');
+      el.className = `storm-log-entry ${cls}`;
+      el.textContent = `[${new Date().toISOString().slice(11,19)}] ${text}`;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    renderStorm();
+    addLog('All consumers healthy, processing normally...', 'ok');
+    await new Promise(r => setTimeout(r, 1000));
+
+    // C2 becomes slow
+    consumers[2].status = 'slow';
+    renderStorm();
+    addLog(`C2 processing takes ${(pollInterval * 0.8 / 1000).toFixed(0)}s — approaching max.poll.interval.ms (${pollInterval / 1000}s)`, 'warning');
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Rebalance triggers, C2 gets MORE partitions, now exceeds timeout
+    addLog('⚡ Rebalance triggered (routine) — C2 gets extra partitions from redistribution', 'warning');
+    await new Promise(r => setTimeout(r, 1000));
+
+    consumers[2].processing = pollInterval * 1.2;
+    addLog(`C2 now has more work: processing time ${(pollInterval * 1.2 / 1000).toFixed(0)}s > max.poll.interval.ms ${pollInterval / 1000}s`, 'error');
+    await new Promise(r => setTimeout(r, 1200));
+
+    // C2 kicked
+    consumers[2].status = 'kicked';
+    renderStorm();
+    addLog('💀 C2 exceeded max.poll.interval.ms → KICKED from group!', 'error');
+    addLog('🔄 Rebalance #2 triggered — redistributing C2\'s partitions...', 'warning');
+    await new Promise(r => setTimeout(r, 1200));
+
+    // Now C1 gets overloaded
+    consumers[1].status = 'slow';
+    renderStorm();
+    addLog('C1 now handles extra partitions from C2... processing time increasing', 'warning');
+    await new Promise(r => setTimeout(r, 1500));
+
+    if (pollInterval < 60000) {
+      consumers[1].status = 'kicked';
+      renderStorm();
+      addLog('💀 C1 also exceeded max.poll.interval.ms → KICKED!', 'error');
+      addLog('🔄 Rebalance #3 triggered — only C0 and C3 remain!', 'error');
+      await new Promise(r => setTimeout(r, 1000));
+
+      addLog('🌪️ REBALANCE STORM — cascading failures! Two consumers down.', 'error');
+      addLog(`Fix: increase max.poll.interval.ms (currently ${pollInterval / 1000}s), reduce max.poll.records, or speed up processing`, 'warning');
+    } else {
+      consumers[1].status = 'healthy';
+      renderStorm();
+      addLog('✅ C1 handles extra load OK — max.poll.interval.ms is generous enough', 'ok');
+      addLog(`With max.poll.interval.ms=${pollInterval / 1000}s, the storm was contained.`, 'ok');
+    }
+
+    stormRunning = false;
+  });
+
+  document.getElementById('resetStormBtn')?.addEventListener('click', () => {
+    stormRunning = false;
+    document.getElementById('stormViz')!.innerHTML = '';
+    document.getElementById('stormLog')!.innerHTML = '';
+  });
+
+  // ========== EVENT BINDINGS ==========
+  document.getElementById('partSlider')?.addEventListener('input', (e) => {
+    partCount = parseInt((e.target as HTMLInputElement).value);
+    document.getElementById('partLabel')!.textContent = String(partCount);
+    renderAssignment();
+    initOffsets(); renderOffsets();
+  });
+
+  document.getElementById('consSlider')?.addEventListener('input', (e) => {
+    consCount = parseInt((e.target as HTMLInputElement).value);
+    document.getElementById('consLabel')!.textContent = String(consCount);
+    renderAssignment();
+  });
+
+  document.querySelectorAll('.strat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.strat-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      strategy = (btn as HTMLElement).dataset.strat!;
+      const descs: Record<string, string> = {
+        range: '<strong>Range Assignor (default):</strong> Partitions are divided by range per topic. Each consumer gets a contiguous block. Uneven splits give extra partitions to earlier consumers.',
+        roundrobin: '<strong>Round Robin Assignor:</strong> Partitions are distributed one-by-one round-robin across consumers. More even distribution across multiple topics.',
+        sticky: '<strong>Sticky Assignor:</strong> Like round-robin for initial assignment, but minimizes partition movement during rebalance. Consumers keep existing partitions when possible.',
+        cooperative: '<strong>CooperativeSticky Assignor:</strong> Same assignment as Sticky, but uses incremental rebalance protocol. Only partitions that need to move are revoked — no stop-the-world!'
+      };
+      document.getElementById('strategyDesc')!.innerHTML = descs[strategy];
+      assignments = []; // reset for non-sticky
+      renderAssignment();
+    });
+  });
+
+  document.getElementById('addConsumerBtn')?.addEventListener('click', () => {
+    if (consCount < 8) {
+      consCount++;
+      (document.getElementById('consSlider') as HTMLInputElement).value = String(consCount);
+      document.getElementById('consLabel')!.textContent = String(consCount);
+      renderAssignment();
+    }
+  });
+
+  document.getElementById('killConsumerBtn')?.addEventListener('click', () => {
+    if (consCount > 1) {
+      consCount--;
+      (document.getElementById('consSlider') as HTMLInputElement).value = String(consCount);
+      document.getElementById('consLabel')!.textContent = String(consCount);
+      renderAssignment();
+    }
+  });
+
+  document.getElementById('addPartBtn')?.addEventListener('click', () => {
+    if (partCount < 12) {
+      partCount++;
+      (document.getElementById('partSlider') as HTMLInputElement).value = String(partCount);
+      document.getElementById('partLabel')!.textContent = String(partCount);
+      renderAssignment();
+      initOffsets(); renderOffsets();
+    }
+  });
+
+  // ========== INIT ==========
+  renderAssignment();
+  initOffsets();
+  renderOffsets();
+</script>
+</BaseLayout>

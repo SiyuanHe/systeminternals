@@ -1,0 +1,1467 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Raft Consensus Algorithm" 
+  description="Interactive visualization of the Raft consensus algorithm — leader election, log replication, and failure recovery"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Raft Consensus", href: "/raft/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗳️ Raft Consensus Algorithm</h1>
+      <p class="subtitle">Leader Election, Log Replication & Fault Tolerance — Visualized</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          <a href="https://raft.github.io/raft.pdf" target="_blank">Raft</a> is a consensus algorithm
+          designed to be <em>understandable</em>. It ensures a cluster of nodes agrees on a sequence of
+          values even when some nodes fail. Every node is in one of three states:
+          <strong>Follower</strong>, <strong>Candidate</strong>, or <strong>Leader</strong>.
+          The leader handles all client writes, replicates them to followers, and commits once a
+          <em>majority</em> acknowledges. If the leader crashes, a new election begins automatically.
+        </p>
+      </div>
+    </section>
+
+    <!-- Cluster Visualization -->
+    <section class="cluster-section">
+      <h2>🖧 Live Cluster</h2>
+      <p class="section-desc">A 5-node Raft cluster. Watch elections, replication, and failures in real time.</p>
+
+      <div class="cluster-controls">
+        <button id="sendWriteBtn" class="action-btn primary-btn">✏️ Send Write</button>
+        <button id="triggerElectionBtn" class="action-btn election-btn">🗳️ Trigger Election</button>
+        <button id="chaosBtn" class="action-btn chaos-btn">💥 Chaos</button>
+        <button id="resetClusterBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <div class="speed-control">
+          <label>Speed: <strong id="speedLabel">1×</strong></label>
+          <input type="range" id="speedSlider" min="1" max="5" value="2" step="1">
+        </div>
+      </div>
+
+      <div class="cluster-status" id="clusterStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="clusterStatusText">Click "Trigger Election" to start the cluster</span>
+      </div>
+
+      <!-- SVG Cluster Ring -->
+      <div class="cluster-ring-wrapper">
+        <svg id="clusterSvg" viewBox="0 0 700 420" class="cluster-svg">
+          <defs>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="4" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="rgba(255,255,255,0.5)"/>
+            </marker>
+          </defs>
+          <!-- Messages layer -->
+          <g id="messagesLayer"></g>
+          <!-- Nodes rendered by JS -->
+          <g id="nodesLayer"></g>
+        </svg>
+        <!-- Node action buttons overlay -->
+        <div class="node-actions" id="nodeActions"></div>
+      </div>
+
+      <!-- Term & Log info -->
+      <div class="cluster-info-bar">
+        <div class="info-chip">
+          <span class="info-label">Term</span>
+          <span class="info-value" id="currentTerm">0</span>
+        </div>
+        <div class="info-chip">
+          <span class="info-label">Leader</span>
+          <span class="info-value" id="currentLeader">None</span>
+        </div>
+        <div class="info-chip">
+          <span class="info-label">Committed</span>
+          <span class="info-value" id="commitIndex">0</span>
+        </div>
+        <div class="info-chip">
+          <span class="info-label">Alive</span>
+          <span class="info-value" id="aliveCount">5/5</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Event Log -->
+    <section class="event-log-section">
+      <h2>📋 Event Log</h2>
+      <div class="event-log" id="eventLog">
+        <div class="event-log-empty">Events will appear here...</div>
+      </div>
+    </section>
+
+    <!-- Log Comparison -->
+    <section class="log-section">
+      <h2>📊 Log Comparison</h2>
+      <p class="section-desc">Side-by-side view of each node's log. Committed entries are highlighted.</p>
+      <div class="log-grid" id="logGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- Leader Election Explainer -->
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>💡 How Leader Election Works</h3>
+        <p>
+          Every node starts as a <strong>Follower</strong>. Each follower has a randomized
+          <em>election timeout</em> (150–300ms). If a follower doesn't hear from a leader before
+          its timeout fires, it becomes a <strong>Candidate</strong>: it increments its term,
+          votes for itself, and sends <code>RequestVote</code> RPCs to all other nodes. If it
+          receives votes from a <strong>majority</strong> (3 of 5), it becomes <strong>Leader</strong>
+          and immediately begins sending heartbeats. The randomized timeout means split votes
+          are rare — and when they do occur, different timeouts ensure one candidate wins next round.
+        </p>
+      </div>
+    </section>
+
+    <!-- Log Replication Explainer -->
+    <section class="explain-section">
+      <div class="explain-card">
+        <h3>📡 Log Replication</h3>
+        <p>
+          The leader is the only node that accepts client writes. When it receives a write, it
+          <strong>appends</strong> the entry to its log and sends <code>AppendEntries</code> RPCs
+          to all followers. Each follower appends the entry and sends an ACK. Once the leader
+          receives ACKs from a <strong>majority</strong>, the entry is <em>committed</em> — meaning
+          it's safe and will survive any future leader change. Committed entries are then applied
+          to each node's state machine. The leader also piggybacks its commit index in heartbeats
+          so followers know which entries are committed.
+        </p>
+      </div>
+    </section>
+
+    <!-- Safety Properties -->
+    <section class="explain-section">
+      <h2>🛡️ Safety Properties</h2>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🗳️ Election Safety</h3>
+          <p>
+            At most <strong>one leader per term</strong>. Since a candidate needs a majority of
+            votes, and each node votes only once per term, two candidates cannot both win in the
+            same term.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📋 Log Matching</h3>
+          <p>
+            If two logs contain an entry with the same <strong>index and term</strong>, then all
+            preceding entries are identical. The <code>AppendEntries</code> consistency check
+            ensures this — a follower rejects entries unless its log matches at the preceding index.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>✅ Leader Completeness</h3>
+          <p>
+            If an entry is <strong>committed</strong> in a given term, it will be present in the
+            logs of all future leaders. This is guaranteed because a candidate cannot win an
+            election without having all committed entries (voters reject candidates with stale logs).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Failure Scenarios -->
+    <section class="failure-section">
+      <h2>💥 Failure Scenarios</h2>
+      <p class="section-desc">Use the buttons below each node to kill, heal, or partition nodes — then watch Raft handle it.</p>
+
+      <div class="scenario-cards">
+        <div class="scenario-card">
+          <h4>🔴 Leader Crash</h4>
+          <p>Kill the leader node. A follower's election timeout will fire, triggering a new election. The new leader will replicate any missing entries to catch up lagging nodes.</p>
+          <button class="action-btn scenario-btn" id="scenarioLeaderCrash">Try It →</button>
+        </div>
+        <div class="scenario-card">
+          <h4>🟡 Network Partition</h4>
+          <p>Can two leaders exist? <strong>No!</strong> Only the partition with a majority can elect a leader and commit entries. The minority side stalls.</p>
+          <button class="action-btn scenario-btn" id="scenarioPartition">Try It →</button>
+        </div>
+        <div class="scenario-card">
+          <h4>🟠 Slow Follower</h4>
+          <p>If a follower is slow or was temporarily down, the leader detects its lag and resends <code>AppendEntries</code> starting from where the follower left off.</p>
+          <button class="action-btn scenario-btn" id="scenarioSlowFollower">Try It →</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://raft.github.io/raft.pdf" target="_blank">In Search of an Understandable Consensus Algorithm</a> by Diego Ongaro & John Ousterhout (2014)</p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=The%20best%20interactive%20Raft%20consensus%20visualization%20I%27ve%20seen&url=https://systeminternals.dev/raft/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/raft/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/raft/&t=Interactive%20Raft%20Consensus%20Algorithm%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #4ade80, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #4ade80; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .election-btn {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+  }
+
+  .election-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+  }
+
+  .chaos-btn {
+    background: linear-gradient(135deg, #f472b6, #ef4444);
+    color: white;
+  }
+
+  .chaos-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .scenario-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    margin-top: 12px;
+  }
+
+  .scenario-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
+  }
+
+  /* Cluster Section */
+  .cluster-section {
+    margin-bottom: 50px;
+  }
+
+  .cluster-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .speed-control {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .speed-control label {
+    color: #aaa;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .speed-control strong {
+    color: #4ade80;
+  }
+
+  .speed-control input[type="range"] {
+    width: 100px;
+    height: 6px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .speed-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4ade80;
+    cursor: pointer;
+  }
+
+  .cluster-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.election { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+  .status-badge.leader { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .status-badge.replicating { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.partitioned { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Cluster SVG */
+  .cluster-ring-wrapper {
+    position: relative;
+    background: rgba(0,0,0,0.3);
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .cluster-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .node-actions {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  :global(.node-action-group) {
+    position: absolute;
+    display: flex;
+    gap: 4px;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+
+  :global(.node-btn) {
+    padding: 3px 8px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    opacity: 0.8;
+  }
+
+  :global(.node-btn:hover) {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+
+  :global(.node-btn.kill-btn) {
+    background: rgba(239, 68, 68, 0.8);
+    color: white;
+  }
+
+  :global(.node-btn.heal-btn) {
+    background: rgba(34, 197, 94, 0.8);
+    color: white;
+  }
+
+  :global(.node-btn.partition-btn) {
+    background: rgba(251, 146, 60, 0.8);
+    color: white;
+  }
+
+  /* Cluster Info Bar */
+  .cluster-info-bar {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 30px;
+  }
+
+  .info-chip {
+    flex: 1;
+    min-width: 120px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+
+  .info-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+
+  .info-value {
+    display: block;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* Event Log */
+  .event-log-section {
+    margin-bottom: 50px;
+  }
+
+  .event-log {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 16px;
+    max-height: 250px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    scroll-behavior: smooth;
+  }
+
+  .event-log-empty {
+    color: #555;
+    font-style: italic;
+  }
+
+  :global(.log-event) {
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    border-radius: 6px;
+    animation: eventAppear 0.3s ease-out;
+    line-height: 1.5;
+  }
+
+  :global(.log-event.election-event) { background: rgba(251, 146, 60, 0.1); color: #fdba74; }
+  :global(.log-event.vote-event) { background: rgba(167, 139, 250, 0.1); color: #c4b5fd; }
+  :global(.log-event.leader-event) { background: rgba(74, 222, 128, 0.15); color: #86efac; }
+  :global(.log-event.replicate-event) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; }
+  :global(.log-event.commit-event) { background: rgba(34, 197, 94, 0.12); color: #86efac; }
+  :global(.log-event.heartbeat-event) { background: rgba(255,255,255,0.03); color: #888; }
+  :global(.log-event.failure-event) { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
+  :global(.log-event.heal-event) { background: rgba(34, 197, 94, 0.1); color: #86efac; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Log Comparison */
+  .log-section {
+    margin-bottom: 50px;
+  }
+
+  .log-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+
+  :global(.log-column) {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  :global(.log-column.dead-column) {
+    opacity: 0.4;
+  }
+
+  :global(.log-col-header) {
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  :global(.log-col-header.leader-header) { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+  :global(.log-col-header.follower-header) { background: rgba(96, 165, 250, 0.1); color: #60a5fa; }
+  :global(.log-col-header.candidate-header) { background: rgba(251, 146, 60, 0.1); color: #fb923c; }
+  :global(.log-col-header.dead-header) { background: rgba(239, 68, 68, 0.1); color: #f87171; }
+
+  :global(.log-col-body) {
+    padding: 8px;
+    min-height: 60px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+  }
+
+  :global(.log-entry) {
+    padding: 4px 6px;
+    margin-bottom: 3px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  :global(.log-entry.committed) {
+    background: rgba(74, 222, 128, 0.15);
+    color: #86efac;
+  }
+
+  :global(.log-entry.uncommitted) {
+    background: rgba(251, 191, 36, 0.1);
+    color: #fde68a;
+  }
+
+  :global(.log-entry-idx) {
+    color: #888;
+  }
+
+  :global(.log-entry-term) {
+    font-size: 0.65rem;
+    color: #666;
+  }
+
+  /* Explain */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #4ade80; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(96, 165, 250, 0.08));
+    border-color: rgba(74, 222, 128, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Failure Scenarios */
+  .failure-section {
+    margin-bottom: 50px;
+  }
+
+  .scenario-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+
+  .scenario-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  .scenario-card h4 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .scenario-card p {
+    color: #aaa;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .scenario-card strong { color: #00d4ff; }
+  .scenario-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .log-grid { grid-template-columns: repeat(3, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+    .scenario-cards { grid-template-columns: 1fr; }
+    .cluster-controls { flex-direction: column; }
+    .speed-control { margin-left: 0; }
+  }
+</style>
+
+<script>
+  // ============================================================
+  // RAFT CONSENSUS SIMULATION
+  // ============================================================
+
+  type NodeState = 'follower' | 'candidate' | 'leader' | 'dead';
+
+  interface LogEntry {
+    term: number;
+    value: string;
+    index: number;
+  }
+
+  interface RaftNode {
+    id: number;
+    name: string;
+    state: NodeState;
+    term: number;
+    votedFor: number | null;
+    log: LogEntry[];
+    commitIndex: number;
+    nextIndex: number[];  // leader only: next index to send to each peer
+    matchIndex: number[]; // leader only: highest replicated index per peer
+    electionTimeout: number;
+    electionTimer: number;
+    heartbeatTimer: number;
+    votes: Set<number>;
+    partitioned: boolean;
+  }
+
+  // SVG node positions (pentagon layout)
+  const NODE_POSITIONS = [
+    { x: 350, y: 60 },   // top center
+    { x: 580, y: 190 },  // top right
+    { x: 490, y: 370 },  // bottom right
+    { x: 210, y: 370 },  // bottom left
+    { x: 120, y: 190 },  // top left
+  ];
+
+  const NODE_NAMES = ['S1', 'S2', 'S3', 'S4', 'S5'];
+  const NODE_RADIUS = 36;
+  const STATE_COLORS: Record<NodeState, string> = {
+    leader: '#4ade80',
+    follower: '#60a5fa',
+    candidate: '#fb923c',
+    dead: '#666',
+  };
+
+  let nodes: RaftNode[] = [];
+  let globalTerm = 0;
+  let writeCounter = 0;
+  let speedMultiplier = 2;
+  let simulationRunning = false;
+  let animationMessages: Array<{
+    from: number; to: number; type: string; id: number;
+    progress: number; duration: number;
+  }> = [];
+  let msgIdCounter = 0;
+  let animFrameId: number | null = null;
+  let lastFrameTime = 0;
+
+  // Timers
+  let tickInterval: number | null = null;
+
+  function baseTime() { return 1000 / speedMultiplier; }
+
+  function initNodes() {
+    nodes = [];
+    globalTerm = 0;
+    writeCounter = 0;
+    animationMessages = [];
+    for (let i = 0; i < 5; i++) {
+      nodes.push({
+        id: i,
+        name: NODE_NAMES[i],
+        state: 'follower',
+        term: 0,
+        votedFor: null,
+        log: [],
+        commitIndex: 0,
+        nextIndex: [1, 1, 1, 1, 1],
+        matchIndex: [0, 0, 0, 0, 0],
+        electionTimeout: randomElectionTimeout(),
+        electionTimer: 0,
+        heartbeatTimer: 0,
+        votes: new Set(),
+        partitioned: false,
+      });
+    }
+  }
+
+  function randomElectionTimeout() {
+    return 150 + Math.floor(Math.random() * 150); // 150-300ms simulated
+  }
+
+  function canCommunicate(a: number, b: number): boolean {
+    if (nodes[a].state === 'dead' || nodes[b].state === 'dead') return false;
+    if (nodes[a].partitioned && nodes[b].partitioned) return true; // same partition
+    if (!nodes[a].partitioned && !nodes[b].partitioned) return true;
+    return false; // different partitions
+  }
+
+  function majoritySize() { return 3; }
+
+  function aliveNodes() { return nodes.filter(n => n.state !== 'dead'); }
+
+  function getLeader(): RaftNode | null {
+    return nodes.find(n => n.state === 'leader') || null;
+  }
+
+  // ---- Event Log ----
+  function addEvent(text: string, cls: string) {
+    const log = document.getElementById('eventLog')!;
+    const empty = log.querySelector('.event-log-empty');
+    if (empty) empty.remove();
+
+    const el = document.createElement('div');
+    el.className = `log-event ${cls}`;
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.textContent = `[${time}] ${text}`;
+    log.appendChild(el);
+
+    // Keep only last 100
+    while (log.children.length > 100) log.removeChild(log.firstChild!);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ---- Animated Messages ----
+  function sendAnimMessage(from: number, to: number, type: string) {
+    animationMessages.push({
+      from, to, type,
+      id: msgIdCounter++,
+      progress: 0,
+      duration: baseTime() * 0.4,
+    });
+  }
+
+  // ---- Core Raft Logic ----
+  function becomeCandidate(nodeId: number) {
+    const node = nodes[nodeId];
+    if (node.state === 'dead') return;
+
+    node.term++;
+    if (node.term > globalTerm) globalTerm = node.term;
+    node.state = 'candidate';
+    node.votedFor = nodeId;
+    node.votes = new Set([nodeId]);
+    node.electionTimer = 0;
+    node.electionTimeout = randomElectionTimeout();
+
+    addEvent(`${node.name} becomes CANDIDATE (term ${node.term})`, 'election-event');
+    updateStatus('election', `${node.name} started election for term ${node.term}`);
+
+    // Send RequestVote to all
+    for (let i = 0; i < 5; i++) {
+      if (i === nodeId) continue;
+      if (!canCommunicate(nodeId, i)) continue;
+      sendAnimMessage(nodeId, i, 'vote-req');
+      // Process vote response after animation
+      scheduleAfterAnim(() => handleVoteRequest(nodeId, i));
+    }
+  }
+
+  function handleVoteRequest(candidateId: number, voterId: number) {
+    const candidate = nodes[candidateId];
+    const voter = nodes[voterId];
+    if (voter.state === 'dead' || candidate.state === 'dead') return;
+    if (!canCommunicate(candidateId, voterId)) return;
+
+    // Update term if candidate has higher term
+    if (candidate.term > voter.term) {
+      voter.term = candidate.term;
+      voter.votedFor = null;
+      if (voter.state === 'leader' || voter.state === 'candidate') {
+        voter.state = 'follower';
+      }
+    }
+
+    if (candidate.term < voter.term) return; // stale
+
+    // Vote if haven't voted this term (or voted for this candidate) and candidate log is up-to-date
+    const canVote = voter.votedFor === null || voter.votedFor === candidateId;
+    const lastVoterTerm = voter.log.length > 0 ? voter.log[voter.log.length - 1].term : 0;
+    const lastCandTerm = candidate.log.length > 0 ? candidate.log[candidate.log.length - 1].term : 0;
+    const logOk = lastCandTerm > lastVoterTerm ||
+      (lastCandTerm === lastVoterTerm && candidate.log.length >= voter.log.length);
+
+    if (canVote && logOk) {
+      voter.votedFor = candidateId;
+      voter.electionTimer = 0; // reset election timer
+      sendAnimMessage(voterId, candidateId, 'vote-yes');
+      addEvent(`${voter.name} votes YES for ${candidate.name} (term ${candidate.term})`, 'vote-event');
+
+      scheduleAfterAnim(() => {
+        if (candidate.state !== 'candidate') return;
+        candidate.votes.add(voterId);
+        if (candidate.votes.size >= majoritySize()) {
+          becomeLeader(candidateId);
+        }
+      });
+    }
+  }
+
+  function becomeLeader(nodeId: number) {
+    const node = nodes[nodeId];
+    if (node.state !== 'candidate') return;
+
+    node.state = 'leader';
+    node.heartbeatTimer = 0;
+
+    // Initialize nextIndex and matchIndex
+    const lastLogIdx = node.log.length;
+    for (let i = 0; i < 5; i++) {
+      node.nextIndex[i] = lastLogIdx + 1;
+      node.matchIndex[i] = 0;
+    }
+    node.matchIndex[nodeId] = lastLogIdx;
+
+    addEvent(`🎉 ${node.name} is now LEADER (term ${node.term}, ${node.votes.size} votes)`, 'leader-event');
+    updateStatus('leader', `${node.name} is leader for term ${node.term}`);
+
+    // Immediate heartbeat
+    sendHeartbeats(nodeId);
+  }
+
+  function sendHeartbeats(leaderId: number) {
+    const leader = nodes[leaderId];
+    if (leader.state !== 'leader') return;
+
+    for (let i = 0; i < 5; i++) {
+      if (i === leaderId) continue;
+      if (!canCommunicate(leaderId, i)) continue;
+      sendAppendEntries(leaderId, i);
+    }
+  }
+
+  function sendAppendEntries(leaderId: number, followerId: number) {
+    const leader = nodes[leaderId];
+    const follower = nodes[followerId];
+    if (leader.state !== 'leader' || follower.state === 'dead') return;
+    if (!canCommunicate(leaderId, followerId)) return;
+
+    const nextIdx = leader.nextIndex[followerId];
+    const entries = leader.log.slice(nextIdx - 1);
+    const isHeartbeat = entries.length === 0;
+
+    sendAnimMessage(leaderId, followerId, isHeartbeat ? 'heartbeat' : 'append');
+
+    scheduleAfterAnim(() => {
+      if (follower.state === 'dead') return;
+
+      // Update follower term
+      if (leader.term > follower.term) {
+        follower.term = leader.term;
+        follower.votedFor = null;
+      }
+      if (follower.state === 'candidate' || follower.state === 'leader') {
+        if (leader.term >= follower.term) {
+          follower.state = 'follower';
+        }
+      }
+
+      follower.electionTimer = 0; // heard from leader
+
+      // Append entries
+      if (entries.length > 0) {
+        // Simplified: just overwrite from nextIdx
+        for (const entry of entries) {
+          const idx = entry.index - 1;
+          follower.log[idx] = { ...entry };
+        }
+        // Trim any extra
+        follower.log.length = Math.max(follower.log.length, nextIdx - 1 + entries.length);
+
+        leader.nextIndex[followerId] = leader.log.length + 1;
+        leader.matchIndex[followerId] = leader.log.length;
+
+        if (!isHeartbeat) {
+          addEvent(`${follower.name} appended ${entries.length} entries from ${leader.name}`, 'replicate-event');
+        }
+
+        // Send ACK
+        sendAnimMessage(followerId, leaderId, 'ack');
+        scheduleAfterAnim(() => tryAdvanceCommit(leaderId));
+      }
+
+      // Update follower commit index
+      if (leader.commitIndex > follower.commitIndex) {
+        follower.commitIndex = Math.min(leader.commitIndex, follower.log.length);
+      }
+    });
+  }
+
+  function tryAdvanceCommit(leaderId: number) {
+    const leader = nodes[leaderId];
+    if (leader.state !== 'leader') return;
+
+    // Find highest N such that majority has matchIndex >= N and log[N].term == currentTerm
+    for (let n = leader.log.length; n > leader.commitIndex; n--) {
+      if (leader.log[n - 1].term !== leader.term) continue;
+      let count = 0;
+      for (let i = 0; i < 5; i++) {
+        if (i === leaderId) { count++; continue; }
+        if (leader.matchIndex[i] >= n) count++;
+      }
+      if (count >= majoritySize()) {
+        leader.commitIndex = n;
+        addEvent(`✅ Entry ${n} committed (majority ACK'd, term ${leader.term})`, 'commit-event');
+        updateInfoBar();
+        break;
+      }
+    }
+  }
+
+  function clientWrite(leaderId: number) {
+    const leader = nodes[leaderId];
+    if (leader.state !== 'leader') {
+      addEvent(`Cannot write: ${leader.name} is not leader`, 'failure-event');
+      return;
+    }
+
+    writeCounter++;
+    const entry: LogEntry = {
+      term: leader.term,
+      value: `cmd-${writeCounter}`,
+      index: leader.log.length + 1,
+    };
+    leader.log.push(entry);
+    leader.matchIndex[leaderId] = leader.log.length;
+    leader.nextIndex[leaderId] = leader.log.length + 1;
+
+    addEvent(`📝 Client write "${entry.value}" → ${leader.name} (index ${entry.index}, term ${entry.term})`, 'replicate-event');
+    updateStatus('replicating', `Replicating "${entry.value}" to cluster...`);
+
+    // Send to all followers
+    for (let i = 0; i < 5; i++) {
+      if (i === leaderId) continue;
+      if (!canCommunicate(leaderId, i)) continue;
+      sendAppendEntries(leaderId, i);
+    }
+  }
+
+  // ---- Scheduling helpers ----
+  const pendingCallbacks: Array<{ fn: () => void; delay: number; elapsed: number }> = [];
+
+  function scheduleAfterAnim(fn: () => void) {
+    pendingCallbacks.push({ fn, delay: baseTime() * 0.5, elapsed: 0 });
+  }
+
+  // ---- Simulation Tick (called ~60fps via rAF) ----
+  function tick(dt: number) {
+    if (!simulationRunning) return;
+
+    const simDt = dt * speedMultiplier;
+
+    // Election timers
+    for (const node of nodes) {
+      if (node.state === 'dead') continue;
+
+      if (node.state === 'follower' || node.state === 'candidate') {
+        node.electionTimer += simDt;
+        if (node.electionTimer >= node.electionTimeout) {
+          becomeCandidate(node.id);
+        }
+      }
+
+      if (node.state === 'leader') {
+        node.heartbeatTimer += simDt;
+        if (node.heartbeatTimer >= 75) { // heartbeat every ~75ms simulated
+          node.heartbeatTimer = 0;
+          sendHeartbeats(node.id);
+        }
+      }
+    }
+
+    // Process pending callbacks
+    for (let i = pendingCallbacks.length - 1; i >= 0; i--) {
+      pendingCallbacks[i].elapsed += dt;
+      if (pendingCallbacks[i].elapsed >= pendingCallbacks[i].delay) {
+        pendingCallbacks[i].fn();
+        pendingCallbacks.splice(i, 1);
+      }
+    }
+
+    // Animate messages
+    for (let i = animationMessages.length - 1; i >= 0; i--) {
+      animationMessages[i].progress += dt / animationMessages[i].duration;
+      if (animationMessages[i].progress >= 1) {
+        animationMessages.splice(i, 1);
+      }
+    }
+
+    renderSVG();
+    renderLogGrid();
+    updateInfoBar();
+  }
+
+  // ---- Rendering ----
+  function renderSVG() {
+    const nodesLayer = document.getElementById('nodesLayer')!;
+    const msgsLayer = document.getElementById('messagesLayer')!;
+
+    // Nodes
+    let nodesHtml = '';
+    for (let i = 0; i < 5; i++) {
+      const node = nodes[i];
+      const pos = NODE_POSITIONS[i];
+      const color = STATE_COLORS[node.state];
+      const opacity = node.state === 'dead' ? 0.3 : 1;
+      const isLeader = node.state === 'leader';
+      const strokeWidth = isLeader ? 4 : 2;
+      const glowFilter = isLeader ? 'filter="url(#glow)"' : '';
+
+      nodesHtml += `
+        <g transform="translate(${pos.x}, ${pos.y})" opacity="${opacity}">
+          <circle r="${NODE_RADIUS}" fill="rgba(15,15,26,0.9)" stroke="${color}"
+            stroke-width="${strokeWidth}" ${glowFilter}/>
+          ${node.partitioned ? `<circle r="${NODE_RADIUS + 6}" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4"/>` : ''}
+          <text text-anchor="middle" dy="-6" fill="${color}" font-size="14" font-weight="700">${node.name}</text>
+          <text text-anchor="middle" dy="12" fill="#888" font-size="10">${node.state === 'dead' ? 'DEAD' : node.state.toUpperCase()}</text>
+          <text text-anchor="middle" dy="26" fill="#666" font-size="9">T${node.term}</text>
+        </g>
+      `;
+    }
+    nodesLayer.innerHTML = nodesHtml;
+
+    // Messages
+    let msgsHtml = '';
+    const MSG_COLORS: Record<string, string> = {
+      'vote-req': '#fb923c',
+      'vote-yes': '#a78bfa',
+      'heartbeat': 'rgba(74,222,128,0.4)',
+      'append': '#60a5fa',
+      'ack': '#4ade80',
+    };
+
+    for (const msg of animationMessages) {
+      const from = NODE_POSITIONS[msg.from];
+      const to = NODE_POSITIONS[msg.to];
+      const p = Math.min(msg.progress, 1);
+      // Ease out
+      const ep = 1 - Math.pow(1 - p, 2);
+      const x = from.x + (to.x - from.x) * ep;
+      const y = from.y + (to.y - from.y) * ep;
+      const color = MSG_COLORS[msg.type] || '#fff';
+      const r = msg.type === 'heartbeat' ? 3 : 5;
+
+      msgsHtml += `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" opacity="${1 - p * 0.5}"/>`;
+    }
+    msgsLayer.innerHTML = msgsHtml;
+
+    // Node action buttons
+    renderNodeActions();
+  }
+
+  function renderNodeActions() {
+    const container = document.getElementById('nodeActions')!;
+    const svg = document.getElementById('clusterSvg')!;
+    const rect = svg.getBoundingClientRect();
+    const viewBox = svg.viewBox.baseVal;
+    const scaleX = rect.width / viewBox.width;
+    const scaleY = rect.height / viewBox.height;
+
+    let html = '';
+    for (let i = 0; i < 5; i++) {
+      const pos = NODE_POSITIONS[i];
+      const node = nodes[i];
+      const px = pos.x * scaleX;
+      const py = (pos.y + NODE_RADIUS + 14) * scaleY;
+
+      if (node.state === 'dead') {
+        html += `<div class="node-action-group" style="left:${px}px;top:${py}px">
+          <button class="node-btn heal-btn" data-action="heal" data-node="${i}">Heal</button>
+        </div>`;
+      } else {
+        html += `<div class="node-action-group" style="left:${px}px;top:${py}px">
+          <button class="node-btn kill-btn" data-action="kill" data-node="${i}">Kill</button>
+          <button class="node-btn partition-btn" data-action="partition" data-node="${i}">${node.partitioned ? 'Rejoin' : 'Isolate'}</button>
+        </div>`;
+      }
+    }
+    container.innerHTML = html;
+
+    // Attach handlers
+    container.querySelectorAll('.node-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const el = e.target as HTMLElement;
+        const action = el.dataset.action!;
+        const nodeId = parseInt(el.dataset.node!);
+        handleNodeAction(action, nodeId);
+      });
+    });
+  }
+
+  function handleNodeAction(action: string, nodeId: number) {
+    const node = nodes[nodeId];
+    if (action === 'kill') {
+      node.state = 'dead';
+      addEvent(`💀 ${node.name} was killed!`, 'failure-event');
+    } else if (action === 'heal') {
+      node.state = 'follower';
+      node.electionTimer = 0;
+      node.electionTimeout = randomElectionTimeout();
+      node.votedFor = null;
+      addEvent(`💚 ${node.name} healed and rejoined as follower`, 'heal-event');
+    } else if (action === 'partition') {
+      node.partitioned = !node.partitioned;
+      if (node.partitioned) {
+        addEvent(`🔌 ${node.name} isolated (partitioned)`, 'failure-event');
+      } else {
+        addEvent(`🔗 ${node.name} rejoined network`, 'heal-event');
+      }
+    }
+    updateInfoBar();
+  }
+
+  function renderLogGrid() {
+    const grid = document.getElementById('logGrid')!;
+    let html = '';
+    for (let i = 0; i < 5; i++) {
+      const node = nodes[i];
+      const isDead = node.state === 'dead';
+      const headerCls = isDead ? 'dead-header' :
+        node.state === 'leader' ? 'leader-header' :
+        node.state === 'candidate' ? 'candidate-header' : 'follower-header';
+
+      html += `<div class="log-column ${isDead ? 'dead-column' : ''}">
+        <div class="log-col-header ${headerCls}">${node.name} (${isDead ? 'dead' : node.state})</div>
+        <div class="log-col-body">`;
+
+      if (node.log.length === 0) {
+        html += '<div style="color:#555;font-style:italic;font-size:0.7rem;">empty</div>';
+      } else {
+        for (const entry of node.log) {
+          const committed = entry.index <= node.commitIndex;
+          html += `<div class="log-entry ${committed ? 'committed' : 'uncommitted'}">
+            <span class="log-entry-idx">#${entry.index}</span>
+            <span>${entry.value}</span>
+            <span class="log-entry-term">T${entry.term}</span>
+          </div>`;
+        }
+      }
+      html += '</div></div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  function updateInfoBar() {
+    const leader = getLeader();
+    document.getElementById('currentTerm')!.textContent = String(globalTerm);
+    document.getElementById('currentLeader')!.textContent = leader ? leader.name : 'None';
+    document.getElementById('commitIndex')!.textContent = leader ? String(leader.commitIndex) : '0';
+    const alive = nodes.filter(n => n.state !== 'dead').length;
+    document.getElementById('aliveCount')!.textContent = `${alive}/5`;
+  }
+
+  function updateStatus(cls: string, text: string) {
+    const badge = document.querySelector('.cluster-section .status-badge')!;
+    badge.className = 'status-badge ' + cls;
+    badge.textContent = cls.charAt(0).toUpperCase() + cls.slice(1);
+    document.getElementById('clusterStatusText')!.textContent = text;
+  }
+
+  // ---- Animation Loop ----
+  function animLoop(timestamp: number) {
+    if (!lastFrameTime) lastFrameTime = timestamp;
+    const dt = Math.min(timestamp - lastFrameTime, 100); // cap at 100ms
+    lastFrameTime = timestamp;
+
+    tick(dt);
+    animFrameId = requestAnimationFrame(animLoop);
+  }
+
+  function startSimulation() {
+    if (simulationRunning) return;
+    simulationRunning = true;
+    lastFrameTime = 0;
+    animFrameId = requestAnimationFrame(animLoop);
+  }
+
+  function stopSimulation() {
+    simulationRunning = false;
+    if (animFrameId !== null) {
+      cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+    }
+    pendingCallbacks.length = 0;
+    animationMessages.length = 0;
+  }
+
+  // ---- Button Handlers ----
+  document.getElementById('triggerElectionBtn')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      initNodes();
+      startSimulation();
+      renderSVG();
+      renderLogGrid();
+    }
+    // Find a follower to trigger election
+    const followers = nodes.filter(n => n.state === 'follower');
+    if (followers.length > 0) {
+      const chosen = followers[Math.floor(Math.random() * followers.length)];
+      chosen.electionTimer = chosen.electionTimeout; // force timeout
+    }
+  });
+
+  document.getElementById('sendWriteBtn')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      addEvent('Start the cluster first (Trigger Election)', 'failure-event');
+      return;
+    }
+    const leader = getLeader();
+    if (!leader) {
+      addEvent('No leader — trigger an election first', 'failure-event');
+      return;
+    }
+    clientWrite(leader.id);
+  });
+
+  document.getElementById('chaosBtn')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      addEvent('Start the cluster first', 'failure-event');
+      return;
+    }
+    // Random chaos: kill or partition a random alive node
+    const alive = nodes.filter(n => n.state !== 'dead');
+    if (alive.length <= 1) {
+      addEvent('Not enough alive nodes for chaos!', 'failure-event');
+      return;
+    }
+    const target = alive[Math.floor(Math.random() * alive.length)];
+    const actions = ['kill', 'partition'];
+    const action = actions[Math.floor(Math.random() * actions.length)];
+    handleNodeAction(action, target.id);
+  });
+
+  document.getElementById('resetClusterBtn')?.addEventListener('click', () => {
+    stopSimulation();
+    initNodes();
+    renderSVG();
+    renderLogGrid();
+    updateInfoBar();
+    updateStatus('idle', 'Click "Trigger Election" to start the cluster');
+    document.getElementById('eventLog')!.innerHTML = '<div class="event-log-empty">Events will appear here...</div>';
+  });
+
+  document.getElementById('speedSlider')?.addEventListener('input', (e) => {
+    speedMultiplier = parseInt((e.target as HTMLInputElement).value);
+    const labels = ['', '0.5×', '1×', '2×', '3×', '5×'];
+    document.getElementById('speedLabel')!.textContent = labels[speedMultiplier] || `${speedMultiplier}×`;
+  });
+
+  // Scenario buttons
+  document.getElementById('scenarioLeaderCrash')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      initNodes();
+      startSimulation();
+      // Force quick election
+      nodes[0].electionTimer = nodes[0].electionTimeout;
+    }
+    setTimeout(() => {
+      const leader = getLeader();
+      if (leader) {
+        handleNodeAction('kill', leader.id);
+      }
+    }, simulationRunning ? 0 : 2000);
+  });
+
+  document.getElementById('scenarioPartition')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      initNodes();
+      startSimulation();
+      nodes[0].electionTimer = nodes[0].electionTimeout;
+    }
+    setTimeout(() => {
+      // Partition 2 nodes (minority)
+      handleNodeAction('partition', 3);
+      handleNodeAction('partition', 4);
+      addEvent('⚡ Network partition: S4 & S5 isolated from majority', 'failure-event');
+      updateStatus('partitioned', 'Network partition — minority cannot elect leader');
+    }, simulationRunning ? 0 : 2000);
+  });
+
+  document.getElementById('scenarioSlowFollower')?.addEventListener('click', () => {
+    if (!simulationRunning) {
+      initNodes();
+      startSimulation();
+      nodes[0].electionTimer = nodes[0].electionTimeout;
+    }
+    // Kill a node, send some writes, then heal it
+    setTimeout(() => {
+      handleNodeAction('kill', 2); // Kill S3
+      addEvent('Scenario: S3 killed — sending writes without it...', 'failure-event');
+    }, simulationRunning ? 0 : 2000);
+
+    setTimeout(() => {
+      const leader = getLeader();
+      if (leader) {
+        clientWrite(leader.id);
+        setTimeout(() => { if (getLeader()) clientWrite(getLeader()!.id); }, 800);
+      }
+    }, simulationRunning ? 1500 : 3500);
+
+    setTimeout(() => {
+      handleNodeAction('heal', 2);
+      addEvent('Scenario: S3 healed — leader will catch it up', 'heal-event');
+    }, simulationRunning ? 4000 : 6000);
+  });
+
+  // ---- Initial render ----
+  initNodes();
+  renderSVG();
+  renderLogGrid();
+  updateInfoBar();
+</script>
+</BaseLayout>

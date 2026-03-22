@@ -1,15 +1,20 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
-const tidbTopics = [
-  { title: "Raft Region Size", description: "The invisible lever for performance & recovery", href: "/tidb/raft-region-size/", status: "live" },
-  { title: "LSM-Tree & Compaction", description: "How TiKV stores data and manages write amplification", href: "/tidb/lsm-tree/", status: "live" },
-  { title: "Distributed Transactions", description: "Percolate 2PC: prewrite, commit, and lock resolution", href: "/tidb/distributed-transactions/", status: "live" },
-  { title: "Hot Regions & Load Balancing", description: "PD scheduler: splitting, scattering, and rebalancing", href: "#", status: "coming" },
-  { title: "TiFlash HTAP", description: "Row store vs column store, when to use each", href: "#", status: "coming" },
-  { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "#", status: "coming" },
-  { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "#", status: "coming" },
-  { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "#", status: "coming" },
+const raftTopics = [
+  { title: "Raft Consensus", description: "Leader election, log replication, and safety — the interactive way", href: "/raft/", status: "live" },
+];
+
+const kafkaTopics = [
+  { title: "Partitions & Offsets", description: "The anatomy of a Kafka topic — and how to choose partition counts", href: "/kafka/partitions/", status: "live" },
+  { title: "Consumer Groups & Rebalancing", description: "Assignment strategies, cooperative rebalancing, and rebalance storms", href: "/kafka/consumer-groups/", status: "live" },
+  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "#", status: "coming" },
+  { title: "Log Compaction", description: "Keeping the latest value per key", href: "#", status: "coming" },
+];
+
+const redisTopics = [
+  { title: "Cluster Hashing & Failover", description: "Hash slots, MOVED redirections, and automatic failover", href: "/redis/cluster-hashing/", status: "live" },
+  { title: "Persistence: RDB & AOF", description: "Snapshots vs append-only file — tradeoffs and tuning", href: "#", status: "coming" },
 ];
 
 const mongodbTopics = [
@@ -18,10 +23,16 @@ const mongodbTopics = [
   { title: "Replica Set Elections", description: "Leader election and failover mechanics", href: "#", status: "coming" },
 ];
 
-const kafkaTopics = [
-  { title: "Partitions & Offsets", description: "The anatomy of a Kafka topic — and how to choose partition counts", href: "/kafka/partitions/", status: "live" },
-  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "#", status: "coming" },
-  { title: "Log Compaction", description: "Keeping the latest value per key", href: "#", status: "coming" },
+const tidbTopics = [
+  { title: "Write & Read Path", description: "End-to-end journey of a SQL write and read through all layers", href: "/tidb/write-read-path/", status: "live" },
+  { title: "Raft Region Size", description: "The invisible lever for performance & recovery", href: "/tidb/raft-region-size/", status: "live" },
+  { title: "LSM-Tree & Compaction", description: "How TiKV stores data and manages write amplification", href: "/tidb/lsm-tree/", status: "live" },
+  { title: "Distributed Transactions", description: "Percolator 2PC: prewrite, commit, and lock resolution", href: "/tidb/distributed-transactions/", status: "live" },
+  { title: "Hot Regions & Load Balancing", description: "PD scheduler: splitting, scattering, and rebalancing", href: "#", status: "coming" },
+  { title: "TiFlash HTAP", description: "Row store vs column store, when to use each", href: "#", status: "coming" },
+  { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "#", status: "coming" },
+  { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "#", status: "coming" },
+  { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "#", status: "coming" },
 ];
 
 const sparkTopics = [
@@ -41,11 +52,47 @@ const sparkTopics = [
 
   <section class="topics-section">
     <h2>
-      <span class="section-icon">🔷</span>
-      TiDB / Database Internals
+      <span class="section-icon">🗳️</span>
+      Raft Consensus
     </h2>
     <div class="topics-grid">
-      {tidbTopics.map(topic => (
+      {raftTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">📨</span>
+      Apache Kafka
+    </h2>
+    <div class="topics-grid">
+      {kafkaTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔴</span>
+      Redis
+    </h2>
+    <div class="topics-grid">
+      {redisTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}
@@ -77,11 +124,11 @@ const sparkTopics = [
 
   <section class="topics-section">
     <h2>
-      <span class="section-icon">📨</span>
-      Apache Kafka
+      <span class="section-icon">🔷</span>
+      TiDB / Database Internals
     </h2>
     <div class="topics-grid">
-      {kafkaTopics.map(topic => (
+      {tidbTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}
