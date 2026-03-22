@@ -21,7 +21,7 @@ const redisTopics = [
 const postgresqlTopics = [
   { title: "MVCC & Vacuum", description: "Tuple versioning, dead tuples, bloat, autovacuum, and txn ID wraparound", href: "/postgresql/mvcc-vacuum/", status: "live" },
   { title: "WAL & Replication", description: "Write-ahead log, streaming replication, and logical replication", href: "/postgresql/wal-replication/", status: "live" },
-  { title: "Query Planner", description: "How PostgreSQL decides to scan, join, and sort", href: "#", status: "coming" },
+  { title: "Query Planner", description: "How PostgreSQL decides to scan, join, and sort", href: "/postgresql/query-planner/", status: "live" },
 ];
 
 const etcdTopics = [
@@ -33,6 +33,21 @@ const cassandraTopics = [
   { title: "Consistent Hashing & Gossip", description: "Token ring, vnodes, gossip protocol, and phi accrual failure detection", href: "/cassandra/consistent-hashing/", status: "live" },
   { title: "Read/Write Path", description: "Coordinators, consistency levels, and read repair", href: "#", status: "coming" },
   { title: "Compaction Strategies", description: "STCS, LCS, TWCS — when to use each", href: "/cassandra/compaction/", status: "live" },
+];
+
+const zookeeperTopics = [
+  { title: "ZNodes & Watches", description: "Tree hierarchy, ephemeral nodes, watches, leader election recipes", href: "/zookeeper/znodes-watches/", status: "live" },
+  { title: "Sessions & Quorums", description: "Client sessions, ZAB protocol, and quorum mechanics", href: "#", status: "coming" },
+];
+
+const elasticsearchTopics = [
+  { title: "Inverted Index & Search", description: "Analyzers, BM25 scoring, segments, and distributed search", href: "/elasticsearch/inverted-index/", status: "live" },
+  { title: "Cluster Management", description: "Sharding, rebalancing, and split-brain prevention", href: "#", status: "coming" },
+];
+
+const kubernetesTopics = [
+  { title: "Pod Scheduling", description: "Filtering, scoring, preemption, and topology spread", href: "/kubernetes/scheduling/", status: "live" },
+  { title: "Networking & Services", description: "ClusterIP, NodePort, Ingress, and kube-proxy modes", href: "#", status: "coming" },
 ];
 
 const mongodbTopics = [
@@ -165,6 +180,60 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {cassandraTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔍</span>
+      Elasticsearch
+    </h2>
+    <div class="topics-grid">
+      {elasticsearchTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">☸️</span>
+      Kubernetes
+    </h2>
+    <div class="topics-grid">
+      {kubernetesTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🦁</span>
+      ZooKeeper
+    </h2>
+    <div class="topics-grid">
+      {zookeeperTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

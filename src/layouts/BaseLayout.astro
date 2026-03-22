@@ -34,7 +34,10 @@ const { title, description = "Interactive visualizations for understanding distr
                 <a href="/kafka/">Kafka</a>
                 <a href="/redis/">Redis</a>
                 <a href="/postgresql/">PostgreSQL</a>
+                <a href="/elasticsearch/">Elasticsearch</a>
+                <a href="/kubernetes/">Kubernetes</a>
                 <a href="/etcd/">etcd</a>
+                <a href="/zookeeper/">ZooKeeper</a>
                 <a href="/cassandra/">Cassandra</a>
                 <a href="/mongodb/">MongoDB</a>
                 <a href="/tidb/">TiDB</a>
@@ -65,10 +68,37 @@ const { title, description = "Interactive visualizations for understanding distr
         <div class="footer-container">
             <div class="footer-cta">
                 <h3>📬 Get notified when we publish new visualizations</h3>
-                <form class="newsletter-form" action="#" method="post">
-                    <input type="email" placeholder="you@example.com" required>
-                    <button type="submit">Subscribe</button>
+                <form class="newsletter-form" id="subscribeForm">
+                    <input type="email" id="subEmail" placeholder="you@example.com" required>
+                    <button type="submit" id="subBtn">Subscribe</button>
                 </form>
+                <p class="sub-status" id="subStatus" style="display:none; margin-top:8px; font-size:0.9rem;"></p>
+                <script is:inline>
+                  document.getElementById('subscribeForm').addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    var email = document.getElementById('subEmail').value;
+                    var btn = document.getElementById('subBtn');
+                    var status = document.getElementById('subStatus');
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                    fetch('/api/subscribe', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ email: email })
+                    }).then(function(r) { return r.json(); }).then(function(data) {
+                      status.style.display = 'block';
+                      status.style.color = '#22c55e';
+                      status.textContent = data.message || 'Subscribed!';
+                      btn.textContent = '✓';
+                    }).catch(function() {
+                      status.style.display = 'block';
+                      status.style.color = '#ef4444';
+                      status.textContent = 'Error — try again later';
+                      btn.disabled = false;
+                      btn.textContent = 'Subscribe';
+                    });
+                  });
+                </script>
             </div>
             <div class="footer-links">
                 <a href="https://twitter.com/systemsexplain" target="_blank">𝕏 Twitter</a>

@@ -1,0 +1,122 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Pod Scheduling", description: "Filtering, scoring, binding — how the scheduler places pods on nodes", href: "/kubernetes/scheduling/", status: "live" },
+  { title: "Networking & Services", description: "kube-proxy, iptables, IPVS, and ClusterIP/NodePort/LoadBalancer", href: "#", status: "coming" },
+  { title: "etcd & Control Plane", description: "How the API server, scheduler, and controllers coordinate via etcd", href: "#", status: "coming" },
+  { title: "Container Runtime", description: "From Pod spec to running containers: CRI, containerd, and cgroups", href: "#", status: "coming" },
+  { title: "RBAC & Admission Control", description: "Authentication, authorization, and mutating/validating webhooks", href: "#", status: "coming" },
+  { title: "Persistent Volumes", description: "CSI drivers, dynamic provisioning, and storage classes", href: "#", status: "coming" },
+  { title: "HPA & VPA", description: "Horizontal and vertical pod autoscaling: metrics, algorithms, and pitfalls", href: "#", status: "coming" },
+  { title: "Resource Management", description: "Requests, limits, QoS classes, and OOM killing", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Kubernetes Internals" 
+  description="Interactive visualizations for understanding Kubernetes scheduling, networking, storage, and control plane internals"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Kubernetes", href: "/kubernetes/" }]}
+>
+  <section class="section-header">
+    <h1>☸️ Kubernetes Internals</h1>
+    <p>
+      Kubernetes orchestrates containers across a cluster of machines. These interactive visualizations
+      help you understand how the scheduler places pods, how networking routes traffic, and how the
+      control plane keeps everything running.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(96, 165, 250, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

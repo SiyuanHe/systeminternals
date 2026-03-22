@@ -1,0 +1,1728 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Elasticsearch Inverted Index & Search"
+  description="Interactive visualization of Elasticsearch's inverted index, analyzer pipeline, Lucene segments, shards & replicas, and BM25 relevance scoring"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Elasticsearch", href: "/elasticsearch/" },
+    { label: "Inverted Index", href: "/elasticsearch/inverted-index/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🔍 Inverted Index & Search</h1>
+    <p class="subtitle">How Elasticsearch Indexes Documents and Finds Matches</p>
+  </header>
+
+  <!-- Overview -->
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        Elasticsearch stores data using <strong>inverted indexes</strong> — a mapping from every unique
+        <em>term</em> to the list of <em>document IDs</em> that contain it (the <strong>posting list</strong>).
+        Before indexing, text passes through an <strong>analyzer pipeline</strong>: character filters → tokenizer → token filters
+        (lowercase, stemming, stop words). Documents are stored in immutable <strong>Lucene segments</strong> that are
+        periodically merged. An index is split into <strong>shards</strong> distributed across the cluster,
+        each with optional <strong>replicas</strong> for fault tolerance. Search queries fan out to all shards,
+        and results are merged using <strong>BM25 relevance scoring</strong>.
+      </p>
+    </div>
+  </section>
+
+  <!-- 1. Analyzer Pipeline -->
+  <section class="flow-section">
+    <h2>🔬 Analyzer Pipeline</h2>
+    <p class="section-desc">Type text to see how Elasticsearch breaks it into tokens through character filters, tokenizer, and token filters.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <input type="text" id="analyzerInput" placeholder="Type text to analyze (e.g. 'The Quick Brown Foxes jumped!')" class="key-input" autocomplete="off" value="The Quick Brown Foxes jumped over lazy Dogs!">
+        <button id="analyzeBtn" class="action-btn primary-btn">Analyze</button>
+      </div>
+
+      <div class="pipeline-stages" id="pipelineStages"></div>
+    </div>
+  </section>
+
+  <!-- Analyzer Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📝 Character Filters</h3>
+        <p>
+          Run <strong>before</strong> tokenization. Strip HTML tags, convert characters
+          (e.g., <code>&amp;</code> → <code>and</code>), or apply regex replacements.
+          The text is still a single string at this stage.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>✂️ Tokenizer</h3>
+        <p>
+          Splits the character stream into individual <strong>tokens</strong>. The <em>standard tokenizer</em>
+          splits on whitespace and punctuation. Other tokenizers include <code>keyword</code> (entire string as one token),
+          <code>pattern</code>, and <code>ngram</code>.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔧 Token Filters</h3>
+        <p>
+          Transform tokens: <strong>lowercase</strong>, remove <em>stop words</em> (the, is, at),
+          apply <strong>stemming</strong> (running → run, foxes → fox). Multiple filters
+          can be chained. Order matters.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Interactive Inverted Index Builder -->
+  <section class="flow-section">
+    <h2>📚 Build an Inverted Index</h2>
+    <p class="section-desc">Add documents to see the inverted index grow. Each term maps to a posting list of document IDs.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <input type="text" id="docInput" placeholder="Enter document text" class="key-input" autocomplete="off">
+        <button id="addDocBtn" class="action-btn primary-btn">+ Add Doc</button>
+        <button id="resetIndexBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="preset-docs">
+        <span class="preset-label">Quick add:</span>
+        <button class="preset-btn" data-text="the quick brown fox jumps over the lazy dog">fox & dog</button>
+        <button class="preset-btn" data-text="elasticsearch is a distributed search engine">search engine</button>
+        <button class="preset-btn" data-text="the fox is quick and clever">clever fox</button>
+        <button class="preset-btn" data-text="distributed systems require careful design">distributed systems</button>
+        <button class="preset-btn" data-text="search engines index documents for fast retrieval">indexing docs</button>
+      </div>
+    </div>
+
+    <div class="index-display">
+      <div class="docs-panel">
+        <h3>📄 Documents</h3>
+        <div id="docsList" class="docs-list"></div>
+      </div>
+      <div class="index-panel">
+        <h3>📇 Inverted Index</h3>
+        <div id="invertedIndex" class="inverted-index-table"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Interactive Search -->
+  <section class="flow-section">
+    <h2>🔎 Search the Index</h2>
+    <p class="section-desc">Search your indexed documents. See which docs match, which terms hit, and why they rank the way they do.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <input type="text" id="searchInput" placeholder="Search query (e.g. 'quick fox')" class="key-input" autocomplete="off">
+        <button id="searchBtn" class="action-btn primary-btn">🔍 Search</button>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+  </section>
+
+  <!-- 4. BM25 Scoring -->
+  <section class="flow-section">
+    <h2>📊 BM25 Relevance Scoring</h2>
+    <p class="section-desc">Adjust parameters to see how BM25 calculates relevance. Higher scores = more relevant.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>k1 (term saturation): <strong id="k1Label">1.2</strong></label>
+        <input type="range" id="k1Slider" min="0" max="30" value="12" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>b (length normalization): <strong id="bLabel">0.75</strong></label>
+        <input type="range" id="bSlider" min="0" max="100" value="75" class="slot-slider">
+      </div>
+    </div>
+
+    <div class="bm25-interactive">
+      <div class="bm25-params">
+        <div class="slider-group vertical">
+          <label>Term Frequency (tf): <strong id="tfLabel">3</strong></label>
+          <input type="range" id="tfSlider" min="0" max="20" value="3" class="slot-slider">
+        </div>
+        <div class="slider-group vertical">
+          <label>Doc Length: <strong id="dlLabel">100</strong></label>
+          <input type="range" id="dlSlider" min="10" max="500" value="100" class="slot-slider">
+        </div>
+        <div class="slider-group vertical">
+          <label>Avg Doc Length: <strong id="avgdlLabel">120</strong></label>
+          <input type="range" id="avgdlSlider" min="10" max="500" value="120" class="slot-slider">
+        </div>
+        <div class="slider-group vertical">
+          <label>Total Docs (N): <strong id="nLabel">1000</strong></label>
+          <input type="range" id="nSlider" min="10" max="10000" value="1000" class="slot-slider">
+        </div>
+        <div class="slider-group vertical">
+          <label>Docs with term (df): <strong id="dfLabel">50</strong></label>
+          <input type="range" id="dfSlider" min="1" max="5000" value="50" class="slot-slider">
+        </div>
+      </div>
+      <div class="bm25-output" id="bm25Output"></div>
+    </div>
+  </section>
+
+  <!-- BM25 Explainer -->
+  <section class="explain-section">
+    <div class="explain-card highlight-card">
+      <h3>💡 BM25 vs TF-IDF</h3>
+      <p>
+        Classic <strong>TF-IDF</strong> increases linearly with term frequency — a term appearing 10x scores 10x
+        higher. <em>BM25</em> adds <strong>saturation</strong>: after a point, more occurrences barely increase the
+        score (controlled by <code>k1</code>). The <code>b</code> parameter controls <strong>length normalization</strong> —
+        longer documents are penalized because they naturally contain more terms. BM25 is Elasticsearch's
+        <em>default scoring function</em> since version 5.0.
+      </p>
+    </div>
+  </section>
+
+  <!-- 5. Lucene Segments -->
+  <section class="flow-section">
+    <h2>📦 Lucene Segments</h2>
+    <p class="section-desc">Documents are written to immutable segments. Watch segments accumulate and merge.</p>
+
+    <div class="flow-controls">
+      <button id="addSegmentBtn" class="action-btn primary-btn">+ Write Segment</button>
+      <button id="mergeSegmentsBtn" class="action-btn step-btn" disabled>🔀 Force Merge</button>
+      <button id="resetSegmentsBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="segmentStatus">
+      <span class="status-badge idle" id="segmentBadge">Ready</span>
+      <span class="status-text" id="segmentStatusText">Add segments to see how Lucene manages immutable data</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="segmentCanvas" width="820" height="320"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="segmentTimeline"></div>
+  </section>
+
+  <!-- Segment Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📝 Immutable Segments</h3>
+        <p>
+          Each <strong>refresh</strong> (default 1s) creates a new segment from the in-memory buffer.
+          Segments are <em>immutable</em> — once written, they never change. Deletes are tracked in
+          a separate <code>.del</code> file. This immutability enables lock-free reads and OS-level caching.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔀 Segment Merging</h3>
+        <p>
+          Too many small segments hurt performance. Lucene's <strong>merge policy</strong> (TieredMergePolicy)
+          periodically combines small segments into larger ones, physically removing deleted documents.
+          <code>force merge</code> reduces to a target number of segments (useful for read-heavy, static indexes).
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Shards & Replicas -->
+  <section class="flow-section">
+    <h2>🌐 Shards & Replicas</h2>
+    <p class="section-desc">See how a search query fans out across primary shards and results are merged by the coordinating node.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Primary Shards: <strong id="shardCountLabel">3</strong></label>
+        <input type="range" id="shardSlider" min="1" max="6" value="3" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Replicas: <strong id="replicaCountLabel">1</strong></label>
+        <input type="range" id="replicaSlider" min="0" max="2" value="1" class="slot-slider">
+      </div>
+      <button id="runQueryBtn" class="action-btn primary-btn">🔍 Run Query</button>
+      <button id="resetShardsBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="shardStatus">
+      <span class="status-badge idle" id="shardBadge">Ready</span>
+      <span class="status-text" id="shardStatusText">Configure shards and run a distributed query</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="shardCanvas" width="820" height="400"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="shardTimeline"></div>
+  </section>
+
+  <!-- Shard Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📨 Query Phase (Scatter)</h3>
+        <p>
+          The coordinating node sends the query to <strong>one copy</strong> of each shard (primary or replica).
+          Each shard executes the query locally and returns a <em>priority queue</em> of
+          <code>(doc_id, score)</code> pairs — just IDs and scores, not full documents.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📋 Fetch Phase (Gather)</h3>
+        <p>
+          The coordinator <strong>merges</strong> all shard results, picks the global top-N,
+          then fetches the actual documents from the relevant shards. This two-phase approach
+          minimizes data transfer — only the winning documents are fetched in full.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html" target="_blank">Elasticsearch Documentation</a> and <a href="https://lucene.apache.org/" target="_blank">Apache Lucene</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Elasticsearch%20inverted%20index%20and%20BM25%20scoring&url=https://systeminternals.dev/elasticsearch/inverted-index/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/elasticsearch/inverted-index/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/elasticsearch/inverted-index/&t=Interactive%20Elasticsearch%20Inverted%20Index%20%26%20BM25%20Scoring%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #00d4ff, #60a5fa, #a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #00d4ff; font-style: normal; font-weight: 500; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #00d4ff, #0099cc);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #a855f7, #7c3aed);
+    color: white;
+  }
+
+  .step-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(168, 85, 247, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.searching { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+  .status-badge.merging { background: rgba(168, 85, 247, 0.2); color: #a855f7; }
+  .status-badge.done { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.writing { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.scatter { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+  .status-badge.gather { background: rgba(168, 85, 247, 0.2); color: #a855f7; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Calculator */
+  .calculator-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 20px;
+  }
+
+  .calc-input-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .key-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 1rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .key-input:focus {
+    border-color: #00d4ff;
+  }
+
+  .key-input::placeholder {
+    color: #555;
+  }
+
+  /* Pipeline Stages */
+  .pipeline-stages {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  :global(.stage) {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  :global(.stage-header) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  :global(.stage-arrow) {
+    text-align: center;
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  :global(.token-list) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  :global(.token-chip) {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  :global(.token-chip.original) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ccc;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  :global(.token-chip.filtered) {
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
+    border: 1px solid rgba(0, 212, 255, 0.3);
+  }
+
+  :global(.token-chip.removed) {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    text-decoration: line-through;
+  }
+
+  :global(.token-chip.stemmed) {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  /* Presets */
+  .preset-docs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .preset-label {
+    font-size: 0.85rem;
+    color: #666;
+  }
+
+  .preset-btn {
+    padding: 6px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #aaa;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .preset-btn:hover {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.3);
+    color: #00d4ff;
+  }
+
+  /* Index Display */
+  .index-display {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .docs-panel, .index-panel {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .docs-panel h3, .index-panel h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+
+  :global(.doc-item) {
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.9rem;
+    color: #ccc;
+    transition: all 0.2s;
+  }
+
+  :global(.doc-item.highlight) {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.3);
+  }
+
+  :global(.doc-id) {
+    font-weight: 700;
+    font-size: 0.8rem;
+    margin-right: 8px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(0, 212, 255, 0.15);
+    color: #00d4ff;
+  }
+
+  :global(.index-row) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+
+  :global(.index-row:hover) {
+    background: rgba(0, 212, 255, 0.05);
+    border-color: rgba(0, 212, 255, 0.2);
+  }
+
+  :global(.index-row.highlight) {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.3);
+  }
+
+  :global(.term-name) {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    color: #00d4ff;
+    min-width: 80px;
+  }
+
+  :global(.term-arrow) {
+    color: #555;
+    font-size: 0.8rem;
+  }
+
+  :global(.posting-list) {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  :global(.posting-id) {
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  :global(.posting-id.match) {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+  }
+
+  :global(.term-freq) {
+    font-size: 0.75rem;
+    color: #666;
+    margin-left: auto;
+  }
+
+  /* Search Results */
+  .search-results {
+    min-height: 40px;
+  }
+
+  :global(.search-hit) {
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  :global(.hit-header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  :global(.hit-score) {
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+
+  :global(.hit-text) {
+    font-size: 0.9rem;
+    color: #ccc;
+    line-height: 1.5;
+  }
+
+  :global(.hit-text mark) {
+    background: rgba(0, 212, 255, 0.2);
+    color: #00d4ff;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  :global(.hit-explain) {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 8px;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  :global(.no-results) {
+    text-align: center;
+    color: #666;
+    padding: 20px;
+    font-size: 0.95rem;
+  }
+
+  /* BM25 */
+  .bm25-interactive {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .bm25-params {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-group.vertical {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .slider-group label {
+    color: #ccc;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .slider-group strong {
+    color: #00d4ff;
+  }
+
+  .slot-slider {
+    width: 160px;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .slot-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #00d4ff;
+    cursor: pointer;
+  }
+
+  .vertical .slot-slider {
+    width: 100%;
+  }
+
+  .bm25-output {
+    min-height: 80px;
+  }
+
+  :global(.bm25-formula) {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    color: #ccc;
+    line-height: 2;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  :global(.bm25-score) {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #00d4ff;
+    text-align: center;
+    margin-top: 16px;
+  }
+
+  :global(.bm25-component) {
+    color: #a855f7;
+  }
+
+  :global(.bm25-value) {
+    color: #22c55e;
+    font-weight: 600;
+  }
+
+  /* Topology container */
+  .topology-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  /* Failover timeline */
+  .failover-timeline {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+  }
+
+  :global(.failover-step) {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.failover-step.info-step) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.failover-step.scatter-step) { background: rgba(0, 212, 255, 0.1); color: #67e8f9; border-left: 3px solid #00d4ff; }
+  :global(.failover-step.gather-step) { background: rgba(168, 85, 247, 0.1); color: #d8b4fe; border-left: 3px solid #a855f7; }
+  :global(.failover-step.write-step) { background: rgba(34, 197, 94, 0.15); color: #86efac; border-left: 3px solid #22c55e; }
+  :global(.failover-step.merge-step) { background: rgba(234, 179, 8, 0.1); color: #fde68a; border-left: 3px solid #eab308; }
+  :global(.failover-step.result-step) { background: rgba(0, 212, 255, 0.1); color: #67e8f9; border-left: 3px solid #00d4ff; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #a855f7; }
+  .explain-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(168, 85, 247, 0.08));
+    border-color: rgba(0, 212, 255, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .calc-input-row { flex-direction: column; }
+    .index-display { grid-template-columns: 1fr; }
+    .bm25-params { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+  // ========== STOP WORDS & STEMMING ==========
+  var STOP_WORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+    'shall', 'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
+    'through', 'during', 'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
+    'under', 'again', 'further', 'then', 'once', 'and', 'but', 'or', 'nor', 'not', 'so', 'yet',
+    'both', 'either', 'neither', 'each', 'every', 'all', 'any', 'few', 'more', 'most', 'other',
+    'some', 'such', 'no', 'only', 'own', 'same', 'than', 'too', 'very', 'just', 'it', 'its',
+    'this', 'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him',
+    'his', 'she', 'her', 'they', 'them', 'their', 'what', 'which', 'who', 'whom']);
+
+  function simpleStem(word) {
+    if (word.length < 4) return word;
+    // Simple suffix stripping
+    if (word.endsWith('ies') && word.length > 4) return word.slice(0, -3) + 'y';
+    if (word.endsWith('sses')) return word.slice(0, -2);
+    if (word.endsWith('ness')) return word.slice(0, -4);
+    if (word.endsWith('ment')) return word.slice(0, -4) || word;
+    if (word.endsWith('ting') && word.length > 5) return word.slice(0, -3);
+    if (word.endsWith('ing') && word.length > 5) return word.slice(0, -3);
+    if (word.endsWith('tion')) return word.slice(0, -4) + 't';
+    if (word.endsWith('ous')) return word.slice(0, -3);
+    if (word.endsWith('ive')) return word.slice(0, -3);
+    if (word.endsWith('ful')) return word.slice(0, -3);
+    if (word.endsWith('ly') && word.length > 4) return word.slice(0, -2);
+    if (word.endsWith('ed') && word.length > 4) return word.slice(0, -2);
+    if (word.endsWith('er') && word.length > 4) return word.slice(0, -2);
+    if (word.endsWith('es') && word.length > 4) return word.slice(0, -2);
+    if (word.endsWith('s') && !word.endsWith('ss') && word.length > 3) return word.slice(0, -1);
+    return word;
+  }
+
+  function analyze(text) {
+    // Step 1: Character filters (strip HTML, normalize)
+    var charFiltered = text.replace(/<[^>]+>/g, '').replace(/&amp;/g, 'and').replace(/&/g, 'and');
+
+    // Step 2: Tokenize (split on non-alphanumeric)
+    var rawTokens = charFiltered.split(/[^a-zA-Z0-9]+/).filter(function(t) { return t.length > 0; });
+
+    // Step 3: Lowercase
+    var lowered = rawTokens.map(function(t) { return t.toLowerCase(); });
+
+    // Step 4: Stop word removal
+    var stopped = lowered.map(function(t) {
+      return { token: t, removed: STOP_WORDS.has(t) };
+    });
+
+    // Step 5: Stemming on non-stopped tokens
+    var final = [];
+    var stemmed = [];
+    for (var i = 0; i < stopped.length; i++) {
+      if (!stopped[i].removed) {
+        var s = simpleStem(stopped[i].token);
+        stemmed.push({ original: stopped[i].token, stemmed: s, changed: s !== stopped[i].token });
+        final.push(s);
+      }
+    }
+
+    return {
+      original: text,
+      charFiltered: charFiltered,
+      rawTokens: rawTokens,
+      lowered: lowered,
+      stopped: stopped,
+      stemmed: stemmed,
+      final: final
+    };
+  }
+
+  // ========== ANALYZER PIPELINE VIZ ==========
+  function renderPipeline() {
+    var input = document.getElementById('analyzerInput');
+    var container = document.getElementById('pipelineStages');
+    var text = input.value.trim();
+    if (!text) { container.innerHTML = ''; return; }
+
+    var result = analyze(text);
+    var html = '';
+
+    // Stage 1: Original
+    html += '<div class="stage"><div class="stage-header" style="color:#888;">📝 Original Input</div>';
+    html += '<div class="token-list"><span class="token-chip original">' + escapeHtml(result.original) + '</span></div></div>';
+    html += '<div class="stage-arrow">▼</div>';
+
+    // Stage 2: Char filtered
+    html += '<div class="stage"><div class="stage-header" style="color:#60a5fa;">🔤 Character Filters</div>';
+    html += '<div class="token-list"><span class="token-chip filtered">' + escapeHtml(result.charFiltered) + '</span></div></div>';
+    html += '<div class="stage-arrow">▼</div>';
+
+    // Stage 3: Tokenized
+    html += '<div class="stage"><div class="stage-header" style="color:#a855f7;">✂️ Tokenizer (standard)</div>';
+    html += '<div class="token-list">';
+    for (var i = 0; i < result.rawTokens.length; i++) {
+      html += '<span class="token-chip filtered">' + escapeHtml(result.rawTokens[i]) + '</span>';
+    }
+    html += '</div></div>';
+    html += '<div class="stage-arrow">▼</div>';
+
+    // Stage 4: Lowercase
+    html += '<div class="stage"><div class="stage-header" style="color:#eab308;">🔡 Lowercase</div>';
+    html += '<div class="token-list">';
+    for (var i = 0; i < result.lowered.length; i++) {
+      html += '<span class="token-chip filtered">' + escapeHtml(result.lowered[i]) + '</span>';
+    }
+    html += '</div></div>';
+    html += '<div class="stage-arrow">▼</div>';
+
+    // Stage 5: Stop word removal
+    html += '<div class="stage"><div class="stage-header" style="color:#ef4444;">🚫 Stop Words Removal</div>';
+    html += '<div class="token-list">';
+    for (var i = 0; i < result.stopped.length; i++) {
+      var cls = result.stopped[i].removed ? 'removed' : 'filtered';
+      html += '<span class="token-chip ' + cls + '">' + escapeHtml(result.stopped[i].token) + '</span>';
+    }
+    html += '</div></div>';
+    html += '<div class="stage-arrow">▼</div>';
+
+    // Stage 6: Stemming
+    html += '<div class="stage"><div class="stage-header" style="color:#22c55e;">🌱 Stemming</div>';
+    html += '<div class="token-list">';
+    for (var i = 0; i < result.stemmed.length; i++) {
+      var cls = result.stemmed[i].changed ? 'stemmed' : 'filtered';
+      var label = result.stemmed[i].changed
+        ? escapeHtml(result.stemmed[i].original) + ' → ' + escapeHtml(result.stemmed[i].stemmed)
+        : escapeHtml(result.stemmed[i].stemmed);
+      html += '<span class="token-chip ' + cls + '">' + label + '</span>';
+    }
+    html += '</div></div>';
+
+    // Final tokens
+    html += '<div class="stage" style="border-color:rgba(0,212,255,0.3);background:rgba(0,212,255,0.05);"><div class="stage-header" style="color:#00d4ff;">✅ Final Tokens (indexed)</div>';
+    html += '<div class="token-list">';
+    for (var i = 0; i < result.final.length; i++) {
+      html += '<span class="token-chip filtered" style="background:rgba(0,212,255,0.15);color:#00d4ff;border-color:rgba(0,212,255,0.4);">' + escapeHtml(result.final[i]) + '</span>';
+    }
+    html += '</div></div>';
+
+    container.innerHTML = html;
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+  }
+
+  document.getElementById('analyzeBtn').addEventListener('click', renderPipeline);
+  document.getElementById('analyzerInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') renderPipeline();
+  });
+
+  // ========== INVERTED INDEX ==========
+  var documents = [];
+  var invertedIdx = {};
+
+  function addDocument(text) {
+    var docId = documents.length + 1;
+    documents.push({ id: docId, text: text });
+    var result = analyze(text);
+    for (var i = 0; i < result.final.length; i++) {
+      var term = result.final[i];
+      if (!invertedIdx[term]) invertedIdx[term] = [];
+      if (invertedIdx[term].indexOf(docId) === -1) {
+        invertedIdx[term].push(docId);
+      }
+    }
+    renderIndex();
+  }
+
+  function renderIndex() {
+    var docsList = document.getElementById('docsList');
+    var indexDiv = document.getElementById('invertedIndex');
+
+    // Render documents
+    var docsHtml = '';
+    for (var i = 0; i < documents.length; i++) {
+      docsHtml += '<div class="doc-item" data-doc-id="' + documents[i].id + '">';
+      docsHtml += '<span class="doc-id">DOC ' + documents[i].id + '</span>';
+      docsHtml += escapeHtml(documents[i].text);
+      docsHtml += '</div>';
+    }
+    if (documents.length === 0) {
+      docsHtml = '<div style="color:#555;text-align:center;padding:20px;">No documents indexed yet</div>';
+    }
+    docsList.innerHTML = docsHtml;
+
+    // Render inverted index sorted by term
+    var terms = Object.keys(invertedIdx).sort();
+    var indexHtml = '';
+    for (var i = 0; i < terms.length; i++) {
+      var term = terms[i];
+      var postings = invertedIdx[term];
+      indexHtml += '<div class="index-row" data-term="' + escapeHtml(term) + '">';
+      indexHtml += '<span class="term-name">' + escapeHtml(term) + '</span>';
+      indexHtml += '<span class="term-arrow">→</span>';
+      indexHtml += '<span class="posting-list">';
+      for (var j = 0; j < postings.length; j++) {
+        indexHtml += '<span class="posting-id">' + postings[j] + '</span>';
+      }
+      indexHtml += '</span>';
+      indexHtml += '<span class="term-freq">df=' + postings.length + '</span>';
+      indexHtml += '</div>';
+    }
+    if (terms.length === 0) {
+      indexHtml = '<div style="color:#555;text-align:center;padding:20px;">Index is empty</div>';
+    }
+    indexDiv.innerHTML = indexHtml;
+
+    // Add hover interaction
+    var rows = indexDiv.querySelectorAll('.index-row');
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].addEventListener('mouseenter', function() {
+        var term = this.getAttribute('data-term');
+        var postings = invertedIdx[term] || [];
+        this.classList.add('highlight');
+        var items = docsList.querySelectorAll('.doc-item');
+        for (var j = 0; j < items.length; j++) {
+          var did = parseInt(items[j].getAttribute('data-doc-id'));
+          if (postings.indexOf(did) !== -1) {
+            items[j].classList.add('highlight');
+          }
+        }
+      });
+      rows[i].addEventListener('mouseleave', function() {
+        this.classList.remove('highlight');
+        var items = docsList.querySelectorAll('.doc-item');
+        for (var j = 0; j < items.length; j++) {
+          items[j].classList.remove('highlight');
+        }
+      });
+    }
+  }
+
+  document.getElementById('addDocBtn').addEventListener('click', function() {
+    var input = document.getElementById('docInput');
+    var text = input.value.trim();
+    if (text) {
+      addDocument(text);
+      input.value = '';
+    }
+  });
+
+  document.getElementById('docInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      var text = this.value.trim();
+      if (text) { addDocument(text); this.value = ''; }
+    }
+  });
+
+  document.getElementById('resetIndexBtn').addEventListener('click', function() {
+    documents = [];
+    invertedIdx = {};
+    renderIndex();
+    document.getElementById('searchResults').innerHTML = '';
+  });
+
+  // Preset buttons
+  var presetBtns = document.querySelectorAll('.preset-btn');
+  for (var i = 0; i < presetBtns.length; i++) {
+    presetBtns[i].addEventListener('click', function() {
+      addDocument(this.getAttribute('data-text'));
+    });
+  }
+
+  // ========== SEARCH ==========
+  function bm25Score(tf, df, dl, avgdl, N, k1, b) {
+    var idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
+    var tfNorm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (dl / avgdl)));
+    return idf * tfNorm;
+  }
+
+  function searchDocuments(query) {
+    var container = document.getElementById('searchResults');
+    if (documents.length === 0) {
+      container.innerHTML = '<div class="no-results">Index some documents first, then search.</div>';
+      return;
+    }
+
+    var queryResult = analyze(query);
+    var queryTerms = queryResult.final;
+    if (queryTerms.length === 0) {
+      container.innerHTML = '<div class="no-results">No searchable terms in query after analysis.</div>';
+      return;
+    }
+
+    // Calculate BM25 for each document
+    var N = documents.length;
+    var totalLen = 0;
+    var docTokens = [];
+    for (var i = 0; i < documents.length; i++) {
+      var tokens = analyze(documents[i].text).final;
+      docTokens.push(tokens);
+      totalLen += tokens.length;
+    }
+    var avgdl = totalLen / N;
+    var k1 = 1.2;
+    var b = 0.75;
+
+    var scores = [];
+    for (var d = 0; d < documents.length; d++) {
+      var score = 0;
+      var explanation = [];
+      var matchedTerms = [];
+
+      for (var t = 0; t < queryTerms.length; t++) {
+        var term = queryTerms[t];
+        var df = invertedIdx[term] ? invertedIdx[term].length : 0;
+        if (df === 0) continue;
+
+        // Count term frequency in this doc
+        var tf = 0;
+        for (var k = 0; k < docTokens[d].length; k++) {
+          if (docTokens[d][k] === term) tf++;
+        }
+        if (tf === 0) continue;
+
+        var s = bm25Score(tf, df, docTokens[d].length, avgdl, N, k1, b);
+        score += s;
+        matchedTerms.push(term);
+        explanation.push(term + ': tf=' + tf + ', df=' + df + ', score=' + s.toFixed(3));
+      }
+
+      if (score > 0) {
+        scores.push({ docId: documents[d].id, text: documents[d].text, score: score, explanation: explanation, matchedTerms: matchedTerms });
+      }
+    }
+
+    scores.sort(function(a, b) { return b.score - a.score; });
+
+    if (scores.length === 0) {
+      container.innerHTML = '<div class="no-results">No documents matched the query "' + escapeHtml(query) + '"</div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < scores.length; i++) {
+      var hit = scores[i];
+      html += '<div class="search-hit">';
+      html += '<div class="hit-header">';
+      html += '<span><span class="doc-id">DOC ' + hit.docId + '</span></span>';
+      html += '<span class="hit-score">BM25: ' + hit.score.toFixed(4) + '</span>';
+      html += '</div>';
+
+      // Highlight matched terms in text
+      var highlighted = escapeHtml(hit.text);
+      // We need to highlight original words that stem to matched terms
+      var words = hit.text.split(/(\s+|[^a-zA-Z0-9]+)/);
+      var highlightedParts = '';
+      for (var w = 0; w < words.length; w++) {
+        var clean = words[w].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        var stem = clean ? simpleStem(clean) : '';
+        if (stem && hit.matchedTerms.indexOf(stem) !== -1) {
+          highlightedParts += '<mark>' + escapeHtml(words[w]) + '</mark>';
+        } else {
+          highlightedParts += escapeHtml(words[w]);
+        }
+      }
+
+      html += '<div class="hit-text">' + highlightedParts + '</div>';
+      html += '<div class="hit-explain">' + hit.explanation.join(' | ') + '</div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+
+    // Highlight matching terms in inverted index
+    var indexRows = document.querySelectorAll('.index-row');
+    for (var i = 0; i < indexRows.length; i++) {
+      var term = indexRows[i].getAttribute('data-term');
+      if (queryTerms.indexOf(term) !== -1) {
+        indexRows[i].classList.add('highlight');
+        var postingIds = indexRows[i].querySelectorAll('.posting-id');
+        var matchDocIds = scores.map(function(s) { return s.docId; });
+        for (var j = 0; j < postingIds.length; j++) {
+          var pid = parseInt(postingIds[j].textContent);
+          if (matchDocIds.indexOf(pid) !== -1) {
+            postingIds[j].classList.add('match');
+          }
+        }
+      } else {
+        indexRows[i].classList.remove('highlight');
+      }
+    }
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', function() {
+    var q = document.getElementById('searchInput').value.trim();
+    if (q) searchDocuments(q);
+  });
+  document.getElementById('searchInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      var q = this.value.trim();
+      if (q) searchDocuments(q);
+    }
+  });
+
+  // ========== BM25 INTERACTIVE ==========
+  var k1Slider = document.getElementById('k1Slider');
+  var bSlider = document.getElementById('bSlider');
+  var tfSlider = document.getElementById('tfSlider');
+  var dlSlider = document.getElementById('dlSlider');
+  var avgdlSlider = document.getElementById('avgdlSlider');
+  var nSlider = document.getElementById('nSlider');
+  var dfSlider = document.getElementById('dfSlider');
+
+  function updateBM25() {
+    var k1 = parseInt(k1Slider.value) / 10;
+    var b = parseInt(bSlider.value) / 100;
+    var tf = parseInt(tfSlider.value);
+    var dl = parseInt(dlSlider.value);
+    var avgdl = parseInt(avgdlSlider.value);
+    var N = parseInt(nSlider.value);
+    var df = Math.min(parseInt(dfSlider.value), N);
+
+    document.getElementById('k1Label').textContent = k1.toFixed(1);
+    document.getElementById('bLabel').textContent = b.toFixed(2);
+    document.getElementById('tfLabel').textContent = tf;
+    document.getElementById('dlLabel').textContent = dl;
+    document.getElementById('avgdlLabel').textContent = avgdl;
+    document.getElementById('nLabel').textContent = N;
+    document.getElementById('dfLabel').textContent = df;
+
+    var idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
+    var tfNorm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (dl / avgdl)));
+    var score = idf * tfNorm;
+
+    var output = document.getElementById('bm25Output');
+    var html = '<div class="bm25-formula">';
+    html += '<span class="bm25-component">IDF</span> = ln(1 + (N - df + 0.5) / (df + 0.5))<br>';
+    html += '&nbsp;&nbsp;&nbsp;&nbsp;= ln(1 + (' + N + ' - ' + df + ' + 0.5) / (' + df + ' + 0.5)) = <span class="bm25-value">' + idf.toFixed(4) + '</span><br><br>';
+    html += '<span class="bm25-component">TF_norm</span> = (tf × (k1 + 1)) / (tf + k1 × (1 - b + b × (dl / avgdl)))<br>';
+    html += '&nbsp;&nbsp;&nbsp;&nbsp;= (' + tf + ' × ' + (k1 + 1).toFixed(1) + ') / (' + tf + ' + ' + k1.toFixed(1) + ' × (1 - ' + b.toFixed(2) + ' + ' + b.toFixed(2) + ' × (' + dl + ' / ' + avgdl + ')))<br>';
+    html += '&nbsp;&nbsp;&nbsp;&nbsp;= <span class="bm25-value">' + tfNorm.toFixed(4) + '</span><br><br>';
+    html += '<span class="bm25-component">Score</span> = IDF × TF_norm = ' + idf.toFixed(4) + ' × ' + tfNorm.toFixed(4) + ' = <span class="bm25-value">' + score.toFixed(4) + '</span>';
+    html += '</div>';
+    html += '<div class="bm25-score">' + score.toFixed(4) + '</div>';
+    output.innerHTML = html;
+  }
+
+  var bm25Sliders = [k1Slider, bSlider, tfSlider, dlSlider, avgdlSlider, nSlider, dfSlider];
+  for (var i = 0; i < bm25Sliders.length; i++) {
+    bm25Sliders[i].addEventListener('input', updateBM25);
+  }
+
+  // ========== LUCENE SEGMENTS ==========
+  var segments = [];
+  var segmentId = 0;
+  var segmentCanvas = document.getElementById('segmentCanvas');
+  var segmentCtx = segmentCanvas.getContext('2d');
+
+  function drawSegments() {
+    var ctx = segmentCtx;
+    var w = segmentCanvas.width;
+    var h = segmentCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (segments.length === 0) {
+      ctx.fillStyle = '#555';
+      ctx.font = '14px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Click "+ Write Segment" to create Lucene segments', w / 2, h / 2);
+      return;
+    }
+
+    var padding = 30;
+    var gap = 12;
+    var maxBarWidth = (w - padding * 2 - gap * (segments.length - 1)) / segments.length;
+    var barWidth = Math.min(maxBarWidth, 80);
+    var totalWidth = segments.length * barWidth + (segments.length - 1) * gap;
+    var startX = (w - totalWidth) / 2;
+
+    var maxDocs = 1;
+    for (var i = 0; i < segments.length; i++) {
+      if (segments[i].docs > maxDocs) maxDocs = segments[i].docs;
+    }
+
+    var colors = ['#00d4ff', '#60a5fa', '#a855f7', '#22c55e', '#eab308', '#ef4444', '#ec4899', '#14b8a6'];
+
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var x = startX + i * (barWidth + gap);
+      var barMaxH = h - 100;
+      var barH = Math.max(30, (seg.docs / maxDocs) * barMaxH);
+      var y = h - 50 - barH;
+      var color = colors[i % colors.length];
+
+      // Bar
+      ctx.fillStyle = color + '30';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, barWidth, barH, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      // Segment label
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Seg ' + seg.id, x + barWidth / 2, y + 20);
+
+      // Doc count
+      ctx.fillStyle = color;
+      ctx.font = '10px Monaco, monospace';
+      ctx.fillText(seg.docs + ' docs', x + barWidth / 2, y + 36);
+
+      // Size indicator
+      ctx.fillStyle = '#888';
+      ctx.font = '9px Inter, sans-serif';
+      ctx.fillText(seg.size + ' KB', x + barWidth / 2, h - 36);
+
+      // Status
+      if (seg.merging) {
+        ctx.fillStyle = '#eab308';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.fillText('MERGING', x + barWidth / 2, y - 8);
+      }
+    }
+
+    // Title
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(segments.length + ' segment' + (segments.length !== 1 ? 's' : '') + ' in index', w / 2, 20);
+  }
+
+  function addTimelineEntry(container, text, cls) {
+    var el = document.createElement('div');
+    el.className = 'failover-step ' + cls;
+    el.textContent = text;
+    container.appendChild(el);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  document.getElementById('addSegmentBtn').addEventListener('click', function() {
+    segmentId++;
+    var docs = 5 + Math.floor(Math.random() * 20);
+    var size = docs * (10 + Math.floor(Math.random() * 5));
+    segments.push({ id: segmentId, docs: docs, size: size, merging: false });
+
+    var badge = document.getElementById('segmentBadge');
+    var statusText = document.getElementById('segmentStatusText');
+    badge.className = 'status-badge writing';
+    badge.textContent = 'WRITING';
+    statusText.textContent = 'Segment ' + segmentId + ' created with ' + docs + ' documents';
+
+    addTimelineEntry(document.getElementById('segmentTimeline'),
+      '📝 Segment ' + segmentId + ' flushed from in-memory buffer (' + docs + ' docs, ' + size + ' KB)', 'write-step');
+
+    if (segments.length >= 3) {
+      document.getElementById('mergeSegmentsBtn').disabled = false;
+    }
+
+    drawSegments();
+  });
+
+  document.getElementById('mergeSegmentsBtn').addEventListener('click', async function() {
+    if (segments.length < 2) return;
+    this.disabled = true;
+
+    var badge = document.getElementById('segmentBadge');
+    var statusText = document.getElementById('segmentStatusText');
+    badge.className = 'status-badge merging';
+    badge.textContent = 'MERGING';
+
+    // Mark all for merge
+    for (var i = 0; i < segments.length; i++) segments[i].merging = true;
+    drawSegments();
+
+    var names = segments.map(function(s) { return 'Seg ' + s.id; }).join(', ');
+    addTimelineEntry(document.getElementById('segmentTimeline'),
+      '🔀 Merge started: ' + names, 'merge-step');
+
+    await new Promise(function(r) { setTimeout(r, 1500); });
+
+    // Create merged segment
+    var totalDocs = 0;
+    var totalSize = 0;
+    for (var i = 0; i < segments.length; i++) {
+      totalDocs += segments[i].docs;
+      totalSize += segments[i].size;
+    }
+
+    segmentId++;
+    segments = [{ id: segmentId, docs: totalDocs, size: Math.floor(totalSize * 0.7), merging: false }];
+
+    statusText.textContent = 'Merged into Segment ' + segmentId + ' (' + totalDocs + ' docs)';
+    badge.className = 'status-badge done';
+    badge.textContent = 'MERGED';
+
+    addTimelineEntry(document.getElementById('segmentTimeline'),
+      '✅ Merged into Segment ' + segmentId + ': ' + totalDocs + ' docs, ' + Math.floor(totalSize * 0.7) + ' KB (30% compaction)', 'result-step');
+
+    drawSegments();
+  });
+
+  document.getElementById('resetSegmentsBtn').addEventListener('click', function() {
+    segments = [];
+    segmentId = 0;
+    document.getElementById('segmentTimeline').innerHTML = '';
+    document.getElementById('segmentBadge').className = 'status-badge idle';
+    document.getElementById('segmentBadge').textContent = 'Ready';
+    document.getElementById('segmentStatusText').textContent = 'Add segments to see how Lucene manages immutable data';
+    document.getElementById('mergeSegmentsBtn').disabled = true;
+    drawSegments();
+  });
+
+  // ========== SHARDS & REPLICAS ==========
+  var shardCanvas = document.getElementById('shardCanvas');
+  var shardCtx = shardCanvas.getContext('2d');
+  var shardSlider = document.getElementById('shardSlider');
+  var replicaSlider = document.getElementById('replicaSlider');
+
+  shardSlider.addEventListener('input', function() {
+    document.getElementById('shardCountLabel').textContent = this.value;
+    drawShardTopology();
+  });
+  replicaSlider.addEventListener('input', function() {
+    document.getElementById('replicaCountLabel').textContent = this.value;
+    drawShardTopology();
+  });
+
+  function drawShardTopology(activeShards, phase) {
+    var ctx = shardCtx;
+    var w = shardCanvas.width;
+    var h = shardCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var numShards = parseInt(shardSlider.value);
+    var numReplicas = parseInt(replicaSlider.value);
+    var totalCopies = 1 + numReplicas;
+
+    // Draw coordinating node
+    var coordX = w / 2;
+    var coordY = 50;
+    ctx.fillStyle = 'rgba(234, 179, 8, 0.2)';
+    ctx.strokeStyle = '#eab308';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(coordX, coordY, 25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('COORD', coordX, coordY + 3);
+
+    // Draw shard groups
+    var groupWidth = (w - 80) / numShards;
+    var shardY = 180;
+
+    for (var s = 0; s < numShards; s++) {
+      var groupX = 40 + s * groupWidth + groupWidth / 2;
+
+      // Line from coordinator
+      var isActive = activeShards ? activeShards.indexOf(s) !== -1 : false;
+      ctx.strokeStyle = isActive ? '#00d4ff' : 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = isActive ? 2 : 1;
+      ctx.setLineDash(isActive ? [] : [4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(coordX, coordY + 25);
+      ctx.lineTo(groupX, shardY - 30);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      for (var r = 0; r < totalCopies; r++) {
+        var isPrimary = r === 0;
+        var sy = shardY + r * 70;
+        var color = isPrimary ? '#00d4ff' : '#60a5fa';
+
+        // Shard box
+        var boxW = Math.min(groupWidth - 20, 100);
+        var boxH = 50;
+        var bx = groupX - boxW / 2;
+
+        ctx.fillStyle = isActive ? color + '25' : color + '10';
+        ctx.strokeStyle = isActive ? color : color + '60';
+        ctx.lineWidth = isActive ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(bx, sy, boxW, boxH, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText((isPrimary ? 'P' : 'R' + r) + s, groupX, sy + 22);
+
+        ctx.fillStyle = '#888';
+        ctx.font = '9px Inter, sans-serif';
+        ctx.fillText(isPrimary ? 'PRIMARY' : 'REPLICA', groupX, sy + 38);
+
+        if (isActive && phase === 'gather' && isPrimary) {
+          ctx.fillStyle = '#22c55e';
+          ctx.font = 'bold 9px Inter, sans-serif';
+          ctx.fillText('✓ RESULTS', groupX, sy + boxH + 14);
+        }
+      }
+    }
+
+    // Phase label
+    if (phase) {
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(phase === 'scatter' ? 'QUERY PHASE (scatter)' : 'FETCH PHASE (gather)', w / 2, h - 15);
+    }
+  }
+
+  document.getElementById('runQueryBtn').addEventListener('click', async function() {
+    var numShards = parseInt(shardSlider.value);
+    var timeline = document.getElementById('shardTimeline');
+    var badge = document.getElementById('shardBadge');
+    var statusText = document.getElementById('shardStatusText');
+    timeline.innerHTML = '';
+
+    // Step 1: Client sends query
+    badge.className = 'status-badge searching';
+    badge.textContent = 'QUERY';
+    statusText.textContent = 'Client sends search request to coordinating node';
+    addTimelineEntry(timeline, '📨 Client sends query to coordinating node', 'info-step');
+    drawShardTopology([], null);
+    await new Promise(function(r) { setTimeout(r, 800); });
+
+    // Step 2: Scatter - query all shards
+    badge.className = 'status-badge scatter';
+    badge.textContent = 'SCATTER';
+    statusText.textContent = 'Coordinator fans out query to one copy of each shard';
+    var allShards = [];
+    for (var i = 0; i < numShards; i++) allShards.push(i);
+    drawShardTopology(allShards, 'scatter');
+    addTimelineEntry(timeline, '🔍 Query Phase: coordinator sends query to ' + numShards + ' shards in parallel', 'scatter-step');
+    await new Promise(function(r) { setTimeout(r, 1000); });
+
+    // Step 3: Each shard returns top results
+    for (var s = 0; s < numShards; s++) {
+      var hits = 2 + Math.floor(Math.random() * 8);
+      addTimelineEntry(timeline, '  ↳ Shard P' + s + ' returns top-' + hits + ' (doc_id, score) pairs', 'scatter-step');
+      await new Promise(function(r) { setTimeout(r, 300); });
+    }
+
+    // Step 4: Gather - merge results
+    badge.className = 'status-badge gather';
+    badge.textContent = 'GATHER';
+    statusText.textContent = 'Coordinator merges results from all shards';
+    drawShardTopology(allShards, 'gather');
+    addTimelineEntry(timeline, '📋 Fetch Phase: coordinator merges scores, picks global top-10', 'gather-step');
+    await new Promise(function(r) { setTimeout(r, 800); });
+
+    addTimelineEntry(timeline, '📦 Fetching full documents from relevant shards...', 'gather-step');
+    await new Promise(function(r) { setTimeout(r, 600); });
+
+    badge.className = 'status-badge done';
+    badge.textContent = 'COMPLETE';
+    statusText.textContent = 'Search completed — results merged from ' + numShards + ' shards';
+    addTimelineEntry(timeline, '✅ Results returned to client: 10 documents, sorted by relevance', 'result-step');
+  });
+
+  document.getElementById('resetShardsBtn').addEventListener('click', function() {
+    document.getElementById('shardTimeline').innerHTML = '';
+    document.getElementById('shardBadge').className = 'status-badge idle';
+    document.getElementById('shardBadge').textContent = 'Ready';
+    document.getElementById('shardStatusText').textContent = 'Configure shards and run a distributed query';
+    drawShardTopology();
+  });
+
+  // ========== INITIAL RENDER ==========
+  renderPipeline();
+  renderIndex();
+  updateBM25();
+  drawSegments();
+  drawShardTopology();
+</script>
+</BaseLayout>

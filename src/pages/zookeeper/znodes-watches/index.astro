@@ -1,0 +1,1668 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="ZooKeeper ZNodes & Watches" 
+  description="Interactive visualization of ZooKeeper ZNode tree, node types, watches, sessions, and distributed recipes"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "ZooKeeper", href: "/zookeeper/" },
+    { label: "ZNodes & Watches", href: "/zookeeper/znodes-watches/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌳 ZooKeeper ZNodes &amp; Watches</h1>
+      <p class="subtitle">Tree Hierarchy, Node Types, One-Time Watches &amp; Distributed Recipes — Visualized</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          <a href="https://zookeeper.apache.org" target="_blank">Apache ZooKeeper</a> provides a
+          hierarchical <strong>namespace</strong> of data nodes called <em>ZNodes</em>, organized as
+          a tree (like a filesystem). Each ZNode can store data (up to 1MB) and have children.
+          ZooKeeper supports <em>ephemeral nodes</em> (tied to client sessions),
+          <em>sequential nodes</em> (auto-incrementing suffix), and <strong>one-time watches</strong>
+          that fire notifications on changes. These primitives enable distributed
+          <strong>leader election</strong>, <strong>locks</strong>, <strong>barriers</strong>,
+          and <strong>configuration management</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- ZNode Tree Explorer -->
+    <section class="tree-section">
+      <h2>🌲 ZNode Tree Explorer</h2>
+      <p class="section-desc">The ZooKeeper namespace is a tree of ZNodes. Each node can hold data and have children. Explore, create, and delete nodes interactively.</p>
+
+      <div class="tree-controls">
+        <div class="tree-input-group">
+          <input type="text" id="nodePathInput" class="tree-input" placeholder="Path (e.g., /app/config)" value="/app/config">
+          <input type="text" id="nodeDataInput" class="tree-input" placeholder="Data (optional)" value="db_host=10.0.0.1">
+          <select id="nodeTypeSelect" class="tree-select">
+            <option value="persistent">Persistent</option>
+            <option value="ephemeral">Ephemeral</option>
+            <option value="persistent_sequential">Persistent Sequential</option>
+            <option value="ephemeral_sequential">Ephemeral Sequential</option>
+          </select>
+        </div>
+        <div class="tree-btn-group">
+          <button id="createNodeBtn" class="action-btn primary-btn">➕ Create ZNode</button>
+          <button id="setDataBtn" class="action-btn step-btn">📝 Set Data</button>
+          <button id="deleteNodeBtn" class="action-btn reset-btn">🗑️ Delete</button>
+          <button id="loadSampleBtn" class="action-btn sample-btn">📂 Load Sample Tree</button>
+        </div>
+      </div>
+
+      <div class="tree-layout">
+        <div class="tree-view" id="treeView">
+          <div class="tree-node root" data-path="/">
+            <span class="tree-toggle">▼</span>
+            <span class="tree-icon">📁</span>
+            <span class="tree-label">/</span>
+          </div>
+          <div class="tree-children" id="treeRoot"></div>
+        </div>
+        <div class="node-detail" id="nodeDetail">
+          <div class="detail-header">📋 Node Details</div>
+          <div class="detail-content" id="detailContent">
+            <div class="detail-empty">Select a node to view details</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ZNode Types -->
+    <section class="types-section">
+      <h2>🏷️ ZNode Types</h2>
+      <div class="explain-card highlight-card">
+        <h3>💡 Four Node Types</h3>
+        <p>
+          <strong>Persistent</strong> nodes survive client disconnection — they exist until explicitly deleted.
+          <strong>Ephemeral</strong> nodes are tied to the client session — when the session ends, ZooKeeper
+          automatically deletes them. <strong>Sequential</strong> nodes get a monotonically increasing
+          10-digit suffix (e.g., <code>/lock/node-0000000001</code>). Combining ephemeral + sequential
+          gives you the building block for <em>leader election</em> and <em>distributed locks</em>.
+          Ephemeral nodes <strong>cannot have children</strong>.
+        </p>
+      </div>
+
+      <div class="types-grid">
+        <div class="type-card" data-type="persistent">
+          <div class="type-icon">📦</div>
+          <div class="type-name">Persistent</div>
+          <div class="type-desc">Survives client disconnect. Must be explicitly deleted.</div>
+          <button class="action-btn type-create-btn" data-create-type="persistent">Create Example</button>
+        </div>
+        <div class="type-card" data-type="ephemeral">
+          <div class="type-icon">⏳</div>
+          <div class="type-name">Ephemeral</div>
+          <div class="type-desc">Deleted when client session ends. Cannot have children.</div>
+          <button class="action-btn type-create-btn" data-create-type="ephemeral">Create Example</button>
+        </div>
+        <div class="type-card" data-type="persistent_sequential">
+          <div class="type-icon">📦🔢</div>
+          <div class="type-name">Persistent Sequential</div>
+          <div class="type-desc">Persistent with auto-incrementing suffix appended.</div>
+          <button class="action-btn type-create-btn" data-create-type="persistent_sequential">Create Example</button>
+        </div>
+        <div class="type-card" data-type="ephemeral_sequential">
+          <div class="type-icon">⏳🔢</div>
+          <div class="type-name">Ephemeral Sequential</div>
+          <div class="type-desc">Ephemeral + sequential. Used for leader election &amp; locks.</div>
+          <button class="action-btn type-create-btn" data-create-type="ephemeral_sequential">Create Example</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Watches -->
+    <section class="watch-section">
+      <h2>👁️ Watches: One-Time Triggers</h2>
+      <div class="explain-card">
+        <h3>📡 How Watches Work</h3>
+        <p>
+          A <strong>watch</strong> is a one-time trigger. When a client reads data with a watch
+          (<code>getData(path, watch=true)</code> or <code>getChildren(path, watch=true)</code>),
+          ZooKeeper registers the watch. When the watched node changes — data modified, node
+          deleted, or children changed — the server sends a <em>WatchEvent</em> notification to the
+          client. The watch fires <strong>exactly once</strong> and must be re-registered. Watch
+          types: <strong>NodeDataChanged</strong>, <strong>NodeDeleted</strong>,
+          <strong>NodeChildrenChanged</strong>, <strong>NodeCreated</strong>.
+        </p>
+      </div>
+
+      <div class="watch-demo">
+        <div class="watch-controls">
+          <div class="watch-input-group">
+            <input type="text" id="watchPathInput" class="tree-input" placeholder="Path to watch" value="/app/config">
+            <select id="watchTypeSelect" class="tree-select">
+              <option value="data">getData (data watch)</option>
+              <option value="children">getChildren (child watch)</option>
+              <option value="exists">exists (existence watch)</option>
+            </select>
+            <button id="setWatchBtn" class="action-btn primary-btn">👁️ Set Watch</button>
+          </div>
+        </div>
+
+        <div class="watch-panels">
+          <div class="watch-panel active-watches-panel">
+            <div class="watch-panel-header">
+              <span>🔔 Active Watches</span>
+              <span class="watch-count" id="watchCount">0</span>
+            </div>
+            <div class="watch-list" id="activeWatches">
+              <div class="watch-empty">No watches set. Set a watch above, then modify the node to trigger it.</div>
+            </div>
+          </div>
+          <div class="watch-panel notifications-panel">
+            <div class="watch-panel-header">
+              <span>📨 Watch Notifications</span>
+              <button id="clearNotificationsBtn" class="action-btn clear-btn">Clear</button>
+            </div>
+            <div class="watch-events" id="watchNotifications">
+              <div class="watch-empty">Notifications appear here when watches fire...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="watch-trigger-controls">
+          <span class="trigger-label">Trigger a watch:</span>
+          <input type="text" id="triggerPathInput" class="tree-input" placeholder="Path" value="/app/config">
+          <input type="text" id="triggerDataInput" class="tree-input" placeholder="New data" value="db_host=10.0.0.2">
+          <button id="triggerSetDataBtn" class="action-btn step-btn">📝 Set Data</button>
+          <button id="triggerDeleteBtn" class="action-btn reset-btn">🗑️ Delete Node</button>
+          <button id="triggerAddChildBtn" class="action-btn sample-btn">➕ Add Child</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sessions & Ephemeral Nodes -->
+    <section class="session-section">
+      <h2>🔗 Sessions &amp; Ephemeral Nodes</h2>
+      <div class="explain-card highlight-card">
+        <h3>💡 Session Lifecycle</h3>
+        <p>
+          Each client maintains a <strong>session</strong> with the ZooKeeper ensemble via TCP.
+          The session has a <em>timeout</em> (e.g., 30s). The client sends heartbeats to keep
+          the session alive. If the server doesn't hear from the client within the timeout, the
+          session expires and all <strong>ephemeral nodes</strong> created by that session are
+          automatically deleted — triggering watches on those nodes. This is the foundation for
+          <em>failure detection</em> in leader election and group membership.
+        </p>
+      </div>
+
+      <div class="session-demo">
+        <div class="session-controls">
+          <button id="connectClientBtn" class="action-btn primary-btn">🔌 Connect Client</button>
+          <button id="disconnectClientBtn" class="action-btn chaos-btn" disabled>💀 Kill Client</button>
+          <button id="resetSessionBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <div class="clients-grid" id="clientsGrid">
+          <!-- Rendered by JS -->
+        </div>
+
+        <div class="session-status" id="sessionStatus">
+          <span class="status-badge idle">Ready</span>
+          <span class="status-text" id="sessionStatusText">Connect clients to see ephemeral node lifecycle</span>
+        </div>
+
+        <div class="ephemeral-nodes-panel">
+          <div class="panel-header">⏳ Ephemeral Nodes in Tree</div>
+          <div class="ephemeral-list" id="ephemeralList">
+            <div class="watch-empty">No ephemeral nodes yet</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Leader Election Recipe -->
+    <section class="election-section">
+      <h2>👑 Leader Election Recipe</h2>
+      <div class="explain-card highlight-card">
+        <h3>🔑 Ephemeral Sequential Nodes</h3>
+        <p>
+          Each candidate creates an <strong>ephemeral sequential</strong> node under
+          <code>/election/</code> (e.g., <code>/election/candidate-0000000001</code>). The node
+          with the <em>smallest sequence number</em> is the leader. Other candidates
+          <strong>watch the node just before theirs</strong> in sequence order — avoiding the
+          thundering herd problem. When the leader dies, its ephemeral node is deleted, and only
+          the <em>next</em> candidate gets notified and becomes leader.
+        </p>
+      </div>
+
+      <div class="election-controls">
+        <button id="startElectionBtn" class="action-btn primary-btn">🏁 Start Election (3 candidates)</button>
+        <button id="killLeaderBtn" class="action-btn chaos-btn" disabled>💀 Kill Leader</button>
+        <button id="addCandidateBtn" class="action-btn step-btn" disabled>➕ Add Candidate</button>
+        <button id="resetElectionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="election-visual">
+        <div class="election-path-header">
+          <span>📁 /election/</span>
+        </div>
+        <div class="election-candidates" id="electionCandidates">
+          <div class="lock-empty">Click "Start Election" to see the recipe in action</div>
+        </div>
+      </div>
+
+      <div class="election-status" id="electionStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="electionStatusText">Start an election to see ephemeral sequential nodes</span>
+      </div>
+    </section>
+
+    <!-- Distributed Lock Recipe -->
+    <section class="lock-section">
+      <h2>🔒 Distributed Lock Recipe</h2>
+      <div class="explain-card">
+        <h3>🔑 Fair Lock with Watch Predecessor</h3>
+        <p>
+          The lock recipe is similar to leader election. Each process creates an
+          <strong>ephemeral sequential</strong> node under <code>/locks/resource/</code>. The
+          process with the <em>smallest sequence number</em> holds the lock. Others watch the
+          node with the <strong>next-smaller sequence number</strong> (their predecessor). When
+          the predecessor is deleted (lock released or process died), the next process gets the
+          lock. This creates a <em>fair FIFO queue</em> with no thundering herd.
+        </p>
+      </div>
+
+      <div class="lock-controls">
+        <button id="lockAcquireBtn" class="action-btn primary-btn">🔒 Acquire Lock (3 processes)</button>
+        <button id="lockReleaseBtn" class="action-btn step-btn" disabled>🔓 Release Lock</button>
+        <button id="lockResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="lock-visual">
+        <div class="lock-key-header">
+          <span>📁 /locks/resource/</span>
+        </div>
+        <div class="lock-queue" id="lockQueue">
+          <div class="lock-empty">Click "Acquire Lock" to see the fair queue</div>
+        </div>
+      </div>
+
+      <div class="lock-status" id="lockStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="lockStatusText">Click "Acquire Lock" to see the queue mechanism</span>
+      </div>
+    </section>
+
+    <!-- Event Log -->
+    <section class="event-log-section">
+      <h2>📋 Event Log</h2>
+      <div class="event-log" id="eventLog">
+        <div class="event-log-empty">Events will appear here...</div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html" target="_blank">ZooKeeper Programmer's Guide</a> and <a href="https://zookeeper.apache.org/doc/current/recipes.html" target="_blank">ZooKeeper Recipes</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20ZooKeeper%20ZNodes%20%26%20Watches%20visualization&url=https://systeminternals.dev/zookeeper/znodes-watches/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/zookeeper/znodes-watches/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/zookeeper/znodes-watches/&t=Interactive%20ZooKeeper%20ZNodes%20%26%20Watches%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #4ade80, #22d3ee, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), rgba(167, 139, 250, 0.05));
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #4ade80; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(74, 222, 128, 0.4); }
+  .step-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .step-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #ccc; }
+  .reset-btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+  .chaos-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4); }
+  .sample-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .sample-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167, 139, 250, 0.4); }
+  .clear-btn { background: transparent; color: #888; font-size: 0.75rem; padding: 4px 10px; }
+  .type-create-btn { background: linear-gradient(135deg, #22d3ee, #0891b2); color: white; font-size: 0.8rem; padding: 6px 14px; margin-top: 10px; }
+
+  /* Status */
+  .election-status, .session-status, .lock-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .status-badge.idle { background: rgba(255,255,255,0.1); color: #999; }
+  .status-badge.active { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .status-badge.success { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .status-badge.error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .status-text { color: #aaa; font-size: 0.9rem; }
+
+  /* Tree Explorer */
+  .tree-section { margin-bottom: 50px; }
+  .tree-controls { margin-bottom: 20px; }
+  .tree-input-group { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tree-btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tree-input {
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #fff;
+    font-family: monospace;
+    font-size: 0.9rem;
+    min-width: 180px;
+  }
+  .tree-input::placeholder { color: #555; }
+  .tree-select {
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  .tree-select option { background: #1a1a2e; }
+
+  .tree-layout {
+    display: grid;
+    grid-template-columns: 1fr 350px;
+    gap: 16px;
+  }
+
+  .tree-view {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 300px;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.85rem;
+  }
+
+  .tree-node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+  .tree-node:hover { background: rgba(255,255,255,0.05); }
+  .tree-node.selected { background: rgba(74, 222, 128, 0.15); border: 1px solid rgba(74, 222, 128, 0.3); }
+  .tree-toggle { color: #666; font-size: 0.7rem; width: 14px; text-align: center; }
+  .tree-icon { font-size: 0.9rem; }
+  .tree-label { color: #fff; }
+  .tree-type-badge {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .tree-type-badge.ephemeral { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .tree-type-badge.sequential { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .tree-type-badge.eph-seq { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+  .tree-children { padding-left: 24px; }
+  .tree-node.new-node { animation: nodeFlash 0.6s ease; }
+  @keyframes nodeFlash {
+    0% { background: rgba(74, 222, 128, 0.4); }
+    100% { background: transparent; }
+  }
+  .tree-node.deleting { animation: nodeDelete 0.4s ease forwards; }
+  @keyframes nodeDelete {
+    0% { opacity: 1; transform: translateX(0); }
+    100% { opacity: 0; transform: translateX(-20px); }
+  }
+
+  .node-detail {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .detail-header {
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-weight: 600;
+    color: #fff;
+  }
+  .detail-content { padding: 16px; }
+  .detail-empty { color: #555; font-style: italic; }
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.85rem;
+  }
+  .detail-key { color: #888; }
+  .detail-val { color: #fff; font-family: monospace; }
+  .detail-val.ephemeral-val { color: #ef4444; }
+  .detail-val.persistent-val { color: #4ade80; }
+  .detail-watch-badges { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .detail-watch-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(96, 165, 250, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+  }
+
+  /* Types Section */
+  .types-section { margin-bottom: 50px; }
+  .types-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  .type-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s;
+  }
+  .type-card:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(74, 222, 128, 0.3);
+  }
+  .type-icon { font-size: 2rem; margin-bottom: 8px; }
+  .type-name { font-weight: 600; color: #fff; margin-bottom: 6px; }
+  .type-desc { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  /* Watch Section */
+  .watch-section { margin-bottom: 50px; }
+  .watch-demo { margin-top: 20px; }
+  .watch-controls { margin-bottom: 16px; }
+  .watch-input-group { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  .watch-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .watch-panel {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .watch-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-size: 0.85rem;
+  }
+  .watch-count {
+    background: rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+  .watch-list, .watch-events {
+    padding: 10px;
+    min-height: 100px;
+    max-height: 250px;
+    overflow-y: auto;
+  }
+  .watch-empty { color: #555; font-style: italic; font-size: 0.85rem; }
+  .watch-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-family: monospace;
+    color: #60a5fa;
+    animation: fadeIn 0.3s ease;
+  }
+  .watch-entry .watch-remove {
+    margin-left: auto;
+    cursor: pointer;
+    color: #888;
+    font-size: 0.9rem;
+  }
+  .watch-notification {
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-family: monospace;
+    animation: notifFlash 0.5s ease;
+  }
+  .watch-notification.data-changed { background: rgba(74, 222, 128, 0.1); border-left: 3px solid #4ade80; color: #4ade80; }
+  .watch-notification.node-deleted { background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; color: #ef4444; }
+  .watch-notification.children-changed { background: rgba(167, 139, 250, 0.1); border-left: 3px solid #a78bfa; color: #a78bfa; }
+  .watch-notification.node-created { background: rgba(34, 211, 238, 0.1); border-left: 3px solid #22d3ee; color: #22d3ee; }
+  @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+  @keyframes notifFlash {
+    0% { opacity: 0; transform: translateX(-10px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+
+  .watch-trigger-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+  }
+  .trigger-label { color: #888; font-size: 0.9rem; font-weight: 600; }
+
+  /* Session Section */
+  .session-section { margin-bottom: 50px; }
+  .session-demo { margin-top: 20px; }
+  .session-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .clients-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .client-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s;
+    animation: fadeIn 0.3s ease;
+  }
+  .client-card.connected { border-color: rgba(74, 222, 128, 0.4); }
+  .client-card.dead { border-color: rgba(239, 68, 68, 0.3); opacity: 0.6; }
+  .client-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .client-name { font-weight: 600; color: #fff; }
+  .client-session-badge {
+    margin-left: auto;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+  .client-session-badge.connected { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .client-session-badge.dead { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .client-heartbeat {
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .client-heartbeat-bar {
+    height: 100%;
+    background: #4ade80;
+    border-radius: 2px;
+    transition: width 1s linear;
+  }
+  .client-info { font-size: 0.8rem; color: #888; }
+  .client-ephemeral { font-size: 0.8rem; color: #ef4444; font-family: monospace; margin-top: 4px; }
+  .client-kill-btn {
+    margin-top: 8px;
+    padding: 4px 12px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: transparent;
+    color: #ef4444;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .client-kill-btn:hover { background: rgba(239, 68, 68, 0.1); }
+
+  .ephemeral-nodes-panel {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-weight: 600;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  .ephemeral-list { padding: 12px 16px; min-height: 40px; }
+  .ephemeral-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    animation: fadeIn 0.3s ease;
+  }
+  .ephemeral-entry.alive { background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .ephemeral-entry.dying { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; animation: nodeDelete 0.5s ease forwards; }
+
+  /* Election Section */
+  .election-section { margin-bottom: 50px; }
+  .election-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .election-visual {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .election-path-header {
+    font-family: monospace;
+    font-weight: 600;
+    color: #4ade80;
+    margin-bottom: 16px;
+    font-size: 1rem;
+  }
+  .election-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .election-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    transition: all 0.3s;
+    animation: fadeIn 0.3s ease;
+  }
+  .election-entry.leader-entry {
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+  .election-entry.follower-entry {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .election-entry.dead-entry {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    opacity: 0.5;
+  }
+  .election-icon { font-size: 1.2rem; }
+  .election-name { color: #fff; font-weight: 600; }
+  .election-path { color: #888; font-size: 0.8rem; }
+  .election-role { margin-left: auto; padding: 3px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .election-role.leader { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .election-role.follower { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+  .election-watch-info { font-size: 0.7rem; color: #888; margin-top: 2px; }
+
+  /* Lock Section */
+  .lock-section { margin-bottom: 50px; }
+  .lock-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .lock-visual {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .lock-key-header {
+    font-family: monospace;
+    font-weight: 600;
+    color: #a78bfa;
+    margin-bottom: 16px;
+    font-size: 1rem;
+  }
+  .lock-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .lock-empty { color: #555; font-style: italic; }
+  .lock-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    animation: fadeIn 0.3s ease;
+    transition: all 0.3s;
+  }
+  .lock-entry.holder {
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+  .lock-entry.waiting {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .lock-icon { font-size: 1.2rem; }
+  .lock-name { color: #fff; font-weight: 600; }
+  .lock-seq { color: #888; }
+  .lock-state { margin-left: auto; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .lock-state.holding { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .lock-state.queued { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+  .lock-watch-info { font-size: 0.7rem; color: #888; margin-top: 2px; }
+
+  /* Explain Cards */
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px 28px;
+    margin-bottom: 24px;
+  }
+  .explain-card.highlight-card {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(167, 139, 250, 0.04));
+    border-color: rgba(74, 222, 128, 0.25);
+  }
+  .explain-card h3 { font-size: 1.1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #bbb; line-height: 1.8; font-size: 0.95rem; }
+  .explain-card code {
+    background: rgba(255,255,255,0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #4ade80;
+  }
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #4ade80; font-style: normal; font-weight: 500; }
+
+  /* Event Log */
+  .event-log-section { margin-bottom: 40px; }
+  .event-log {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+  }
+  .event-log-empty { color: #555; font-style: italic; }
+  .log-entry { padding: 4px 0; color: #aaa; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .log-entry .log-time { color: #666; margin-right: 8px; }
+  .log-entry .log-type { font-weight: 600; margin-right: 6px; }
+  .log-type.tree { color: #4ade80; }
+  .log-type.watch { color: #60a5fa; }
+  .log-type.session { color: #f59e0b; }
+  .log-type.election { color: #22d3ee; }
+  .log-type.lock { color: #a78bfa; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    padding: 30px 0;
+    color: #666;
+    font-size: 0.85rem;
+  }
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 20px 0 40px;
+    color: #666;
+    font-size: 0.9rem;
+    flex-wrap: wrap;
+  }
+  .share-btn {
+    padding: 8px 16px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ccc;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  .share-btn:hover { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); }
+
+  @media (max-width: 768px) {
+    .tree-layout { grid-template-columns: 1fr; }
+    .watch-panels { grid-template-columns: 1fr; }
+    .types-grid { grid-template-columns: 1fr; }
+    .clients-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+(function() {
+  // ===================== UTILITIES =====================
+  var seqCounter = 0;
+  var zkTree = { '/': { data: '', type: 'persistent', children: {}, version: 0, cversion: 0, ephemeralOwner: null, watches: [] } };
+  var activeWatches = [];
+  var clientIdCounter = 0;
+  var clients = [];
+
+  function logEvent(type, msg) {
+    var log = document.getElementById('eventLog');
+    var empty = log.querySelector('.event-log-empty');
+    if (empty) empty.remove();
+    var entry = document.createElement('div');
+    entry.className = 'log-entry';
+    var now = new Date();
+    var time = now.toLocaleTimeString();
+    entry.innerHTML = '<span class="log-time">' + time + '</span><span class="log-type ' + type + '">[' + type.toUpperCase() + ']</span> ' + msg;
+    log.prepend(entry);
+    if (log.children.length > 100) log.removeChild(log.lastChild);
+  }
+
+  function setStatusBadge(containerId, type, text) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    var badge = container.querySelector('.status-badge');
+    var statusText = container.querySelector('.status-text');
+    badge.className = 'status-badge ' + type;
+    badge.textContent = type === 'idle' ? 'Ready' : type === 'active' ? 'Active' : type === 'success' ? 'Success' : 'Error';
+    statusText.textContent = text;
+  }
+
+  // ===================== ZNODE TREE =====================
+  function getNode(path) {
+    if (path === '/') return zkTree['/'];
+    var parts = path.split('/').filter(function(p) { return p.length > 0; });
+    var current = zkTree['/'];
+    for (var i = 0; i < parts.length; i++) {
+      if (!current.children[parts[i]]) return null;
+      current = current.children[parts[i]];
+    }
+    return current;
+  }
+
+  function getParentPath(path) {
+    if (path === '/') return null;
+    var parts = path.split('/').filter(function(p) { return p.length > 0; });
+    parts.pop();
+    return parts.length === 0 ? '/' : '/' + parts.join('/');
+  }
+
+  function getNodeName(path) {
+    if (path === '/') return '/';
+    var parts = path.split('/').filter(function(p) { return p.length > 0; });
+    return parts[parts.length - 1];
+  }
+
+  function createNode(path, data, type, sessionId) {
+    var parentPath = getParentPath(path);
+    if (!parentPath && path !== '/') return false;
+    var parent = getNode(parentPath);
+    if (!parent) {
+      // Auto-create parent paths
+      var parts = path.split('/').filter(function(p) { return p.length > 0; });
+      var currentPath = '';
+      for (var i = 0; i < parts.length - 1; i++) {
+        currentPath += '/' + parts[i];
+        if (!getNode(currentPath)) {
+          createNode(currentPath, '', 'persistent', null);
+        }
+      }
+      parent = getNode(parentPath);
+    }
+    if (!parent) return false;
+    if (parent.ephemeralOwner) {
+      logEvent('tree', 'ERROR: Cannot create child under ephemeral node ' + parentPath);
+      return false;
+    }
+
+    var nodeName = getNodeName(path);
+    var actualPath = path;
+
+    if (type === 'persistent_sequential' || type === 'ephemeral_sequential') {
+      seqCounter++;
+      var suffix = String(seqCounter);
+      while (suffix.length < 10) suffix = '0' + suffix;
+      nodeName = nodeName + suffix;
+      actualPath = parentPath + (parentPath === '/' ? '' : '/') + nodeName;
+    }
+
+    parent.children[nodeName] = {
+      data: data || '',
+      type: type,
+      children: {},
+      version: 0,
+      cversion: 0,
+      ephemeralOwner: (type === 'ephemeral' || type === 'ephemeral_sequential') ? sessionId : null,
+      watches: []
+    };
+    parent.cversion++;
+
+    // Trigger children watches on parent
+    fireWatches(parentPath, 'NodeChildrenChanged');
+    // Trigger exists watches on this path
+    fireWatches(actualPath, 'NodeCreated');
+
+    logEvent('tree', 'Created ' + actualPath + ' [' + type + ']' + (data ? ' data="' + data + '"' : ''));
+    renderTree();
+    return actualPath;
+  }
+
+  function setNodeData(path, data) {
+    var node = getNode(path);
+    if (!node) {
+      logEvent('tree', 'ERROR: Node ' + path + ' does not exist');
+      return false;
+    }
+    node.data = data;
+    node.version++;
+    fireWatches(path, 'NodeDataChanged');
+    logEvent('tree', 'Set data on ' + path + ' = "' + data + '" (version=' + node.version + ')');
+    renderTree();
+    return true;
+  }
+
+  function deleteNode(path) {
+    if (path === '/') return false;
+    var node = getNode(path);
+    if (!node) return false;
+    var childKeys = Object.keys(node.children);
+    if (childKeys.length > 0) {
+      logEvent('tree', 'ERROR: Cannot delete ' + path + ' — has ' + childKeys.length + ' children');
+      return false;
+    }
+    var parentPath = getParentPath(path);
+    var parent = getNode(parentPath);
+    var nodeName = getNodeName(path);
+    // Fire watches before deletion
+    fireWatches(path, 'NodeDeleted');
+    delete parent.children[nodeName];
+    parent.cversion++;
+    fireWatches(parentPath, 'NodeChildrenChanged');
+    logEvent('tree', 'Deleted ' + path);
+    renderTree();
+    return true;
+  }
+
+  function deleteNodeRecursive(path) {
+    var node = getNode(path);
+    if (!node) return;
+    var childKeys = Object.keys(node.children);
+    for (var i = 0; i < childKeys.length; i++) {
+      var childPath = path === '/' ? '/' + childKeys[i] : path + '/' + childKeys[i];
+      deleteNodeRecursive(childPath);
+    }
+    if (path !== '/') deleteNode(path);
+  }
+
+  var selectedPath = null;
+
+  function renderTree() {
+    var root = document.getElementById('treeRoot');
+    root.innerHTML = '';
+    var rootNode = zkTree['/'];
+    var childKeys = Object.keys(rootNode.children).sort();
+    childKeys.forEach(function(key) {
+      renderTreeNode(root, '/' + key, key, rootNode.children[key], 0);
+    });
+    updateEphemeralList();
+  }
+
+  function renderTreeNode(container, path, name, node, depth) {
+    var childKeys = Object.keys(node.children).sort();
+    var hasChildren = childKeys.length > 0;
+
+    var div = document.createElement('div');
+    div.className = 'tree-node' + (selectedPath === path ? ' selected' : '') + ' new-node';
+    div.setAttribute('data-path', path);
+
+    var toggleSpan = '<span class="tree-toggle">' + (hasChildren ? '▼' : '·') + '</span>';
+    var isEph = node.type === 'ephemeral' || node.type === 'ephemeral_sequential';
+    var isSeq = node.type === 'persistent_sequential' || node.type === 'ephemeral_sequential';
+    var iconSpan = '<span class="tree-icon">' + (isEph ? '⏳' : (hasChildren ? '📁' : '📄')) + '</span>';
+    var labelSpan = '<span class="tree-label">' + name + '</span>';
+    var badge = '';
+    if (isEph && isSeq) {
+      badge = '<span class="tree-type-badge eph-seq">eph+seq</span>';
+    } else if (isEph) {
+      badge = '<span class="tree-type-badge ephemeral">ephemeral</span>';
+    } else if (isSeq) {
+      badge = '<span class="tree-type-badge sequential">sequential</span>';
+    }
+    var watchIndicator = '';
+    var watchCount = getWatchesForPath(path).length;
+    if (watchCount > 0) {
+      watchIndicator = '<span class="tree-type-badge" style="background:rgba(96,165,250,0.2);color:#60a5fa;">👁️' + watchCount + '</span>';
+    }
+
+    div.innerHTML = toggleSpan + iconSpan + labelSpan + badge + watchIndicator;
+
+    div.addEventListener('click', function(e) {
+      e.stopPropagation();
+      selectedPath = path;
+      showNodeDetail(path, node);
+      document.querySelectorAll('.tree-node').forEach(function(n) { n.classList.remove('selected'); });
+      div.classList.add('selected');
+      document.getElementById('nodePathInput').value = path;
+      document.getElementById('nodeDataInput').value = node.data || '';
+      document.getElementById('watchPathInput').value = path;
+      document.getElementById('triggerPathInput').value = path;
+    });
+
+    container.appendChild(div);
+
+    if (hasChildren) {
+      var childContainer = document.createElement('div');
+      childContainer.className = 'tree-children';
+      childKeys.forEach(function(ck) {
+        var childPath = path + '/' + ck;
+        renderTreeNode(childContainer, childPath, ck, node.children[ck], depth + 1);
+      });
+      container.appendChild(childContainer);
+    }
+  }
+
+  function showNodeDetail(path, node) {
+    var content = document.getElementById('detailContent');
+    var watches = getWatchesForPath(path);
+    var isEph = node.type === 'ephemeral' || node.type === 'ephemeral_sequential';
+    var html = '';
+    html += '<div class="detail-row"><span class="detail-key">Path</span><span class="detail-val">' + path + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Data</span><span class="detail-val">' + (node.data || '(empty)') + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Type</span><span class="detail-val ' + (isEph ? 'ephemeral-val' : 'persistent-val') + '">' + node.type + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Version</span><span class="detail-val">' + node.version + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Children Version</span><span class="detail-val">' + node.cversion + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Children</span><span class="detail-val">' + Object.keys(node.children).length + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-key">Ephemeral Owner</span><span class="detail-val">' + (node.ephemeralOwner || 'none') + '</span></div>';
+    if (watches.length > 0) {
+      html += '<div class="detail-watch-badges">';
+      watches.forEach(function(w) {
+        html += '<span class="detail-watch-badge">👁️ ' + w.type + '</span>';
+      });
+      html += '</div>';
+    }
+    content.innerHTML = html;
+  }
+
+  // Tree controls
+  document.getElementById('createNodeBtn').addEventListener('click', function() {
+    var path = document.getElementById('nodePathInput').value.trim();
+    var data = document.getElementById('nodeDataInput').value.trim();
+    var type = document.getElementById('nodeTypeSelect').value;
+    if (!path || path[0] !== '/') { logEvent('tree', 'ERROR: Path must start with /'); return; }
+    createNode(path, data, type, 'user-session');
+  });
+
+  document.getElementById('setDataBtn').addEventListener('click', function() {
+    var path = document.getElementById('nodePathInput').value.trim();
+    var data = document.getElementById('nodeDataInput').value.trim();
+    if (!path) return;
+    setNodeData(path, data);
+  });
+
+  document.getElementById('deleteNodeBtn').addEventListener('click', function() {
+    var path = document.getElementById('nodePathInput').value.trim();
+    if (!path || path === '/') return;
+    deleteNode(path);
+  });
+
+  document.getElementById('loadSampleBtn').addEventListener('click', function() {
+    // Clear existing
+    zkTree['/'].children = {};
+    zkTree['/'].cversion = 0;
+    // Create sample tree
+    createNode('/app', '', 'persistent', null);
+    createNode('/app/config', 'db_host=10.0.0.1', 'persistent', null);
+    createNode('/app/config/database', 'port=3306', 'persistent', null);
+    createNode('/app/config/cache', 'ttl=300', 'persistent', null);
+    createNode('/app/leader', '', 'persistent', null);
+    createNode('/app/members', '', 'persistent', null);
+    createNode('/app/members/node-1', 'host=10.0.0.1', 'ephemeral', 'session-1');
+    createNode('/app/members/node-2', 'host=10.0.0.2', 'ephemeral', 'session-2');
+    createNode('/app/locks', '', 'persistent', null);
+    logEvent('tree', 'Loaded sample ZNode tree');
+    renderTree();
+  });
+
+  // Click root node
+  document.querySelector('.tree-node.root').addEventListener('click', function() {
+    selectedPath = '/';
+    showNodeDetail('/', zkTree['/']);
+    document.querySelectorAll('.tree-node').forEach(function(n) { n.classList.remove('selected'); });
+    this.classList.add('selected');
+    document.getElementById('nodePathInput').value = '/';
+  });
+
+  // ===================== ZNODE TYPES =====================
+  document.querySelectorAll('.type-create-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-create-type');
+      var basePaths = {
+        'persistent': '/demo/persistent-node',
+        'ephemeral': '/demo/ephemeral-node',
+        'persistent_sequential': '/demo/seq-',
+        'ephemeral_sequential': '/demo/eph-seq-'
+      };
+      var baseData = {
+        'persistent': 'I persist forever',
+        'ephemeral': 'I vanish when session ends',
+        'persistent_sequential': 'Ordered persistent',
+        'ephemeral_sequential': 'Ordered ephemeral'
+      };
+      createNode(basePaths[type], baseData[type], type, 'demo-session');
+    });
+  });
+
+  // ===================== WATCHES =====================
+  function getWatchesForPath(path) {
+    return activeWatches.filter(function(w) { return w.path === path; });
+  }
+
+  function fireWatches(path, eventType) {
+    var toFire = [];
+    var remaining = [];
+    activeWatches.forEach(function(w) {
+      if (w.path !== path) { remaining.push(w); return; }
+      var shouldFire = false;
+      if (w.type === 'data' && (eventType === 'NodeDataChanged' || eventType === 'NodeDeleted')) shouldFire = true;
+      if (w.type === 'children' && (eventType === 'NodeChildrenChanged' || eventType === 'NodeDeleted')) shouldFire = true;
+      if (w.type === 'exists' && (eventType === 'NodeCreated' || eventType === 'NodeDeleted' || eventType === 'NodeDataChanged')) shouldFire = true;
+      if (shouldFire) {
+        toFire.push(w);
+        // One-time: do not keep
+      } else {
+        remaining.push(w);
+      }
+    });
+    activeWatches = remaining;
+
+    toFire.forEach(function(w) {
+      addWatchNotification(eventType, w.path, w.type);
+      logEvent('watch', eventType + ' on ' + w.path + ' (watch type: ' + w.type + ') — watch removed (one-time)');
+    });
+
+    renderWatches();
+  }
+
+  function addWatchNotification(eventType, path, watchType) {
+    var panel = document.getElementById('watchNotifications');
+    var empty = panel.querySelector('.watch-empty');
+    if (empty) empty.remove();
+    var div = document.createElement('div');
+    var cssClass = 'data-changed';
+    if (eventType === 'NodeDeleted') cssClass = 'node-deleted';
+    if (eventType === 'NodeChildrenChanged') cssClass = 'children-changed';
+    if (eventType === 'NodeCreated') cssClass = 'node-created';
+    div.className = 'watch-notification ' + cssClass;
+    div.textContent = '⚡ ' + eventType + ' — ' + path + ' (was: ' + watchType + ' watch)';
+    panel.prepend(div);
+    if (panel.children.length > 30) panel.removeChild(panel.lastChild);
+  }
+
+  function renderWatches() {
+    var list = document.getElementById('activeWatches');
+    var count = document.getElementById('watchCount');
+    count.textContent = activeWatches.length;
+    if (activeWatches.length === 0) {
+      list.innerHTML = '<div class="watch-empty">No watches set. Set a watch above, then modify the node to trigger it.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    activeWatches.forEach(function(w, idx) {
+      var div = document.createElement('div');
+      div.className = 'watch-entry';
+      div.innerHTML = '👁️ ' + w.path + ' <span style="color:#888">(' + w.type + ')</span><span class="watch-remove" data-idx="' + idx + '">✕</span>';
+      div.querySelector('.watch-remove').addEventListener('click', function(e) {
+        e.stopPropagation();
+        activeWatches.splice(idx, 1);
+        renderWatches();
+      });
+      list.appendChild(div);
+    });
+    // Also update tree to show watch indicators
+    renderTree();
+  }
+
+  document.getElementById('setWatchBtn').addEventListener('click', function() {
+    var path = document.getElementById('watchPathInput').value.trim();
+    var type = document.getElementById('watchTypeSelect').value;
+    if (!path) return;
+    activeWatches.push({ path: path, type: type });
+    logEvent('watch', 'Set ' + type + ' watch on ' + path);
+    renderWatches();
+  });
+
+  document.getElementById('clearNotificationsBtn').addEventListener('click', function() {
+    document.getElementById('watchNotifications').innerHTML = '<div class="watch-empty">Notifications appear here when watches fire...</div>';
+  });
+
+  // Watch trigger controls
+  document.getElementById('triggerSetDataBtn').addEventListener('click', function() {
+    var path = document.getElementById('triggerPathInput').value.trim();
+    var data = document.getElementById('triggerDataInput').value.trim();
+    if (!path) return;
+    var node = getNode(path);
+    if (!node) {
+      createNode(path, data, 'persistent', null);
+    } else {
+      setNodeData(path, data);
+    }
+  });
+
+  document.getElementById('triggerDeleteBtn').addEventListener('click', function() {
+    var path = document.getElementById('triggerPathInput').value.trim();
+    if (!path || path === '/') return;
+    deleteNode(path);
+  });
+
+  document.getElementById('triggerAddChildBtn').addEventListener('click', function() {
+    var path = document.getElementById('triggerPathInput').value.trim();
+    if (!path) return;
+    var childName = 'child-' + Math.floor(Math.random() * 1000);
+    var childPath = path === '/' ? '/' + childName : path + '/' + childName;
+    createNode(childPath, 'auto-created', 'persistent', null);
+  });
+
+  // ===================== SESSIONS & EPHEMERAL NODES =====================
+  function updateEphemeralList() {
+    var list = document.getElementById('ephemeralList');
+    var ephemerals = [];
+    function findEphemerals(node, path) {
+      if (node.ephemeralOwner) {
+        ephemerals.push({ path: path, owner: node.ephemeralOwner });
+      }
+      Object.keys(node.children).forEach(function(k) {
+        findEphemerals(node.children[k], path === '/' ? '/' + k : path + '/' + k);
+      });
+    }
+    findEphemerals(zkTree['/'], '/');
+    if (ephemerals.length === 0) {
+      list.innerHTML = '<div class="watch-empty">No ephemeral nodes yet</div>';
+    } else {
+      list.innerHTML = '';
+      ephemerals.forEach(function(e) {
+        var div = document.createElement('div');
+        div.className = 'ephemeral-entry alive';
+        div.textContent = '⏳ ' + e.path + '  (owner: ' + e.owner + ')';
+        list.appendChild(div);
+      });
+    }
+  }
+
+  function renderClients() {
+    var grid = document.getElementById('clientsGrid');
+    grid.innerHTML = '';
+    clients.forEach(function(client) {
+      var div = document.createElement('div');
+      div.className = 'client-card ' + (client.alive ? 'connected' : 'dead');
+      var ephNodes = client.ephemeralPaths.map(function(p) { return '⏳ ' + p; }).join('<br>');
+      div.innerHTML =
+        '<div class="client-header">' +
+          '<span style="font-size:1.2rem">' + (client.alive ? '🖥️' : '💀') + '</span>' +
+          '<span class="client-name">' + client.name + '</span>' +
+          '<span class="client-session-badge ' + (client.alive ? 'connected' : 'dead') + '">' + (client.alive ? 'CONNECTED' : 'EXPIRED') + '</span>' +
+        '</div>' +
+        '<div class="client-heartbeat"><div class="client-heartbeat-bar" style="width:' + (client.alive ? client.heartbeat : 0) + '%"></div></div>' +
+        '<div class="client-info">Session: ' + client.sessionId + ' | Timeout: 30s</div>' +
+        (ephNodes ? '<div class="client-ephemeral">' + ephNodes + '</div>' : '') +
+        (client.alive ? '<button class="client-kill-btn" data-client-id="' + client.id + '">💀 Kill</button>' : '<div class="client-info" style="color:#ef4444;margin-top:4px">Session expired — ephemeral nodes deleted</div>');
+      var killBtn = div.querySelector('.client-kill-btn');
+      if (killBtn) {
+        killBtn.addEventListener('click', function() {
+          killClient(client.id);
+        });
+      }
+      grid.appendChild(div);
+    });
+    document.getElementById('disconnectClientBtn').disabled = clients.filter(function(c) { return c.alive; }).length === 0;
+  }
+
+  function killClient(clientId) {
+    var client = clients.find(function(c) { return c.id === clientId; });
+    if (!client || !client.alive) return;
+    client.alive = false;
+    if (client.heartbeatTimer) { clearInterval(client.heartbeatTimer); client.heartbeatTimer = null; }
+    // Delete ephemeral nodes
+    client.ephemeralPaths.forEach(function(path) {
+      deleteNode(path);
+      logEvent('session', 'Ephemeral node ' + path + ' deleted (session ' + client.sessionId + ' expired)');
+    });
+    logEvent('session', client.name + ' session expired — all ephemeral nodes removed');
+    setStatusBadge('sessionStatus', 'error', client.name + ' died — ' + client.ephemeralPaths.length + ' ephemeral node(s) deleted');
+    renderClients();
+    renderTree();
+  }
+
+  document.getElementById('connectClientBtn').addEventListener('click', function() {
+    clientIdCounter++;
+    var id = clientIdCounter;
+    var sessionId = '0x' + (1000 + id).toString(16);
+    var name = 'Client-' + id;
+    var ephPath = '/app/members/' + name.toLowerCase();
+
+    // Create ephemeral node
+    createNode(ephPath, 'host=10.0.0.' + id, 'ephemeral', sessionId);
+
+    var client = {
+      id: id,
+      name: name,
+      sessionId: sessionId,
+      alive: true,
+      heartbeat: 100,
+      ephemeralPaths: [ephPath],
+      heartbeatTimer: null
+    };
+
+    // Heartbeat countdown
+    client.heartbeatTimer = setInterval(function() {
+      if (!client.alive) { clearInterval(client.heartbeatTimer); return; }
+      client.heartbeat -= 3;
+      if (client.heartbeat <= 20) {
+        client.heartbeat = 100; // Reset (simulate heartbeat sent)
+      }
+      renderClients();
+    }, 1000);
+
+    clients.push(client);
+    logEvent('session', name + ' connected (session=' + sessionId + '), created ephemeral node ' + ephPath);
+    setStatusBadge('sessionStatus', 'success', name + ' connected with session ' + sessionId);
+    renderClients();
+  });
+
+  document.getElementById('disconnectClientBtn').addEventListener('click', function() {
+    var aliveClients = clients.filter(function(c) { return c.alive; });
+    if (aliveClients.length === 0) return;
+    killClient(aliveClients[aliveClients.length - 1].id);
+  });
+
+  document.getElementById('resetSessionBtn').addEventListener('click', function() {
+    clients.forEach(function(c) {
+      if (c.heartbeatTimer) clearInterval(c.heartbeatTimer);
+    });
+    clients = [];
+    clientIdCounter = 0;
+    renderClients();
+    setStatusBadge('sessionStatus', 'idle', 'Connect clients to see ephemeral node lifecycle');
+  });
+
+  // ===================== LEADER ELECTION RECIPE =====================
+  (function() {
+    var electionCandidates = [];
+    var electionSeq = 0;
+    var CANDIDATE_NAMES = ['Server-A', 'Server-B', 'Server-C', 'Server-D', 'Server-E'];
+    var CANDIDATE_COLORS = ['#4ade80', '#60a5fa', '#a78bfa', '#f59e0b', '#22d3ee'];
+
+    function getLeaderIdx() {
+      var alive = electionCandidates.filter(function(c) { return c.alive; });
+      if (alive.length === 0) return -1;
+      alive.sort(function(a, b) { return a.seq - b.seq; });
+      return electionCandidates.indexOf(alive[0]);
+    }
+
+    function renderElection() {
+      var container = document.getElementById('electionCandidates');
+      var alive = electionCandidates.filter(function(c) { return c.alive; });
+      alive.sort(function(a, b) { return a.seq - b.seq; });
+      var dead = electionCandidates.filter(function(c) { return !c.alive; });
+      var sorted = alive.concat(dead);
+
+      if (sorted.length === 0) {
+        container.innerHTML = '<div class="lock-empty">Click "Start Election" to see the recipe in action</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      sorted.forEach(function(c, idx) {
+        var isLeader = c.alive && alive.length > 0 && alive[0] === c;
+        var predecessorName = '';
+        if (c.alive && !isLeader) {
+          var myAliveIdx = alive.indexOf(c);
+          if (myAliveIdx > 0) {
+            predecessorName = alive[myAliveIdx - 1].name;
+          }
+        }
+        var div = document.createElement('div');
+        div.className = 'election-entry ' + (c.alive ? (isLeader ? 'leader-entry' : 'follower-entry') : 'dead-entry');
+        div.innerHTML =
+          '<span class="election-icon">' + (c.alive ? (isLeader ? '👑' : '🖥️') : '💀') + '</span>' +
+          '<div>' +
+            '<span class="election-name" style="color:' + c.color + '">' + c.name + '</span>' +
+            '<span class="election-path"> /election/candidate-' + String(c.seq).padStart(10, '0') + '</span>' +
+            (predecessorName ? '<div class="election-watch-info">👁️ watching ' + predecessorName + '\'s node</div>' : '') +
+            (!c.alive ? '<div class="election-watch-info">Node deleted (session expired)</div>' : '') +
+          '</div>' +
+          '<span class="election-role ' + (isLeader ? 'leader' : 'follower') + '">' + (c.alive ? (isLeader ? 'LEADER' : 'FOLLOWER') : 'DEAD') + '</span>';
+        container.appendChild(div);
+      });
+
+      document.getElementById('killLeaderBtn').disabled = alive.length === 0;
+      document.getElementById('addCandidateBtn').disabled = electionCandidates.length >= 5;
+    }
+
+    document.getElementById('startElectionBtn').addEventListener('click', function() {
+      electionCandidates = [];
+      electionSeq = 0;
+      for (var i = 0; i < 3; i++) {
+        electionSeq++;
+        electionCandidates.push({
+          name: CANDIDATE_NAMES[i],
+          color: CANDIDATE_COLORS[i],
+          seq: electionSeq,
+          alive: true
+        });
+        logEvent('election', CANDIDATE_NAMES[i] + ' created /election/candidate-' + String(electionSeq).padStart(10, '0') + ' (ephemeral sequential)');
+      }
+      var leaderIdx = getLeaderIdx();
+      logEvent('election', CANDIDATE_NAMES[leaderIdx] + ' is leader (smallest sequence number)');
+      logEvent('election', 'Others watch their predecessor — no thundering herd');
+      setStatusBadge('electionStatus', 'success', CANDIDATE_NAMES[leaderIdx] + ' is leader (seq=' + electionCandidates[leaderIdx].seq + ')');
+      document.getElementById('killLeaderBtn').disabled = false;
+      document.getElementById('addCandidateBtn').disabled = false;
+      renderElection();
+    });
+
+    document.getElementById('killLeaderBtn').addEventListener('click', function() {
+      var alive = electionCandidates.filter(function(c) { return c.alive; });
+      alive.sort(function(a, b) { return a.seq - b.seq; });
+      if (alive.length === 0) return;
+      var leader = alive[0];
+      leader.alive = false;
+      logEvent('election', leader.name + ' died! Ephemeral node deleted');
+      var newAlive = electionCandidates.filter(function(c) { return c.alive; });
+      newAlive.sort(function(a, b) { return a.seq - b.seq; });
+      if (newAlive.length > 0) {
+        logEvent('election', newAlive[0].name + ' detected predecessor deletion via watch — became new leader');
+        setStatusBadge('electionStatus', 'success', newAlive[0].name + ' is new leader (automatic failover)');
+      } else {
+        setStatusBadge('electionStatus', 'error', 'No candidates alive — no leader');
+      }
+      renderElection();
+    });
+
+    document.getElementById('addCandidateBtn').addEventListener('click', function() {
+      var total = electionCandidates.length;
+      if (total >= 5) return;
+      electionSeq++;
+      electionCandidates.push({
+        name: CANDIDATE_NAMES[total],
+        color: CANDIDATE_COLORS[total],
+        seq: electionSeq,
+        alive: true
+      });
+      logEvent('election', CANDIDATE_NAMES[total] + ' joined election (seq=' + electionSeq + ')');
+      renderElection();
+    });
+
+    document.getElementById('resetElectionBtn').addEventListener('click', function() {
+      electionCandidates = [];
+      electionSeq = 0;
+      setStatusBadge('electionStatus', 'idle', 'Start an election to see ephemeral sequential nodes');
+      document.getElementById('killLeaderBtn').disabled = true;
+      document.getElementById('addCandidateBtn').disabled = true;
+      renderElection();
+    });
+  })();
+
+  // ===================== DISTRIBUTED LOCK RECIPE =====================
+  (function() {
+    var lockQueue = [];
+    var lockSeq = 0;
+    var PROCESS_NAMES = ['Process-A', 'Process-B', 'Process-C'];
+    var PROCESS_COLORS = ['#4ade80', '#60a5fa', '#a78bfa'];
+
+    function renderLockQueue() {
+      var container = document.getElementById('lockQueue');
+      if (lockQueue.length === 0) {
+        container.innerHTML = '<div class="lock-empty">Click "Acquire Lock" to see the fair queue</div>';
+        return;
+      }
+      container.innerHTML = '';
+      lockQueue.forEach(function(entry, idx) {
+        var predecessorName = '';
+        if (idx > 0) {
+          predecessorName = PROCESS_NAMES[lockQueue[idx - 1].processId];
+        }
+        var div = document.createElement('div');
+        div.className = 'lock-entry ' + (idx === 0 ? 'holder' : 'waiting');
+        div.innerHTML =
+          '<span class="lock-icon">' + (idx === 0 ? '🔒' : '⏳') + '</span>' +
+          '<div>' +
+            '<span class="lock-name" style="color:' + PROCESS_COLORS[entry.processId] + '">' + PROCESS_NAMES[entry.processId] + '</span>' +
+            '<span class="lock-seq"> /locks/resource/lock-' + String(entry.seq).padStart(10, '0') + '</span>' +
+            (predecessorName ? '<div class="lock-watch-info">👁️ watching ' + predecessorName + '\'s node (predecessor)</div>' : '') +
+          '</div>' +
+          '<span class="lock-state ' + (idx === 0 ? 'holding' : 'queued') + '">' + (idx === 0 ? 'HOLDING' : 'QUEUED') + '</span>';
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById('lockAcquireBtn').addEventListener('click', function() {
+      lockQueue = [];
+      lockSeq = 0;
+      for (var i = 0; i < 3; i++) {
+        lockSeq++;
+        lockQueue.push({ processId: i, seq: lockSeq });
+        logEvent('lock', PROCESS_NAMES[i] + ' created /locks/resource/lock-' + String(lockSeq).padStart(10, '0') + ' (ephemeral sequential)');
+      }
+      lockQueue.sort(function(a, b) { return a.seq - b.seq; });
+      logEvent('lock', PROCESS_NAMES[lockQueue[0].processId] + ' holds the lock (smallest seq). Others watch predecessor.');
+      setStatusBadge('lockStatus', 'success', PROCESS_NAMES[lockQueue[0].processId] + ' holds lock. Fair FIFO queue — no thundering herd.');
+      document.getElementById('lockReleaseBtn').disabled = false;
+      renderLockQueue();
+    });
+
+    document.getElementById('lockReleaseBtn').addEventListener('click', function() {
+      if (lockQueue.length === 0) return;
+      var released = lockQueue.shift();
+      logEvent('lock', PROCESS_NAMES[released.processId] + ' released lock (deleted ephemeral node)');
+      if (lockQueue.length > 0) {
+        logEvent('lock', PROCESS_NAMES[lockQueue[0].processId] + ' watch fired — now holds the lock');
+        setStatusBadge('lockStatus', 'success', PROCESS_NAMES[lockQueue[0].processId] + ' now holds the lock');
+      } else {
+        setStatusBadge('lockStatus', 'idle', 'Lock released — no more waiters');
+        document.getElementById('lockReleaseBtn').disabled = true;
+      }
+      renderLockQueue();
+    });
+
+    document.getElementById('lockResetBtn').addEventListener('click', function() {
+      lockQueue = [];
+      lockSeq = 0;
+      renderLockQueue();
+      document.getElementById('lockReleaseBtn').disabled = true;
+      setStatusBadge('lockStatus', 'idle', 'Click "Acquire Lock" to see the queue mechanism');
+    });
+  })();
+
+  // Initial render
+  renderTree();
+})();
+</script>
+</BaseLayout>

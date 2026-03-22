@@ -1,0 +1,1708 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Query Planner: How PostgreSQL Decides"
+  description="Interactive visualization of PostgreSQL query planning — scan types, join strategies, EXPLAIN trees, cost model, and pg_stats"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "PostgreSQL", href: "/postgresql/" },
+    { label: "Query Planner", href: "/postgresql/query-planner/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🧠 Query Planner</h1>
+    <p class="subtitle">How PostgreSQL Decides to Scan, Join, and Sort</p>
+  </header>
+
+  <!-- Overview -->
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        Every SQL query goes through the <strong>planner/optimizer</strong> before execution. PostgreSQL
+        evaluates many possible plans — different scan methods, join orders, join algorithms — and picks
+        the one with the <em>lowest estimated cost</em>. The cost model uses <strong>table statistics</strong>
+        (row counts, value distributions, correlation) combined with configurable cost parameters to
+        estimate I/O and CPU work. Understanding the planner means understanding <em>why</em> your
+        query is slow — and how to fix it.
+      </p>
+    </div>
+  </section>
+
+  <!-- Section 1: Scan Types -->
+  <section class="flow-section">
+    <h2>🔍 Scan Types: How Rows Are Found</h2>
+    <p class="section-desc">The planner chooses a scan method based on selectivity, table size, and index availability.</p>
+
+    <div class="scan-controls">
+      <div class="scan-slider">
+        <label>Table rows: <strong id="scanRowsValue">100,000</strong></label>
+        <input type="range" id="scanRowsSlider" min="100" max="10000000" value="100000" step="100">
+      </div>
+      <div class="scan-slider">
+        <label>Selectivity (% of rows matched): <strong id="scanSelectValue">5%</strong></label>
+        <input type="range" id="scanSelectSlider" min="0" max="100" value="5" step="1">
+      </div>
+      <div class="scan-check">
+        <label><input type="checkbox" id="scanIndexExists" checked> B-tree index exists on filter column</label>
+      </div>
+      <div class="scan-check">
+        <label><input type="checkbox" id="scanCovering"> Index covers all selected columns (index-only possible)</label>
+      </div>
+    </div>
+
+    <div class="scan-result" id="scanResult">
+      <div class="scan-chosen">
+        <div class="scan-chosen-label">Planner chooses:</div>
+        <div class="scan-chosen-name" id="scanChosenName">Index Scan</div>
+        <div class="scan-chosen-reason" id="scanChosenReason">Low selectivity + index available</div>
+      </div>
+      <div class="scan-comparison" id="scanComparison">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <div class="scan-cards">
+      <div class="scan-card" id="scanCardSeq">
+        <div class="scan-card-icon">📄</div>
+        <h3>Sequential Scan</h3>
+        <p>Reads every page in order. Cheapest for large result sets or small tables. Uses <code>seq_page_cost</code>.</p>
+      </div>
+      <div class="scan-card" id="scanCardIndex">
+        <div class="scan-card-icon">🌳</div>
+        <h3>Index Scan</h3>
+        <p>Traverses B-tree, then fetches heap tuples. Best for very selective queries. Random I/O per row.</p>
+      </div>
+      <div class="scan-card" id="scanCardIndexOnly">
+        <div class="scan-card-icon">⚡</div>
+        <h3>Index-Only Scan</h3>
+        <p>All columns in the index — no heap fetch needed (if visibility map says page is all-visible).</p>
+      </div>
+      <div class="scan-card" id="scanCardBitmap">
+        <div class="scan-card-icon">🗺️</div>
+        <h3>Bitmap Scan</h3>
+        <p>Builds a bitmap of matching pages, then fetches them in order. Best for medium selectivity.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Join Strategies -->
+  <section class="flow-section">
+    <h2>🔗 Join Strategies</h2>
+    <p class="section-desc">Three join algorithms, each optimal for different data sizes. Drag the sliders to see the planner switch.</p>
+
+    <div class="join-controls">
+      <div class="join-slider">
+        <label>Left table rows: <strong id="joinLeftValue">10,000</strong></label>
+        <input type="range" id="joinLeftSlider" min="10" max="10000000" value="10000" step="10">
+      </div>
+      <div class="join-slider">
+        <label>Right table rows: <strong id="joinRightValue">1,000</strong></label>
+        <input type="range" id="joinRightSlider" min="10" max="10000000" value="1000" step="10">
+      </div>
+      <div class="join-check">
+        <label><input type="checkbox" id="joinIndexExists"> Index on join column (right table)</label>
+      </div>
+      <div class="join-check">
+        <label><input type="checkbox" id="joinPreSorted"> Both inputs pre-sorted</label>
+      </div>
+    </div>
+
+    <div class="join-result">
+      <div class="join-chosen">
+        <div class="join-chosen-label">Planner chooses:</div>
+        <div class="join-chosen-name" id="joinChosenName">Hash Join</div>
+        <div class="join-chosen-reason" id="joinChosenReason">Best for medium-large unsorted inputs</div>
+      </div>
+      <div class="join-costs" id="joinCosts">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <div class="join-cards">
+      <div class="join-card" id="joinCardNested">
+        <div class="join-card-header nested">Nested Loop</div>
+        <div class="join-card-body">
+          <p>For each outer row, scan inner table. O(N×M) without index, O(N×log M) with. Best when one side is tiny.</p>
+          <div class="join-card-cost" id="nestedCost">—</div>
+        </div>
+      </div>
+      <div class="join-card" id="joinCardHash">
+        <div class="join-card-header hash">Hash Join</div>
+        <div class="join-card-body">
+          <p>Build hash table on smaller input, probe with larger. O(N+M). Needs memory for hash table (work_mem).</p>
+          <div class="join-card-cost" id="hashCost">—</div>
+        </div>
+      </div>
+      <div class="join-card" id="joinCardMerge">
+        <div class="join-card-header merge">Merge Join</div>
+        <div class="join-card-body">
+          <p>Walk both sorted inputs in lockstep. O(N+M) if pre-sorted; add O(N log N + M log M) for sorting.</p>
+          <div class="join-card-cost" id="mergeCost">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: EXPLAIN Visualizer -->
+  <section class="flow-section">
+    <h2>📊 EXPLAIN Visualizer</h2>
+    <p class="section-desc">Paste an EXPLAIN (or EXPLAIN ANALYZE) output to see it as an interactive tree.</p>
+
+    <div class="explain-input-area">
+      <textarea id="explainInput" placeholder="Paste EXPLAIN output here, e.g.:
+Nested Loop  (cost=0.29..8.53 rows=1 width=16)
+  ->  Index Scan using users_pkey on users  (cost=0.29..8.31 rows=1 width=8)
+        Index Cond: (id = 42)
+  ->  Seq Scan on orders  (cost=0.00..20.12 rows=3 width=8)
+        Filter: (user_id = 42)" rows="8"></textarea>
+      <div class="explain-actions">
+        <button id="parseExplainBtn" class="action-btn primary-btn">🌳 Parse Plan</button>
+        <button id="loadSampleBtn" class="action-btn step-btn">📝 Load Sample</button>
+        <button id="clearExplainBtn" class="action-btn reset-btn">🔄 Clear</button>
+      </div>
+    </div>
+
+    <div class="explain-tree-container" id="explainTreeContainer" style="display: none;">
+      <div class="explain-tree" id="explainTree"></div>
+      <div class="explain-tree-legend">
+        <span class="legend-item"><span class="legend-dot scan-dot"></span> Scan</span>
+        <span class="legend-item"><span class="legend-dot join-dot"></span> Join</span>
+        <span class="legend-item"><span class="legend-dot sort-dot"></span> Sort/Aggregate</span>
+        <span class="legend-item"><span class="legend-dot other-dot"></span> Other</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 4: pg_stats -->
+  <section class="flow-section">
+    <h2>📈 Statistics: What the Planner Knows</h2>
+    <p class="section-desc">The planner relies on pg_stats — collected by ANALYZE — to estimate row counts and plan costs.</p>
+
+    <div class="stats-demo">
+      <div class="stats-table">
+        <div class="stats-header">
+          <span>Column: users.country</span>
+        </div>
+        <div class="stats-rows">
+          <div class="stats-row">
+            <span class="stats-key">n_distinct</span>
+            <span class="stats-val" id="statsDistinct">42</span>
+            <span class="stats-desc">Estimated distinct values</span>
+          </div>
+          <div class="stats-row">
+            <span class="stats-key">null_frac</span>
+            <span class="stats-val" id="statsNull">0.02</span>
+            <span class="stats-desc">Fraction of NULL values</span>
+          </div>
+          <div class="stats-row">
+            <span class="stats-key">most_common_vals</span>
+            <span class="stats-val mcv" id="statsMCV">US, DE, GB, FR, JP</span>
+            <span class="stats-desc">Most frequent values</span>
+          </div>
+          <div class="stats-row">
+            <span class="stats-key">most_common_freqs</span>
+            <span class="stats-val mcv" id="statsMCF">0.30, 0.15, 0.12, 0.08, 0.06</span>
+            <span class="stats-desc">Their frequencies</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-histogram">
+        <div class="stats-histogram-title">Frequency Distribution (most_common_vals)</div>
+        <div class="stats-bars" id="statsBars">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div class="stats-estimator">
+        <label>WHERE country = <select id="statsCountrySelect">
+          <option value="US">US (30%)</option>
+          <option value="DE">DE (15%)</option>
+          <option value="GB">GB (12%)</option>
+          <option value="FR">FR (8%)</option>
+          <option value="JP">JP (6%)</option>
+          <option value="OTHER">Other (29%)</option>
+        </select></label>
+        <div class="stats-estimate" id="statsEstimate">
+          <span class="stats-est-label">Estimated rows:</span>
+          <span class="stats-est-value" id="statsEstRows">30,000</span>
+          <span class="stats-est-detail" id="statsEstDetail">= 100,000 rows x 0.30 frequency</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Explanation: Why statistics matter -->
+  <section class="explain-section">
+    <div class="explain-card highlight-card">
+      <h3>💡 Why Stale Statistics Cause Bad Plans</h3>
+      <p>
+        If you load 10 million rows but never run <code>ANALYZE</code>, the planner still thinks the table
+        has its old row count. It might choose a sequential scan for a query that should use an index, or
+        a nested loop join when a hash join would be 1000x faster. <strong>Autovacuum runs ANALYZE
+        automatically</strong>, but after bulk loads you should run it manually:
+        <code>ANALYZE tablename;</code>
+      </p>
+    </div>
+  </section>
+
+  <!-- Section 5: Cost Model -->
+  <section class="flow-section">
+    <h2>⚙️ Cost Model Parameters</h2>
+    <p class="section-desc">The planner's cost estimates depend on these GUC parameters. Adjust them to see how plans change.</p>
+
+    <div class="cost-controls">
+      <div class="cost-slider">
+        <label>seq_page_cost: <strong id="seqPageCostValue">1.0</strong></label>
+        <input type="range" id="seqPageCostSlider" min="0" max="40" value="10" step="1">
+        <span class="cost-hint">Cost of a sequential disk page fetch</span>
+      </div>
+      <div class="cost-slider">
+        <label>random_page_cost: <strong id="randomPageCostValue">4.0</strong></label>
+        <input type="range" id="randomPageCostSlider" min="0" max="100" value="40" step="1">
+        <span class="cost-hint">Cost of a random disk page fetch (SSD ≈ 1.1, HDD ≈ 4.0)</span>
+      </div>
+      <div class="cost-slider">
+        <label>cpu_tuple_cost: <strong id="cpuTupleCostValue">0.01</strong></label>
+        <input type="range" id="cpuTupleCostSlider" min="1" max="100" value="10" step="1">
+        <span class="cost-hint">CPU cost per row processed</span>
+      </div>
+      <div class="cost-slider">
+        <label>effective_cache_size: <strong id="cacheSizeValue">4 GB</strong></label>
+        <input type="range" id="cacheSizeSlider" min="1" max="128" value="4" step="1">
+        <span class="cost-hint">Planner's estimate of available cache (OS + shared_buffers)</span>
+      </div>
+    </div>
+
+    <div class="cost-scenario">
+      <div class="cost-scenario-title">Scenario: SELECT * FROM orders WHERE customer_id = 42</div>
+      <div class="cost-scenario-info">Table: 1M rows, 8 KB pages, ~125,000 pages. Index on customer_id. Query matches ~100 rows.</div>
+      <div class="cost-comparison" id="costComparison">
+        <!-- filled by JS -->
+      </div>
+      <div class="cost-verdict" id="costVerdict">
+        <!-- filled by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 6: Interactive Strategy Switcher -->
+  <section class="flow-section">
+    <h2>🎯 Strategy Switcher: Watch the Planner Think</h2>
+    <p class="section-desc">A realistic query scenario. Adjust parameters and watch the planner switch between strategies in real time.</p>
+
+    <div class="strategy-controls">
+      <div class="strategy-slider">
+        <label>orders table rows: <strong id="stratOrdersValue">1,000,000</strong></label>
+        <input type="range" id="stratOrdersSlider" min="1000" max="50000000" value="1000000" step="1000">
+      </div>
+      <div class="strategy-slider">
+        <label>customers table rows: <strong id="stratCustomersValue">50,000</strong></label>
+        <input type="range" id="stratCustomersSlider" min="100" max="5000000" value="50000" step="100">
+      </div>
+      <div class="strategy-slider">
+        <label>WHERE selectivity: <strong id="stratSelectValue">1%</strong></label>
+        <input type="range" id="stratSelectSlider" min="0" max="100" value="1" step="1">
+      </div>
+      <div class="strategy-check">
+        <label><input type="checkbox" id="stratIndex" checked> Index on orders.customer_id</label>
+      </div>
+      <div class="strategy-check">
+        <label><input type="checkbox" id="stratSSD" checked> SSD storage (low random_page_cost)</label>
+      </div>
+    </div>
+
+    <div class="strategy-plan" id="strategyPlan">
+      <!-- filled by JS -->
+    </div>
+
+    <div class="strategy-explain" id="strategyExplain">
+      <p>Adjust the sliders above to see how the planner builds different execution plans.</p>
+    </div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://www.postgresql.org/docs/current/planner-optimizer.html" target="_blank">PostgreSQL Planner Documentation</a> and <a href="https://www.postgresql.org/docs/current/using-explain.html" target="_blank">Using EXPLAIN Guide</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20PostgreSQL%20Query%20Planner&url=https://systeminternals.dev/postgresql/query-planner/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/postgresql/query-planner/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/postgresql/query-planner/&t=Interactive%20PostgreSQL%20Query%20Planner%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa, #34d399);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(52, 211, 153, 0.05));
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #a78bfa; }
+  .explain-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.08), rgba(52, 211, 153, 0.08));
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+
+  /* Sliders shared */
+  input[type="range"] {
+    width: 100%;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #a78bfa;
+    cursor: pointer;
+  }
+
+  /* Checkboxes */
+  .scan-check, .join-check, .strategy-check {
+    margin-bottom: 8px;
+  }
+
+  .scan-check label, .join-check label, .strategy-check label {
+    color: #ccc;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #a78bfa;
+  }
+
+  /* ===== Section 1: Scan Types ===== */
+  .scan-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .scan-slider {
+    max-width: 500px;
+  }
+
+  .scan-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+  }
+
+  .scan-slider strong { color: #a78bfa; }
+
+  .scan-result {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 24px;
+  }
+
+  .scan-chosen {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  .scan-chosen-label {
+    font-size: 0.85rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+
+  .scan-chosen-name {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #60a5fa;
+    margin-bottom: 6px;
+  }
+
+  .scan-chosen-reason {
+    color: #aaa;
+    font-size: 0.9rem;
+  }
+
+  .scan-comparison {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  :global(.scan-cost-bar) {
+    text-align: center;
+    padding: 12px 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s;
+  }
+
+  :global(.scan-cost-bar.chosen) {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.4);
+    box-shadow: 0 0 15px rgba(96, 165, 250, 0.15);
+  }
+
+  :global(.scan-cost-bar.disabled) {
+    opacity: 0.3;
+  }
+
+  :global(.scan-cost-name) {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 6px;
+  }
+
+  :global(.scan-cost-value) {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .scan-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+
+  .scan-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s;
+  }
+
+  :global(.scan-card.active) {
+    border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(96, 165, 250, 0.08);
+  }
+
+  .scan-card-icon {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+  }
+
+  .scan-card h3 {
+    font-size: 0.9rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .scan-card p {
+    font-size: 0.8rem;
+    color: #888;
+    line-height: 1.5;
+  }
+
+  .scan-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    color: #22c55e;
+  }
+
+  /* ===== Section 2: Join Strategies ===== */
+  .join-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .join-slider {
+    max-width: 500px;
+  }
+
+  .join-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+  }
+
+  .join-slider strong { color: #a78bfa; }
+
+  .join-result {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 24px;
+  }
+
+  .join-chosen {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  .join-chosen-label {
+    font-size: 0.85rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+
+  .join-chosen-name {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #34d399;
+    margin-bottom: 6px;
+  }
+
+  .join-chosen-reason {
+    color: #aaa;
+    font-size: 0.9rem;
+  }
+
+  .join-costs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  :global(.join-cost-item) {
+    text-align: center;
+    padding: 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s;
+  }
+
+  :global(.join-cost-item.chosen) {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.4);
+  }
+
+  :global(.join-cost-label) {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 4px;
+  }
+
+  :global(.join-cost-val) {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .join-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .join-card {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s;
+  }
+
+  :global(.join-card.active) {
+    border-color: rgba(52, 211, 153, 0.5);
+  }
+
+  .join-card-header {
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .join-card-header.nested { background: rgba(244, 114, 182, 0.2); color: #f9a8d4; }
+  .join-card-header.hash { background: rgba(52, 211, 153, 0.2); color: #86efac; }
+  .join-card-header.merge { background: rgba(96, 165, 250, 0.2); color: #93c5fd; }
+
+  .join-card-body {
+    padding: 14px;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .join-card-body p {
+    font-size: 0.82rem;
+    color: #aaa;
+    line-height: 1.5;
+    margin-bottom: 10px;
+  }
+
+  .join-card-cost {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    color: #a78bfa;
+    font-weight: 600;
+  }
+
+  /* ===== Section 3: EXPLAIN Visualizer ===== */
+  .explain-input-area {
+    margin-bottom: 24px;
+  }
+
+  #explainInput {
+    width: 100%;
+    min-height: 120px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    color: #e2e8f0;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.82rem;
+    padding: 16px;
+    resize: vertical;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+  }
+
+  #explainInput::placeholder { color: #555; }
+
+  .explain-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .explain-tree-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .explain-tree {
+    margin-bottom: 16px;
+  }
+
+  :global(.explain-node) {
+    margin-left: 24px;
+    margin-bottom: 8px;
+  }
+
+  :global(.explain-node-content) {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.82rem;
+    cursor: default;
+    transition: background 0.2s;
+  }
+
+  :global(.explain-node-content:hover) {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  :global(.explain-node-content.scan-type) {
+    background: rgba(96, 165, 250, 0.1);
+    border-left: 3px solid #60a5fa;
+    color: #93c5fd;
+  }
+
+  :global(.explain-node-content.join-type) {
+    background: rgba(52, 211, 153, 0.1);
+    border-left: 3px solid #34d399;
+    color: #86efac;
+  }
+
+  :global(.explain-node-content.sort-type) {
+    background: rgba(251, 191, 36, 0.1);
+    border-left: 3px solid #fbbf24;
+    color: #fde68a;
+  }
+
+  :global(.explain-node-content.other-type) {
+    background: rgba(167, 139, 250, 0.1);
+    border-left: 3px solid #a78bfa;
+    color: #c4b5fd;
+  }
+
+  :global(.explain-node-cost) {
+    font-size: 0.72rem;
+    color: #888;
+    padding: 2px 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+  }
+
+  :global(.explain-node-rows) {
+    font-size: 0.72rem;
+    color: #a78bfa;
+  }
+
+  :global(.explain-node-detail) {
+    margin-left: 48px;
+    font-size: 0.75rem;
+    color: #666;
+    font-family: 'Monaco', 'Menlo', monospace;
+    padding: 2px 0;
+  }
+
+  .explain-tree-legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+  }
+
+  .scan-dot { background: rgba(96, 165, 250, 0.5); }
+  .join-dot { background: rgba(52, 211, 153, 0.5); }
+  .sort-dot { background: rgba(251, 191, 36, 0.5); }
+  .other-dot { background: rgba(167, 139, 250, 0.5); }
+
+  /* ===== Section 4: pg_stats ===== */
+  .stats-demo {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .stats-table {
+    margin-bottom: 24px;
+  }
+
+  .stats-header {
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px 8px 0 0;
+    font-weight: 600;
+    color: #aaa;
+    font-size: 0.9rem;
+  }
+
+  .stats-rows {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+  }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: 180px 1fr 1fr;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.85rem;
+  }
+
+  .stats-key {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: #22c55e;
+    font-size: 0.8rem;
+  }
+
+  .stats-val {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .stats-val.mcv {
+    font-size: 0.8rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .stats-desc {
+    color: #666;
+    font-size: 0.8rem;
+  }
+
+  .stats-histogram {
+    margin-bottom: 24px;
+  }
+
+  .stats-histogram-title {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 12px;
+  }
+
+  .stats-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 120px;
+    padding: 0 10px;
+  }
+
+  :global(.stats-bar) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+  }
+
+  :global(.stats-bar-fill) {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    transition: all 0.3s;
+    min-height: 4px;
+  }
+
+  :global(.stats-bar-label) {
+    font-size: 0.7rem;
+    color: #888;
+    margin-top: 6px;
+    text-align: center;
+  }
+
+  :global(.stats-bar-pct) {
+    font-size: 0.65rem;
+    color: #a78bfa;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .stats-estimator {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .stats-estimator label {
+    color: #ccc;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .stats-estimator select {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+
+  .stats-estimate {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stats-est-label {
+    color: #888;
+    font-size: 0.9rem;
+  }
+
+  .stats-est-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #60a5fa;
+  }
+
+  .stats-est-detail {
+    font-size: 0.8rem;
+    color: #666;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  /* ===== Section 5: Cost Model ===== */
+  .cost-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .cost-slider {
+    max-width: 500px;
+  }
+
+  .cost-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+  }
+
+  .cost-slider strong { color: #a78bfa; }
+
+  .cost-hint {
+    display: block;
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 4px;
+  }
+
+  .cost-scenario {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .cost-scenario-title {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9rem;
+    color: #60a5fa;
+    margin-bottom: 8px;
+  }
+
+  .cost-scenario-info {
+    font-size: 0.82rem;
+    color: #888;
+    margin-bottom: 20px;
+  }
+
+  .cost-comparison {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  :global(.cost-plan) {
+    text-align: center;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s;
+  }
+
+  :global(.cost-plan.winner) {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.4);
+    box-shadow: 0 0 15px rgba(52, 211, 153, 0.15);
+  }
+
+  :global(.cost-plan-name) {
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 8px;
+  }
+
+  :global(.cost-plan-value) {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #fff;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  :global(.cost-plan-detail) {
+    font-size: 0.72rem;
+    color: #666;
+    margin-top: 6px;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .cost-verdict {
+    text-align: center;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: #ccc;
+  }
+
+  :global(.cost-verdict-text) {
+    color: #34d399;
+    font-weight: 600;
+  }
+
+  /* ===== Section 6: Strategy Switcher ===== */
+  .strategy-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .strategy-slider {
+    max-width: 500px;
+  }
+
+  .strategy-slider label {
+    display: block;
+    color: #ccc;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+  }
+
+  .strategy-slider strong { color: #a78bfa; }
+
+  .strategy-plan {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 16px;
+    padding: 20px 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.82rem;
+    color: #e2e8f0;
+    margin-bottom: 16px;
+    min-height: 120px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .strategy-explain {
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #aaa;
+    font-size: 0.9rem;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+    text-decoration: none;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .scan-cards { grid-template-columns: repeat(2, 1fr); }
+    .scan-comparison { grid-template-columns: repeat(2, 1fr); }
+    .join-cards { grid-template-columns: 1fr; }
+    .join-costs { grid-template-columns: 1fr; }
+    .cost-comparison { grid-template-columns: 1fr; }
+    .stats-row { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+
+<script is:inline>
+  // ========== HELPERS ==========
+  function fmtNum(n) {
+    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'B';
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(Math.round(n));
+  }
+
+  function fmtCost(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return n.toFixed(1);
+  }
+
+  // ========== SECTION 1: SCAN TYPES ==========
+  var scanTypes = ['Seq Scan', 'Index Scan', 'Index-Only Scan', 'Bitmap Scan'];
+  var scanCardIds = ['scanCardSeq', 'scanCardIndex', 'scanCardIndexOnly', 'scanCardBitmap'];
+
+  function updateScan() {
+    var rows = parseInt(document.getElementById('scanRowsSlider').value);
+    var selectivity = parseInt(document.getElementById('scanSelectSlider').value) / 100;
+    var hasIndex = document.getElementById('scanIndexExists').checked;
+    var covering = document.getElementById('scanCovering').checked;
+
+    document.getElementById('scanRowsValue').textContent = fmtNum(rows);
+    document.getElementById('scanSelectValue').textContent = Math.round(selectivity * 100) + '%';
+
+    var pages = Math.max(1, Math.ceil(rows / 100)); // ~100 rows per 8KB page
+    var matchedRows = Math.max(1, Math.round(rows * selectivity));
+    var matchedPages = Math.max(1, Math.ceil(matchedRows / 100));
+
+    // Cost estimates (simplified but realistic)
+    var seqCost = pages * 1.0 + rows * 0.01;
+    var indexCost = hasIndex ? (Math.log2(rows) * 0.5 + matchedRows * 4.0 + matchedRows * 0.01) : Infinity;
+    var indexOnlyCost = (hasIndex && covering) ? (Math.log2(rows) * 0.5 + matchedRows * 1.0 + matchedRows * 0.01) : Infinity;
+    var bitmapCost = hasIndex ? (Math.log2(rows) * 0.5 + matchedPages * 1.0 + matchedRows * 0.01 + matchedRows * 0.005) : Infinity;
+
+    var costs = [seqCost, indexCost, indexOnlyCost, bitmapCost];
+    var minCost = Math.min.apply(null, costs);
+    var chosenIdx = costs.indexOf(minCost);
+
+    var reasons = [
+      'Full table scan is cheapest — high selectivity or small table',
+      'Low selectivity + index — random I/O beats full scan',
+      'Index covers all columns — no heap access needed',
+      'Moderate selectivity — bitmap reduces random I/O via batching'
+    ];
+
+    document.getElementById('scanChosenName').textContent = scanTypes[chosenIdx];
+    document.getElementById('scanChosenReason').textContent = reasons[chosenIdx];
+
+    // Render comparison bars
+    var comp = document.getElementById('scanComparison');
+    var html = '';
+    for (var i = 0; i < 4; i++) {
+      var isChosen = i === chosenIdx;
+      var isDisabled = costs[i] === Infinity;
+      var cls = isChosen ? 'chosen' : (isDisabled ? 'disabled' : '');
+      html += '<div class="scan-cost-bar ' + cls + '">';
+      html += '<div class="scan-cost-name">' + scanTypes[i] + '</div>';
+      html += '<div class="scan-cost-value">' + (isDisabled ? 'N/A' : fmtCost(costs[i])) + '</div>';
+      html += '</div>';
+    }
+    comp.innerHTML = html;
+
+    // Highlight active card
+    for (var j = 0; j < scanCardIds.length; j++) {
+      var card = document.getElementById(scanCardIds[j]);
+      if (j === chosenIdx) {
+        card.className = 'scan-card active';
+      } else {
+        card.className = 'scan-card';
+      }
+    }
+  }
+
+  document.getElementById('scanRowsSlider').addEventListener('input', updateScan);
+  document.getElementById('scanSelectSlider').addEventListener('input', updateScan);
+  document.getElementById('scanIndexExists').addEventListener('change', updateScan);
+  document.getElementById('scanCovering').addEventListener('change', updateScan);
+  updateScan();
+
+  // ========== SECTION 2: JOIN STRATEGIES ==========
+  function updateJoin() {
+    var left = parseInt(document.getElementById('joinLeftSlider').value);
+    var right = parseInt(document.getElementById('joinRightSlider').value);
+    var hasIndex = document.getElementById('joinIndexExists').checked;
+    var preSorted = document.getElementById('joinPreSorted').checked;
+
+    document.getElementById('joinLeftValue').textContent = fmtNum(left);
+    document.getElementById('joinRightValue').textContent = fmtNum(right);
+
+    var smaller = Math.min(left, right);
+    var larger = Math.max(left, right);
+
+    // Nested Loop: outer * (index lookup or seq scan of inner)
+    var nestedCost = hasIndex
+      ? left * (Math.log2(right) * 0.5 + 4.0 + 0.01)
+      : left * (right * 0.01 + Math.ceil(right / 100));
+
+    // Hash Join: build hash on smaller + probe with larger
+    var hashCost = smaller * 0.03 + larger * 0.02 + smaller * 0.01;
+
+    // Merge Join: sort both (if needed) + merge
+    var sortCostLeft = preSorted ? 0 : left * Math.log2(Math.max(2, left)) * 0.005;
+    var sortCostRight = preSorted ? 0 : right * Math.log2(Math.max(2, right)) * 0.005;
+    var mergeCost = sortCostLeft + sortCostRight + left * 0.01 + right * 0.01;
+
+    var costs = [nestedCost, hashCost, mergeCost];
+    var names = ['Nested Loop', 'Hash Join', 'Merge Join'];
+    var reasons = [
+      'One side is small' + (hasIndex ? ' + index lookup on inner' : '') + ' — loop is efficient',
+      'Best for medium-large unsorted inputs — O(N+M) with hash',
+      (preSorted ? 'Pre-sorted inputs' : 'Worth sorting') + ' — merge walk is very efficient'
+    ];
+    var cardIds = ['joinCardNested', 'joinCardHash', 'joinCardMerge'];
+
+    var minCost = Math.min.apply(null, costs);
+    var chosenIdx = costs.indexOf(minCost);
+
+    document.getElementById('joinChosenName').textContent = names[chosenIdx];
+    document.getElementById('joinChosenReason').textContent = reasons[chosenIdx];
+
+    // Cost items
+    var costsHtml = '';
+    for (var i = 0; i < 3; i++) {
+      costsHtml += '<div class="join-cost-item ' + (i === chosenIdx ? 'chosen' : '') + '">';
+      costsHtml += '<div class="join-cost-label">' + names[i] + '</div>';
+      costsHtml += '<div class="join-cost-val">' + fmtCost(costs[i]) + '</div>';
+      costsHtml += '</div>';
+    }
+    document.getElementById('joinCosts').innerHTML = costsHtml;
+
+    // Update cost display in cards
+    document.getElementById('nestedCost').textContent = 'Est. cost: ' + fmtCost(nestedCost);
+    document.getElementById('hashCost').textContent = 'Est. cost: ' + fmtCost(hashCost);
+    document.getElementById('mergeCost').textContent = 'Est. cost: ' + fmtCost(mergeCost);
+
+    // Highlight active card
+    for (var j = 0; j < cardIds.length; j++) {
+      var card = document.getElementById(cardIds[j]);
+      if (j === chosenIdx) {
+        card.className = 'join-card active';
+      } else {
+        card.className = 'join-card';
+      }
+    }
+  }
+
+  document.getElementById('joinLeftSlider').addEventListener('input', updateJoin);
+  document.getElementById('joinRightSlider').addEventListener('input', updateJoin);
+  document.getElementById('joinIndexExists').addEventListener('change', updateJoin);
+  document.getElementById('joinPreSorted').addEventListener('change', updateJoin);
+  updateJoin();
+
+  // ========== SECTION 3: EXPLAIN VISUALIZER ==========
+  var sampleExplain = 'Hash Join  (cost=230.47..713.98 rows=101 width=32)\n  Hash Cond: (orders.customer_id = customers.id)\n  ->  Bitmap Heap Scan on orders  (cost=4.66..220.09 rows=101 width=16)\n        Recheck Cond: (amount > 500)\n        ->  Bitmap Index Scan on orders_amount_idx  (cost=0.00..4.63 rows=101 width=0)\n              Index Cond: (amount > 500)\n  ->  Hash  (cost=145.00..145.00 rows=5000 width=16)\n        ->  Seq Scan on customers  (cost=0.00..145.00 rows=5000 width=16)';
+
+  function classifyNode(name) {
+    var n = name.toLowerCase();
+    if (n.indexOf('scan') !== -1) return 'scan-type';
+    if (n.indexOf('join') !== -1 || n.indexOf('loop') !== -1) return 'join-type';
+    if (n.indexOf('sort') !== -1 || n.indexOf('aggregate') !== -1 || n.indexOf('group') !== -1 || n.indexOf('unique') !== -1) return 'sort-type';
+    return 'other-type';
+  }
+
+  function parseExplain(text) {
+    var lines = text.split('\n');
+    var nodes = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var stripped = line.replace(/^[\s\-\>]+/, '');
+      if (!stripped) continue;
+
+      // Compute indent level
+      var match = line.match(/^([\s\->]*)/);
+      var rawIndent = match ? match[1].length : 0;
+      var indent = Math.floor(rawIndent / 2);
+
+      // Try to parse as a plan node: "NodeType ... (cost=X..Y rows=Z width=W)"
+      var nodeMatch = stripped.match(/^([A-Z][A-Za-z\s]+?)(?:\s+on\s+\S+)?(?:\s+using\s+\S+)?(?:\s+on\s+\S+)?\s*\(cost=([0-9.]+)\.\.([0-9.]+)\s+rows=(\d+)\s+width=(\d+)\)/);
+      if (nodeMatch) {
+        nodes.push({
+          type: 'node',
+          name: stripped.split('(cost=')[0].trim(),
+          startCost: parseFloat(nodeMatch[2]),
+          totalCost: parseFloat(nodeMatch[3]),
+          rows: parseInt(nodeMatch[4]),
+          width: parseInt(nodeMatch[5]),
+          indent: indent,
+          cls: classifyNode(nodeMatch[1])
+        });
+      } else if (stripped.match(/^(Filter|Index Cond|Hash Cond|Recheck Cond|Sort Key|Join Filter|Merge Cond)/)) {
+        nodes.push({
+          type: 'detail',
+          text: stripped,
+          indent: indent
+        });
+      }
+    }
+    return nodes;
+  }
+
+  function renderExplainTree(nodes) {
+    var container = document.getElementById('explainTree');
+    var html = '';
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.type === 'node') {
+        var margin = n.indent * 24;
+        html += '<div class="explain-node" style="margin-left:' + margin + 'px">';
+        html += '<div class="explain-node-content ' + n.cls + '">';
+        html += '<span>' + n.name + '</span>';
+        html += '<span class="explain-node-cost">cost=' + n.startCost.toFixed(2) + '..' + n.totalCost.toFixed(2) + '</span>';
+        html += '<span class="explain-node-rows">rows=' + n.rows + '</span>';
+        html += '</div></div>';
+      } else {
+        var detailMargin = n.indent * 24;
+        html += '<div class="explain-node-detail" style="margin-left:' + detailMargin + 'px">' + n.text + '</div>';
+      }
+    }
+    container.innerHTML = html;
+  }
+
+  document.getElementById('parseExplainBtn').addEventListener('click', function() {
+    var text = document.getElementById('explainInput').value.trim();
+    if (!text) return;
+    var nodes = parseExplain(text);
+    if (nodes.length === 0) return;
+    renderExplainTree(nodes);
+    document.getElementById('explainTreeContainer').style.display = 'block';
+  });
+
+  document.getElementById('loadSampleBtn').addEventListener('click', function() {
+    document.getElementById('explainInput').value = sampleExplain;
+  });
+
+  document.getElementById('clearExplainBtn').addEventListener('click', function() {
+    document.getElementById('explainInput').value = '';
+    document.getElementById('explainTreeContainer').style.display = 'none';
+    document.getElementById('explainTree').innerHTML = '';
+  });
+
+  // ========== SECTION 4: pg_stats ==========
+  var statsData = [
+    { label: 'US', freq: 0.30, color: '#60a5fa' },
+    { label: 'DE', freq: 0.15, color: '#a78bfa' },
+    { label: 'GB', freq: 0.12, color: '#34d399' },
+    { label: 'FR', freq: 0.08, color: '#f472b6' },
+    { label: 'JP', freq: 0.06, color: '#fbbf24' },
+    { label: 'Other', freq: 0.29, color: '#6b7280' }
+  ];
+
+  function renderStatsBars() {
+    var container = document.getElementById('statsBars');
+    var maxFreq = 0.30;
+    var html = '';
+    for (var i = 0; i < statsData.length; i++) {
+      var d = statsData[i];
+      var height = (d.freq / maxFreq) * 100;
+      html += '<div class="stats-bar">';
+      html += '<div class="stats-bar-pct">' + Math.round(d.freq * 100) + '%</div>';
+      html += '<div class="stats-bar-fill" style="height:' + height + '%;background:' + d.color + '"></div>';
+      html += '<div class="stats-bar-label">' + d.label + '</div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  function updateStatsEstimate() {
+    var country = document.getElementById('statsCountrySelect').value;
+    var totalRows = 100000;
+    var freqMap = { US: 0.30, DE: 0.15, GB: 0.12, FR: 0.08, JP: 0.06, OTHER: 0.29 };
+    var freq = freqMap[country] || 0.02;
+    var est = Math.round(totalRows * freq);
+    document.getElementById('statsEstRows').textContent = est.toLocaleString();
+    document.getElementById('statsEstDetail').textContent = '= ' + totalRows.toLocaleString() + ' rows × ' + freq.toFixed(2) + ' frequency';
+  }
+
+  document.getElementById('statsCountrySelect').addEventListener('change', updateStatsEstimate);
+  renderStatsBars();
+  updateStatsEstimate();
+
+  // ========== SECTION 5: COST MODEL ==========
+  function updateCostModel() {
+    var seqPageCost = parseInt(document.getElementById('seqPageCostSlider').value) / 10;
+    var randomPageCost = parseInt(document.getElementById('randomPageCostSlider').value) / 10;
+    var cpuTupleCost = parseInt(document.getElementById('cpuTupleCostSlider').value) / 1000;
+    var cacheGB = parseInt(document.getElementById('cacheSizeSlider').value);
+
+    document.getElementById('seqPageCostValue').textContent = seqPageCost.toFixed(1);
+    document.getElementById('randomPageCostValue').textContent = randomPageCost.toFixed(1);
+    document.getElementById('cpuTupleCostValue').textContent = cpuTupleCost.toFixed(3);
+    document.getElementById('cacheSizeValue').textContent = cacheGB + ' GB';
+
+    // Scenario: 1M rows, 125K pages, index on customer_id, 100 matching rows
+    var totalRows = 1000000;
+    var totalPages = 125000;
+    var matchRows = 100;
+    var matchPages = Math.max(1, Math.ceil(matchRows / 8)); // rows spread across pages
+
+    // Cache effect: higher cache = lower effective random cost
+    var cacheRatio = Math.min(1.0, (cacheGB * 128000) / totalPages); // cache in pages vs total
+    var effectiveRandomCost = randomPageCost * (1 - cacheRatio * 0.6);
+
+    // Seq Scan cost
+    var seqTotal = totalPages * seqPageCost + totalRows * cpuTupleCost;
+
+    // Index Scan cost
+    var indexTotal = (4 * effectiveRandomCost) + (matchRows * effectiveRandomCost) + (matchRows * cpuTupleCost);
+
+    // Bitmap Scan cost
+    var bitmapTotal = (4 * effectiveRandomCost) + (matchPages * seqPageCost) + (matchRows * cpuTupleCost) + (matchRows * 0.005);
+
+    var plans = [
+      { name: 'Seq Scan', cost: seqTotal, detail: totalPages + ' pages × ' + seqPageCost.toFixed(1) + ' + ' + fmtNum(totalRows) + ' rows × ' + cpuTupleCost.toFixed(3) },
+      { name: 'Index Scan', cost: indexTotal, detail: matchRows + ' lookups × ' + effectiveRandomCost.toFixed(2) + ' random cost' },
+      { name: 'Bitmap Scan', cost: bitmapTotal, detail: matchPages + ' pages seq + ' + matchRows + ' rows CPU' }
+    ];
+
+    var minCost = Math.min(seqTotal, indexTotal, bitmapTotal);
+
+    var compHtml = '';
+    for (var i = 0; i < plans.length; i++) {
+      var isWinner = plans[i].cost === minCost;
+      compHtml += '<div class="cost-plan ' + (isWinner ? 'winner' : '') + '">';
+      compHtml += '<div class="cost-plan-name">' + plans[i].name + (isWinner ? ' ✓' : '') + '</div>';
+      compHtml += '<div class="cost-plan-value">' + fmtCost(plans[i].cost) + '</div>';
+      compHtml += '<div class="cost-plan-detail">' + plans[i].detail + '</div>';
+      compHtml += '</div>';
+    }
+    document.getElementById('costComparison').innerHTML = compHtml;
+
+    var winnerName = plans[plans.indexOf(plans.filter(function(p) { return p.cost === minCost; })[0])].name;
+    var verdictHtml = '<span class="cost-verdict-text">Winner: ' + winnerName + '</span>';
+    if (randomPageCost <= 1.5) {
+      verdictHtml += ' — SSD-like random_page_cost makes index scans much cheaper';
+    } else if (seqPageCost >= 2.0) {
+      verdictHtml += ' — High seq_page_cost penalizes full table scans';
+    }
+    document.getElementById('costVerdict').innerHTML = verdictHtml;
+  }
+
+  document.getElementById('seqPageCostSlider').addEventListener('input', updateCostModel);
+  document.getElementById('randomPageCostSlider').addEventListener('input', updateCostModel);
+  document.getElementById('cpuTupleCostSlider').addEventListener('input', updateCostModel);
+  document.getElementById('cacheSizeSlider').addEventListener('input', updateCostModel);
+  updateCostModel();
+
+  // ========== SECTION 6: STRATEGY SWITCHER ==========
+  function updateStrategy() {
+    var orders = parseInt(document.getElementById('stratOrdersSlider').value);
+    var customers = parseInt(document.getElementById('stratCustomersSlider').value);
+    var selectivity = parseInt(document.getElementById('stratSelectSlider').value) / 100;
+    var hasIndex = document.getElementById('stratIndex').checked;
+    var isSSD = document.getElementById('stratSSD').checked;
+
+    document.getElementById('stratOrdersValue').textContent = fmtNum(orders);
+    document.getElementById('stratCustomersValue').textContent = fmtNum(customers);
+    document.getElementById('stratSelectValue').textContent = Math.round(selectivity * 100) + '%';
+
+    var matchedOrders = Math.max(1, Math.round(orders * selectivity));
+    var randomCost = isSSD ? 1.1 : 4.0;
+
+    // Determine scan on orders
+    var scanType;
+    var scanReason;
+    if (selectivity > 0.3 || !hasIndex) {
+      scanType = 'Seq Scan on orders';
+      scanReason = selectivity > 0.3 ? 'High selectivity → seq scan is cheaper' : 'No index available';
+    } else if (selectivity < 0.01 && hasIndex) {
+      scanType = 'Index Scan using orders_customer_id_idx on orders';
+      scanReason = 'Very selective (' + fmtNum(matchedOrders) + ' rows) → index scan';
+    } else {
+      scanType = 'Bitmap Heap Scan on orders';
+      scanReason = 'Moderate selectivity (' + fmtNum(matchedOrders) + ' rows) → bitmap scan';
+    }
+
+    // Determine join
+    var joinType;
+    var joinReason;
+    if (matchedOrders < 100 && hasIndex) {
+      joinType = 'Nested Loop';
+      joinReason = 'Tiny outer set → loop with index lookup';
+    } else if (matchedOrders > customers * 0.5 || (matchedOrders > 1000 && customers > 1000)) {
+      joinType = 'Hash Join';
+      joinReason = 'Large join → build hash on customers, probe with orders';
+    } else {
+      joinType = 'Nested Loop';
+      joinReason = 'Small result set → nested loop efficient';
+    }
+
+    // Build plan text
+    var plan = '';
+    var indent = '';
+    if (joinType === 'Hash Join') {
+      var hashCost = (customers * 0.03 + matchedOrders * 0.02);
+      plan += 'Hash Join  (cost=0.00..' + fmtCost(hashCost) + ' rows=' + fmtNum(matchedOrders) + ')\n';
+      plan += '  Hash Cond: (orders.customer_id = customers.id)\n';
+      if (scanType.indexOf('Bitmap') !== -1) {
+        plan += '  ->  Bitmap Heap Scan on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+        plan += '        Recheck Cond: (customer_id filter)\n';
+        plan += '        ->  Bitmap Index Scan on orders_customer_id_idx\n';
+      } else if (scanType.indexOf('Index') !== -1) {
+        plan += '  ->  Index Scan using orders_customer_id_idx on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+      } else {
+        plan += '  ->  Seq Scan on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+        if (selectivity < 1.0) {
+          plan += '        Filter: (WHERE clause)\n';
+        }
+      }
+      plan += '  ->  Hash  (rows=' + fmtNum(customers) + ')\n';
+      plan += '        ->  Seq Scan on customers  (rows=' + fmtNum(customers) + ')';
+    } else {
+      // Nested Loop
+      var nlCost = matchedOrders * (Math.log2(Math.max(2, customers)) * 0.5 + randomCost);
+      plan += 'Nested Loop  (cost=0.00..' + fmtCost(nlCost) + ' rows=' + fmtNum(matchedOrders) + ')\n';
+      if (scanType.indexOf('Bitmap') !== -1) {
+        plan += '  ->  Bitmap Heap Scan on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+        plan += '        ->  Bitmap Index Scan on orders_customer_id_idx\n';
+      } else if (scanType.indexOf('Index Scan') !== -1) {
+        plan += '  ->  Index Scan using orders_customer_id_idx on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+      } else {
+        plan += '  ->  Seq Scan on orders  (rows=' + fmtNum(matchedOrders) + ')\n';
+      }
+      plan += '  ->  Index Scan using customers_pkey on customers  (rows=1)\n';
+      plan += '        Index Cond: (id = orders.customer_id)';
+    }
+
+    document.getElementById('strategyPlan').textContent = plan;
+
+    var explainHtml = '<p><strong>Scan:</strong> ' + scanReason + '</p>';
+    explainHtml += '<p><strong>Join:</strong> ' + joinReason + '</p>';
+    if (isSSD) {
+      explainHtml += '<p><strong>Storage:</strong> SSD (random_page_cost=1.1) — index scans are favored</p>';
+    } else {
+      explainHtml += '<p><strong>Storage:</strong> HDD (random_page_cost=4.0) — sequential access preferred</p>';
+    }
+    document.getElementById('strategyExplain').innerHTML = explainHtml;
+  }
+
+  document.getElementById('stratOrdersSlider').addEventListener('input', updateStrategy);
+  document.getElementById('stratCustomersSlider').addEventListener('input', updateStrategy);
+  document.getElementById('stratSelectSlider').addEventListener('input', updateStrategy);
+  document.getElementById('stratIndex').addEventListener('change', updateStrategy);
+  document.getElementById('stratSSD').addEventListener('change', updateStrategy);
+  updateStrategy();
+</script>

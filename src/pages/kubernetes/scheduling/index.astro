@@ -1,0 +1,1468 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kubernetes Pod Scheduling" 
+  description="Interactive visualization of the Kubernetes scheduler pipeline — filtering, scoring, binding, preemption, and topology spread"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Pod Scheduling", href: "/kubernetes/scheduling/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>☸️ Kubernetes Pod Scheduling</h1>
+      <p class="subtitle">Filtering, Scoring &amp; Binding — How Pods Find Their Home</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          When you create a Pod, the <strong>kube-scheduler</strong> decides which node to place it on.
+          The scheduler runs a <em>pipeline</em>: first it <strong>filters</strong> out nodes that can't
+          run the Pod (not enough resources, wrong taints, affinity mismatches), then it <strong>scores</strong>
+          the remaining candidates (prefer less loaded nodes, balanced allocation, topology spread),
+          and finally <strong>binds</strong> the Pod to the highest-scoring node. If no node passes
+          filtering, the Pod stays <em>Pending</em> — or triggers <strong>preemption</strong> of
+          lower-priority Pods.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pipeline Diagram -->
+    <section class="pipeline-section">
+      <h2>🔀 Scheduler Pipeline</h2>
+      <p class="section-desc">The three phases every Pod goes through before it runs.</p>
+      <div class="pipeline">
+        <div class="pipeline-step" id="pipeFilter">
+          <div class="pipe-icon">🔍</div>
+          <div class="pipe-label">Filter</div>
+          <div class="pipe-desc">Remove unfit nodes</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" id="pipeScore">
+          <div class="pipe-icon">📊</div>
+          <div class="pipe-label">Score</div>
+          <div class="pipe-desc">Rank remaining nodes</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" id="pipeBind">
+          <div class="pipe-icon">🔗</div>
+          <div class="pipe-label">Bind</div>
+          <div class="pipe-desc">Assign Pod to winner</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Cluster Simulation -->
+    <section class="cluster-section">
+      <h2>🖧 Interactive Cluster</h2>
+      <p class="section-desc">Configure a Pod and watch the scheduler filter, score, and place it across 5 nodes.</p>
+
+      <div class="sim-layout">
+        <!-- Pod Config Panel -->
+        <div class="config-panel">
+          <h3>Pod Configuration</h3>
+
+          <div class="config-group">
+            <label>CPU Request: <strong id="cpuReqLabel">500m</strong></label>
+            <input type="range" id="cpuReqSlider" min="100" max="4000" value="500" step="100" class="slider">
+          </div>
+
+          <div class="config-group">
+            <label>Memory Request: <strong id="memReqLabel">256Mi</strong></label>
+            <input type="range" id="memReqSlider" min="64" max="8192" value="256" step="64" class="slider">
+          </div>
+
+          <div class="config-group">
+            <label>Priority: <strong id="priorityLabel">Medium</strong></label>
+            <input type="range" id="prioritySlider" min="0" max="2" value="1" step="1" class="slider">
+          </div>
+
+          <div class="config-group">
+            <label>Node Affinity</label>
+            <select id="affinitySelect" class="config-select">
+              <option value="none">None</option>
+              <option value="zone-a">Prefer zone-a</option>
+              <option value="zone-b">Prefer zone-b</option>
+              <option value="gpu">Require GPU</option>
+            </select>
+          </div>
+
+          <div class="config-group">
+            <label>Toleration</label>
+            <select id="tolerationSelect" class="config-select">
+              <option value="none">None</option>
+              <option value="dedicated">dedicated=ml</option>
+              <option value="spot">spot=true</option>
+            </select>
+          </div>
+
+          <div class="config-group">
+            <label>Anti-Affinity</label>
+            <select id="antiAffinitySelect" class="config-select">
+              <option value="none">None</option>
+              <option value="web">Avoid nodes with web pods</option>
+              <option value="db">Avoid nodes with db pods</option>
+            </select>
+          </div>
+
+          <button id="scheduleBtn" class="action-btn primary-btn">▶ Schedule Pod</button>
+          <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <!-- Cluster View -->
+        <div class="cluster-view">
+          <div class="nodes-grid" id="nodesGrid">
+            <!-- Rendered by JS -->
+          </div>
+
+          <!-- Scheduler Log -->
+          <div class="sched-log-wrapper">
+            <h4>📋 Scheduler Log</h4>
+            <div class="sched-log" id="schedLog">
+              <div class="log-empty">Configure a Pod and click "Schedule Pod"...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filtering Explainer -->
+    <section class="explain-section">
+      <h2>🔍 Filtering (Predicates)</h2>
+      <p class="section-desc">Nodes that fail any predicate are eliminated. No exceptions.</p>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📦 Resource Fit</h3>
+          <p>
+            The node must have enough <strong>allocatable</strong> CPU and memory to satisfy the Pod's
+            <code>requests</code>. Note: <em>requests</em> reserve capacity, while <em>limits</em> cap usage.
+            A node can be <strong>overcommitted</strong> on limits but never on requests.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🏷️ Taints &amp; Tolerations</h3>
+          <p>
+            Nodes can have <strong>taints</strong> (e.g., <code>dedicated=ml:NoSchedule</code>).
+            A Pod must have a matching <strong>toleration</strong> or the node is filtered out.
+            This keeps specialized nodes reserved for specific workloads.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📍 Node Affinity</h3>
+          <p>
+            <code>requiredDuringScheduling</code> rules act as hard filters — the Pod <em>must</em>
+            land on a node matching the label selector. <code>preferredDuringScheduling</code>
+            rules are soft and only affect scoring.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Pod Anti-Affinity</h3>
+          <p>
+            <code>requiredDuringScheduling</code> anti-affinity prevents co-locating Pods.
+            For example, two replicas of the same service shouldn't land on the same node for HA.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scoring Explainer -->
+    <section class="explain-section">
+      <h2>📊 Scoring (Priorities)</h2>
+      <p class="section-desc">Surviving nodes are scored 0–100 on each priority, then weighted and summed.</p>
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>⚖️ LeastRequestedPriority</h3>
+          <p>
+            Prefers nodes with the <strong>most free resources</strong>. Score =
+            <code>(capacity - used) / capacity × 100</code>. Spreads load across the cluster.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🎯 BalancedResourceAllocation</h3>
+          <p>
+            Prefers nodes where CPU and memory usage are <strong>balanced</strong>. Avoids nodes
+            that are 90% on CPU but 10% on memory — those waste capacity.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🧲 InterPodAffinity</h3>
+          <p>
+            Scores higher when <code>preferredDuringScheduling</code> affinity rules are satisfied.
+            Useful for co-locating tightly coupled services (e.g., app + cache).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Preemption Section -->
+    <section class="preemption-section">
+      <h2>⚡ Preemption</h2>
+      <p class="section-desc">When no node passes filtering, the scheduler may evict lower-priority Pods.</p>
+
+      <div class="preemption-demo">
+        <div class="preemption-card">
+          <h4>How It Works</h4>
+          <p>
+            Each Pod has a <strong>PriorityClass</strong> (0–1,000,000,000). When a high-priority Pod
+            can't be scheduled, the scheduler finds a node where evicting low-priority Pods would
+            free enough resources. The evicted Pods get a <code>gracefulTermination</code> period,
+            then are deleted. The high-priority Pod is then scheduled on that node.
+          </p>
+        </div>
+        <div class="preemption-viz" id="preemptionViz">
+          <div class="preempt-node" id="preemptNode">
+            <div class="preempt-node-label">node-3 (4 CPU, 8Gi)</div>
+            <div class="preempt-pods" id="preemptPods">
+              <!-- Rendered by JS -->
+            </div>
+            <div class="preempt-bar">
+              <div class="preempt-bar-fill" id="preemptBarFill"></div>
+            </div>
+          </div>
+          <div class="preempt-controls">
+            <button id="preemptBtn" class="action-btn chaos-btn">⚡ Schedule High-Priority Pod</button>
+            <button id="preemptResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          </div>
+          <div class="preempt-log" id="preemptLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Topology Spread -->
+    <section class="topo-section">
+      <h2>🌐 Topology Spread Constraints</h2>
+      <p class="section-desc">Distribute Pods evenly across failure domains (zones, racks, nodes).</p>
+
+      <div class="topo-demo">
+        <div class="explain-card highlight-card" style="margin-bottom: 24px;">
+          <h3>💡 maxSkew</h3>
+          <p>
+            <code>maxSkew</code> defines the maximum difference in Pod count between any two topology
+            domains. With <code>maxSkew: 1</code> and 3 zones, scheduling 6 replicas gives 2 per zone.
+            If a zone already has 3 and another has 1, the scheduler places the next Pod in the zone
+            with fewer Pods. <code>whenUnsatisfiable: DoNotSchedule</code> makes this a hard constraint;
+            <code>ScheduleAnyway</code> makes it a soft preference.
+          </p>
+        </div>
+
+        <div class="topo-viz" id="topoViz">
+          <div class="topo-zones" id="topoZones">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="topo-controls">
+            <button id="topoAddBtn" class="action-btn primary-btn">+ Add Replica</button>
+            <button id="topoAdd3Btn" class="action-btn election-btn">+3 Replicas</button>
+            <button id="topoResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+            <div class="topo-skew-control">
+              <label>maxSkew: <strong id="skewLabel">1</strong></label>
+              <input type="range" id="skewSlider" min="1" max="3" value="1" step="1" class="slider">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Resource Requests vs Limits -->
+    <section class="explain-section">
+      <h2>📏 Requests vs Limits</h2>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📋 Requests</h3>
+          <p>
+            The <strong>guaranteed</strong> amount of resources. The scheduler uses requests to decide
+            placement. A node's allocatable capacity minus all Pod requests = free capacity. Pods are
+            <em>guaranteed</em> their requested resources.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🚀 Limits</h3>
+          <p>
+            The <strong>maximum</strong> a Pod can use. If a Pod exceeds its memory limit, it's
+            <strong>OOM-killed</strong>. CPU limits cause <strong>throttling</strong>. A node can
+            have total limits &gt; capacity (overcommitted) — this is fine until Pods actually try to
+            use it all simultaneously.
+          </p>
+        </div>
+        <div class="explain-card highlight-card">
+          <h3>⚠️ QoS Classes</h3>
+          <p>
+            <strong>Guaranteed</strong>: requests == limits for all containers.<br/>
+            <strong>Burstable</strong>: requests &lt; limits (or only requests set).<br/>
+            <strong>BestEffort</strong>: no requests or limits set — first to be evicted under pressure.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on the <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/" target="_blank">Kubernetes Scheduler Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kubernetes%20Pod%20Scheduling%20visualizer&url=https://systeminternals.dev/kubernetes/scheduling/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kubernetes/scheduling/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kubernetes/scheduling/&t=Interactive%20Kubernetes%20Pod%20Scheduling%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(167, 139, 250, 0.05));
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Pipeline */
+  .pipeline-section {
+    margin-bottom: 50px;
+  }
+
+  .pipeline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .pipeline-step {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    padding: 24px 32px;
+    text-align: center;
+    transition: all 0.4s;
+    min-width: 160px;
+  }
+
+  .pipeline-step.active {
+    border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(96, 165, 250, 0.1);
+    box-shadow: 0 0 30px rgba(96, 165, 250, 0.2);
+    transform: scale(1.05);
+  }
+
+  .pipeline-step.done {
+    border-color: rgba(74, 222, 128, 0.5);
+    background: rgba(74, 222, 128, 0.08);
+  }
+
+  .pipe-icon { font-size: 2rem; margin-bottom: 8px; }
+  .pipe-label { font-size: 1.1rem; font-weight: 700; color: #fff; }
+  .pipe-desc { font-size: 0.85rem; color: #888; margin-top: 4px; }
+
+  .pipeline-arrow {
+    font-size: 1.5rem;
+    color: #555;
+    font-weight: bold;
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
+  }
+
+  .election-btn {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+  }
+
+  .election-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+  }
+
+  .chaos-btn {
+    background: linear-gradient(135deg, #f472b6, #ef4444);
+    color: white;
+  }
+
+  .chaos-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Sim Layout */
+  .cluster-section {
+    margin-bottom: 50px;
+  }
+
+  .sim-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+  }
+
+  .config-panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .config-panel h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+
+  .config-group {
+    margin-bottom: 16px;
+  }
+
+  .config-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 6px;
+  }
+
+  .config-group label strong {
+    color: #60a5fa;
+  }
+
+  .slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #60a5fa;
+    cursor: pointer;
+  }
+
+  .config-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ddd;
+    font-size: 0.85rem;
+  }
+
+  .config-panel .action-btn {
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  /* Cluster View */
+  .cluster-view {
+    min-width: 0;
+  }
+
+  .nodes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .node-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 14px;
+    transition: all 0.4s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .node-card.filtered-out {
+    opacity: 0.3;
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .node-card.scoring {
+    border-color: rgba(251, 191, 36, 0.5);
+    background: rgba(251, 191, 36, 0.05);
+  }
+
+  .node-card.selected {
+    border-color: rgba(74, 222, 128, 0.7);
+    background: rgba(74, 222, 128, 0.08);
+    box-shadow: 0 0 30px rgba(74, 222, 128, 0.2);
+  }
+
+  .node-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .node-zone {
+    font-size: 0.7rem;
+    color: #888;
+    margin-bottom: 8px;
+  }
+
+  .node-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .node-label-tag {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(167, 139, 250, 0.2);
+    color: #c4b5fd;
+  }
+
+  .node-label-tag.taint {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+  }
+
+  .node-resources {
+    font-size: 0.75rem;
+    color: #aaa;
+    margin-bottom: 8px;
+  }
+
+  .resource-bar {
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    margin: 3px 0;
+    overflow: hidden;
+  }
+
+  .resource-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+
+  .resource-bar-fill.cpu { background: linear-gradient(90deg, #60a5fa, #3b82f6); }
+  .resource-bar-fill.mem { background: linear-gradient(90deg, #a78bfa, #7c3aed); }
+
+  .node-pods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 20px;
+  }
+
+  .pod-chip {
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(96, 165, 250, 0.25);
+    color: #93c5fd;
+    transition: all 0.3s;
+  }
+
+  .pod-chip.new-pod {
+    background: rgba(74, 222, 128, 0.3);
+    color: #86efac;
+    animation: podAppear 0.5s ease;
+  }
+
+  .pod-chip.evicting {
+    background: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    animation: podEvict 0.6s ease forwards;
+  }
+
+  @keyframes podAppear {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes podEvict {
+    to { transform: scale(0); opacity: 0; }
+  }
+
+  .node-score {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #fbbf24;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .node-card.scoring .node-score,
+  .node-card.selected .node-score {
+    opacity: 1;
+  }
+
+  .node-card.selected .node-score {
+    color: #4ade80;
+  }
+
+  /* Scheduler Log */
+  .sched-log-wrapper h4 {
+    font-size: 0.95rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .sched-log {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 250px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+
+  .log-empty { color: #555; }
+
+  .log-line { color: #aaa; }
+  .log-line.filter { color: #f87171; }
+  .log-line.pass { color: #4ade80; }
+  .log-line.score { color: #fbbf24; }
+  .log-line.bind { color: #60a5fa; }
+  .log-line.info { color: #a78bfa; }
+
+  /* Explain sections */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+
+  .explain-card p {
+    font-size: 0.95rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #60a5fa; font-style: normal; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    border-color: rgba(96, 165, 250, 0.3);
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.08), rgba(167, 139, 250, 0.04));
+  }
+
+  /* Preemption */
+  .preemption-section {
+    margin-bottom: 50px;
+  }
+
+  .preemption-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .preemption-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .preemption-card h4 { color: #fff; margin-bottom: 12px; font-size: 1.05rem; }
+  .preemption-card p { color: #aaa; line-height: 1.7; font-size: 0.95rem; }
+  .preemption-card strong { color: #fff; }
+  .preemption-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .preemption-viz {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .preempt-node {
+    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 16px;
+  }
+
+  .preempt-node-label {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+
+  .preempt-pods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+    min-height: 30px;
+  }
+
+  .preempt-pod {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.4s;
+  }
+
+  .preempt-pod.low {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .preempt-pod.medium {
+    background: rgba(96, 165, 250, 0.2);
+    color: #93c5fd;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+  }
+
+  .preempt-pod.high {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .preempt-pod.evicting {
+    animation: podEvict 0.6s ease forwards;
+  }
+
+  .preempt-bar {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .preempt-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+
+  .preempt-controls {
+    display: flex;
+    gap: 12px;
+  }
+
+  .preempt-log {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.6;
+    min-height: 20px;
+  }
+
+  /* Topology */
+  .topo-section {
+    margin-bottom: 50px;
+  }
+
+  .topo-viz {
+    margin-top: 16px;
+  }
+
+  .topo-zones {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .topo-zone {
+    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 16px;
+    text-align: center;
+    transition: all 0.3s;
+    min-height: 120px;
+  }
+
+  .topo-zone.receiving {
+    border-color: rgba(74, 222, 128, 0.5);
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .topo-zone-name {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+  }
+
+  .topo-zone-count {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 10px;
+  }
+
+  .topo-pods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .topo-pod {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: rgba(96, 165, 250, 0.3);
+    border: 1px solid rgba(96, 165, 250, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: #93c5fd;
+    animation: podAppear 0.4s ease;
+  }
+
+  .topo-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .topo-skew-control {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .topo-skew-control label {
+    color: #aaa;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .topo-skew-control strong {
+    color: #60a5fa;
+  }
+
+  .topo-skew-control .slider {
+    width: 80px;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .sim-layout { grid-template-columns: 1fr; }
+    .preemption-demo { grid-template-columns: 1fr; }
+    .topo-zones { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipeline-arrow { transform: rotate(90deg); }
+    .nodes-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // KUBERNETES SCHEDULER SIMULATION
+  // ============================================================
+
+  // --- Cluster Definition ---
+  var nodes = [
+    { name: "node-1", zone: "zone-a", cpu: 4000, mem: 8192, labels: ["gpu"], taints: [], usedCpu: 1200, usedMem: 2048, pods: [{ name: "ml-train", cpu: 800, mem: 1024, type: "web", priority: 1 }, { name: "api-srv", cpu: 400, mem: 1024, type: "web", priority: 1 }] },
+    { name: "node-2", zone: "zone-a", cpu: 2000, mem: 4096, labels: [], taints: ["dedicated=ml:NoSchedule"], usedCpu: 500, usedMem: 1024, pods: [{ name: "ml-infer", cpu: 500, mem: 1024, type: "db", priority: 0 }] },
+    { name: "node-3", zone: "zone-b", cpu: 4000, mem: 8192, labels: [], taints: [], usedCpu: 3200, usedMem: 6144, pods: [{ name: "web-1", cpu: 1000, mem: 2048, type: "web", priority: 1 }, { name: "web-2", cpu: 1000, mem: 2048, type: "web", priority: 0 }, { name: "cache", cpu: 1200, mem: 2048, type: "db", priority: 0 }] },
+    { name: "node-4", zone: "zone-b", cpu: 8000, mem: 16384, labels: ["gpu"], taints: ["spot=true:NoSchedule"], usedCpu: 2000, usedMem: 4096, pods: [{ name: "batch-1", cpu: 1000, mem: 2048, type: "db", priority: 0 }, { name: "batch-2", cpu: 1000, mem: 2048, type: "db", priority: 1 }] },
+    { name: "node-5", zone: "zone-c", cpu: 2000, mem: 4096, labels: [], taints: [], usedCpu: 400, usedMem: 512, pods: [{ name: "monitor", cpu: 400, mem: 512, type: "web", priority: 0 }] }
+  ];
+
+  var origNodes = JSON.parse(JSON.stringify(nodes));
+
+  function resetNodes() {
+    nodes = JSON.parse(JSON.stringify(origNodes));
+  }
+
+  // --- Render Nodes ---
+  function renderNodes(filterResults, scoreResults, selectedIdx) {
+    var grid = document.getElementById("nodesGrid");
+    var html = "";
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var cls = "node-card";
+      if (filterResults && !filterResults[i]) cls += " filtered-out";
+      else if (selectedIdx === i) cls += " selected";
+      else if (scoreResults && scoreResults[i] !== undefined) cls += " scoring";
+
+      var cpuPct = Math.round((n.usedCpu / n.cpu) * 100);
+      var memPct = Math.round((n.usedMem / n.mem) * 100);
+
+      html += '<div class="' + cls + '">';
+      html += '<div class="node-score">' + (scoreResults && scoreResults[i] !== undefined ? scoreResults[i] : "") + '</div>';
+      html += '<div class="node-name">' + n.name + '</div>';
+      html += '<div class="node-zone">' + n.zone + '</div>';
+      html += '<div class="node-labels">';
+      for (var l = 0; l < n.labels.length; l++) {
+        html += '<span class="node-label-tag">' + n.labels[l] + '</span>';
+      }
+      for (var t = 0; t < n.taints.length; t++) {
+        html += '<span class="node-label-tag taint">⚠ ' + n.taints[t].split(":")[0] + '</span>';
+      }
+      html += '</div>';
+      html += '<div class="node-resources">';
+      html += 'CPU: ' + n.usedCpu + 'm / ' + n.cpu + 'm';
+      html += '<div class="resource-bar"><div class="resource-bar-fill cpu" style="width:' + cpuPct + '%"></div></div>';
+      html += 'Mem: ' + n.usedMem + 'Mi / ' + n.mem + 'Mi';
+      html += '<div class="resource-bar"><div class="resource-bar-fill mem" style="width:' + memPct + '%"></div></div>';
+      html += '</div>';
+      html += '<div class="node-pods">';
+      for (var p = 0; p < n.pods.length; p++) {
+        var podCls = "pod-chip";
+        if (n.pods[p].isNew) podCls += " new-pod";
+        html += '<span class="' + podCls + '">' + n.pods[p].name + '</span>';
+      }
+      html += '</div>';
+      html += '</div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  // --- Log ---
+  var logEl = document.getElementById("schedLog");
+
+  function clearLog() {
+    logEl.innerHTML = '<div class="log-empty">Configure a Pod and click "Schedule Pod"...</div>';
+  }
+
+  function addLog(msg, cls) {
+    if (logEl.querySelector(".log-empty")) logEl.innerHTML = "";
+    var div = document.createElement("div");
+    div.className = "log-line " + (cls || "");
+    div.textContent = msg;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // --- Pipeline highlight ---
+  function setPipelineStage(stage) {
+    var stages = ["pipeFilter", "pipeScore", "pipeBind"];
+    for (var s = 0; s < stages.length; s++) {
+      var el = document.getElementById(stages[s]);
+      el.classList.remove("active", "done");
+      if (s < stage) el.classList.add("done");
+      if (s === stage) el.classList.add("active");
+    }
+  }
+
+  function clearPipeline() {
+    var stages = ["pipeFilter", "pipeScore", "pipeBind"];
+    for (var s = 0; s < stages.length; s++) {
+      document.getElementById(stages[s]).classList.remove("active", "done");
+    }
+  }
+
+  // --- Scheduler ---
+  function schedulePod() {
+    var cpuReq = parseInt(document.getElementById("cpuReqSlider").value);
+    var memReq = parseInt(document.getElementById("memReqSlider").value);
+    var prioVal = parseInt(document.getElementById("prioritySlider").value);
+    var affinity = document.getElementById("affinitySelect").value;
+    var toleration = document.getElementById("tolerationSelect").value;
+    var antiAff = document.getElementById("antiAffinitySelect").value;
+
+    var prioNames = ["Low", "Medium", "High"];
+    var prioName = prioNames[prioVal];
+
+    clearLog();
+    addLog("== Scheduling Pod: cpu=" + cpuReq + "m, mem=" + memReq + "Mi, priority=" + prioName + " ==", "info");
+
+    var schedBtn = document.getElementById("scheduleBtn");
+    schedBtn.disabled = true;
+
+    // Phase 1: Filtering
+    var filterResults = [];
+    var delay = 0;
+
+    setTimeout(function() {
+      setPipelineStage(0);
+      addLog("--- Phase 1: Filtering ---", "info");
+    }, delay);
+    delay += 400;
+
+    for (var i = 0; i < nodes.length; i++) {
+      (function(idx) {
+        setTimeout(function() {
+          var n = nodes[idx];
+          var pass = true;
+          var reason = "";
+
+          // Resource check
+          if (n.cpu - n.usedCpu < cpuReq) {
+            pass = false;
+            reason = "insufficient CPU (free: " + (n.cpu - n.usedCpu) + "m, need: " + cpuReq + "m)";
+          } else if (n.mem - n.usedMem < memReq) {
+            pass = false;
+            reason = "insufficient memory (free: " + (n.mem - n.usedMem) + "Mi, need: " + memReq + "Mi)";
+          }
+
+          // Taint check
+          if (pass && n.taints.length > 0) {
+            var tolerated = false;
+            for (var t = 0; t < n.taints.length; t++) {
+              var taintKey = n.taints[t].split("=")[0];
+              if (toleration === taintKey) { tolerated = true; break; }
+            }
+            if (!tolerated) {
+              pass = false;
+              reason = "taint " + n.taints[0].split(":")[0] + " not tolerated";
+            }
+          }
+
+          // Hard node affinity (gpu requirement)
+          if (pass && affinity === "gpu") {
+            if (n.labels.indexOf("gpu") === -1) {
+              pass = false;
+              reason = "missing label: gpu";
+            }
+          }
+
+          // Hard anti-affinity
+          if (pass && antiAff !== "none") {
+            for (var p = 0; p < n.pods.length; p++) {
+              if (n.pods[p].type === antiAff) {
+                pass = false;
+                reason = "anti-affinity: has " + antiAff + " pod (" + n.pods[p].name + ")";
+                break;
+              }
+            }
+          }
+
+          filterResults[idx] = pass;
+          if (pass) {
+            addLog("  ✅ " + n.name + " — passed all predicates", "pass");
+          } else {
+            addLog("  ❌ " + n.name + " — filtered: " + reason, "filter");
+          }
+          renderNodes(filterResults, null, -1);
+        }, delay);
+        delay += 350;
+      })(i);
+    }
+
+    // Phase 2: Scoring
+    var scoreResults = [];
+    setTimeout(function() {
+      setPipelineStage(1);
+      addLog("--- Phase 2: Scoring ---", "info");
+
+      var survivors = [];
+      for (var i = 0; i < nodes.length; i++) {
+        if (filterResults[i]) survivors.push(i);
+      }
+
+      if (survivors.length === 0) {
+        addLog("  ⚠️ No nodes passed filtering! Pod stays Pending.", "filter");
+        clearPipeline();
+        schedBtn.disabled = false;
+        return;
+      }
+
+      var scoringDelay = 0;
+      for (var s = 0; s < survivors.length; s++) {
+        (function(idx) {
+          setTimeout(function() {
+            var n = nodes[idx];
+
+            // LeastRequested score
+            var cpuFree = (n.cpu - n.usedCpu - cpuReq) / n.cpu;
+            var memFree = (n.mem - n.usedMem - memReq) / n.mem;
+            var leastReq = Math.round(((cpuFree + memFree) / 2) * 100);
+
+            // BalancedAllocation score
+            var cpuRatio = (n.usedCpu + cpuReq) / n.cpu;
+            var memRatio = (n.usedMem + memReq) / n.mem;
+            var balanced = Math.round((1 - Math.abs(cpuRatio - memRatio)) * 100);
+
+            // Zone affinity bonus
+            var affinityScore = 0;
+            if (affinity === "zone-a" && n.zone === "zone-a") affinityScore = 20;
+            if (affinity === "zone-b" && n.zone === "zone-b") affinityScore = 20;
+
+            var total = Math.max(0, Math.min(100, Math.round(leastReq * 0.5 + balanced * 0.3 + affinityScore * 0.2 + affinityScore)));
+            scoreResults[idx] = total;
+
+            addLog("  📊 " + n.name + ": LeastReq=" + leastReq + " Balanced=" + balanced + " Affinity=+" + affinityScore + " → Total=" + total, "score");
+            renderNodes(filterResults, scoreResults, -1);
+          }, scoringDelay);
+          scoringDelay += 400;
+        })(survivors[s]);
+      }
+
+      // Phase 3: Binding
+      setTimeout(function() {
+        setPipelineStage(2);
+        addLog("--- Phase 3: Binding ---", "info");
+
+        var bestIdx = -1;
+        var bestScore = -1;
+        for (var i = 0; i < nodes.length; i++) {
+          if (scoreResults[i] !== undefined && scoreResults[i] > bestScore) {
+            bestScore = scoreResults[i];
+            bestIdx = i;
+          }
+        }
+
+        if (bestIdx >= 0) {
+          var podName = "new-pod-" + Math.floor(Math.random() * 1000);
+          nodes[bestIdx].pods.push({ name: podName, cpu: cpuReq, mem: memReq, type: "web", priority: prioVal, isNew: true });
+          nodes[bestIdx].usedCpu += cpuReq;
+          nodes[bestIdx].usedMem += memReq;
+          addLog("  🔗 Bound to " + nodes[bestIdx].name + " (score: " + bestScore + ")", "bind");
+          renderNodes(filterResults, scoreResults, bestIdx);
+        }
+
+        setTimeout(function() {
+          clearPipeline();
+          schedBtn.disabled = false;
+        }, 2000);
+      }, scoringDelay + 300);
+    }, delay + 200);
+  }
+
+  // --- Slider Labels ---
+  document.getElementById("cpuReqSlider").addEventListener("input", function() {
+    document.getElementById("cpuReqLabel").textContent = this.value + "m";
+  });
+  document.getElementById("memReqSlider").addEventListener("input", function() {
+    document.getElementById("memReqLabel").textContent = this.value + "Mi";
+  });
+  document.getElementById("prioritySlider").addEventListener("input", function() {
+    var names = ["Low", "Medium", "High"];
+    document.getElementById("priorityLabel").textContent = names[parseInt(this.value)];
+  });
+  document.getElementById("skewSlider").addEventListener("input", function() {
+    document.getElementById("skewLabel").textContent = this.value;
+  });
+
+  // --- Schedule Button ---
+  document.getElementById("scheduleBtn").addEventListener("click", schedulePod);
+
+  // --- Reset ---
+  document.getElementById("resetBtn").addEventListener("click", function() {
+    resetNodes();
+    clearLog();
+    clearPipeline();
+    renderNodes(null, null, -1);
+    document.getElementById("scheduleBtn").disabled = false;
+  });
+
+  // --- Preemption Demo ---
+  var preemptPods = [
+    { name: "batch-low", cpu: 1000, priority: 0, cls: "low" },
+    { name: "web-med", cpu: 1000, priority: 1, cls: "medium" },
+    { name: "cache-low", cpu: 1000, priority: 0, cls: "low" },
+    { name: "api-med", cpu: 500, priority: 1, cls: "medium" }
+  ];
+  var preemptOrigPods = JSON.parse(JSON.stringify(preemptPods));
+  var preemptUsed = 3500;
+  var preemptTotal = 4000;
+
+  function renderPreemption() {
+    var el = document.getElementById("preemptPods");
+    var html = "";
+    for (var i = 0; i < preemptPods.length; i++) {
+      html += '<span class="preempt-pod ' + preemptPods[i].cls + '">' + preemptPods[i].name + ' (' + preemptPods[i].cpu + 'm, pri=' + preemptPods[i].priority + ')</span>';
+    }
+    el.innerHTML = html;
+    var pct = Math.round((preemptUsed / preemptTotal) * 100);
+    document.getElementById("preemptBarFill").style.width = pct + "%";
+  }
+
+  document.getElementById("preemptBtn").addEventListener("click", function() {
+    var logEl2 = document.getElementById("preemptLog");
+    var btn = document.getElementById("preemptBtn");
+    btn.disabled = true;
+    logEl2.innerHTML = '<span style="color:#f87171;">⚡ High-priority Pod needs 1500m CPU. Current free: ' + (preemptTotal - preemptUsed) + 'm</span>';
+
+    setTimeout(function() {
+      // Find low-priority pods to evict
+      var freed = 0;
+      var toEvict = [];
+      // Sort by priority ascending
+      var sorted = preemptPods.slice().sort(function(a, b) { return a.priority - b.priority; });
+      for (var i = 0; i < sorted.length && freed < 1500 - (preemptTotal - preemptUsed); i++) {
+        if (sorted[i].priority < 2) {
+          toEvict.push(sorted[i].name);
+          freed += sorted[i].cpu;
+        }
+      }
+
+      logEl2.innerHTML += '<br><span style="color:#fbbf24;">🔍 Need to free ' + (1500 - (preemptTotal - preemptUsed)) + 'm more. Evicting: ' + toEvict.join(", ") + '</span>';
+
+      setTimeout(function() {
+        // Evict pods
+        for (var e = 0; e < toEvict.length; e++) {
+          for (var p = preemptPods.length - 1; p >= 0; p--) {
+            if (preemptPods[p].name === toEvict[e]) {
+              preemptUsed -= preemptPods[p].cpu;
+              preemptPods.splice(p, 1);
+              break;
+            }
+          }
+        }
+        renderPreemption();
+        logEl2.innerHTML += '<br><span style="color:#4ade80;">✅ Evicted ' + toEvict.length + ' low-priority pods. Free: ' + (preemptTotal - preemptUsed) + 'm</span>';
+
+        setTimeout(function() {
+          preemptPods.push({ name: "critical-svc", cpu: 1500, priority: 2, cls: "high" });
+          preemptUsed += 1500;
+          renderPreemption();
+          logEl2.innerHTML += '<br><span style="color:#60a5fa;">🔗 High-priority Pod "critical-svc" scheduled!</span>';
+          btn.disabled = false;
+        }, 800);
+      }, 800);
+    }, 600);
+  });
+
+  document.getElementById("preemptResetBtn").addEventListener("click", function() {
+    preemptPods = JSON.parse(JSON.stringify(preemptOrigPods));
+    preemptUsed = 3500;
+    renderPreemption();
+    document.getElementById("preemptLog").innerHTML = "";
+    document.getElementById("preemptBtn").disabled = false;
+  });
+
+  // --- Topology Spread ---
+  var topoZones = [
+    { name: "zone-a", pods: 0 },
+    { name: "zone-b", pods: 0 },
+    { name: "zone-c", pods: 0 }
+  ];
+  var topoCounter = 0;
+
+  function renderTopo() {
+    var el = document.getElementById("topoZones");
+    var html = "";
+    for (var z = 0; z < topoZones.length; z++) {
+      var zone = topoZones[z];
+      html += '<div class="topo-zone" id="topoZone' + z + '">';
+      html += '<div class="topo-zone-name">' + zone.name + '</div>';
+      html += '<div class="topo-zone-count">' + zone.pods + ' pods</div>';
+      html += '<div class="topo-pods">';
+      for (var p = 0; p < zone.pods; p++) {
+        html += '<div class="topo-pod">☸</div>';
+      }
+      html += '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function addTopoReplica() {
+    var maxSkew = parseInt(document.getElementById("skewSlider").value);
+    // Find zone with minimum pods
+    var minPods = Infinity;
+    for (var z = 0; z < topoZones.length; z++) {
+      if (topoZones[z].pods < minPods) minPods = topoZones[z].pods;
+    }
+
+    // Candidates: zones where adding wouldn't violate maxSkew
+    var candidates = [];
+    for (var z = 0; z < topoZones.length; z++) {
+      if (topoZones[z].pods - minPods < maxSkew || topoZones[z].pods === minPods) {
+        candidates.push(z);
+      }
+    }
+
+    // Prefer zone with fewest pods among candidates
+    candidates.sort(function(a, b) { return topoZones[a].pods - topoZones[b].pods; });
+
+    // Among tied candidates, pick randomly
+    var minCandPods = topoZones[candidates[0]].pods;
+    var tied = candidates.filter(function(c) { return topoZones[c].pods === minCandPods; });
+    var chosen = tied[Math.floor(Math.random() * tied.length)];
+
+    topoZones[chosen].pods++;
+    topoCounter++;
+    renderTopo();
+
+    // Highlight the receiving zone
+    var zoneEl = document.getElementById("topoZone" + chosen);
+    if (zoneEl) {
+      zoneEl.classList.add("receiving");
+      setTimeout(function() { zoneEl.classList.remove("receiving"); }, 500);
+    }
+  }
+
+  document.getElementById("topoAddBtn").addEventListener("click", addTopoReplica);
+
+  document.getElementById("topoAdd3Btn").addEventListener("click", function() {
+    addTopoReplica();
+    setTimeout(addTopoReplica, 300);
+    setTimeout(addTopoReplica, 600);
+  });
+
+  document.getElementById("topoResetBtn").addEventListener("click", function() {
+    for (var z = 0; z < topoZones.length; z++) topoZones[z].pods = 0;
+    topoCounter = 0;
+    renderTopo();
+  });
+
+  // --- Init ---
+  renderNodes(null, null, -1);
+  renderPreemption();
+  renderTopo();
+</script>
