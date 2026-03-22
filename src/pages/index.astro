@@ -65,7 +65,9 @@ const sparkTopics = [
     <div class="topics-grid">
       {mongodbTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
-          <div class="topic-status">Coming soon</div>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
           <h3>{topic.title}</h3>
           <p>{topic.description}</p>
         </a>
@@ -81,7 +83,9 @@ const sparkTopics = [
     <div class="topics-grid">
       {kafkaTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
-          <div class="topic-status">Coming soon</div>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
           <h3>{topic.title}</h3>
           <p>{topic.description}</p>
         </a>
@@ -97,7 +101,9 @@ const sparkTopics = [
     <div class="topics-grid">
       {sparkTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
-          <div class="topic-status">Coming soon</div>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
           <h3>{topic.title}</h3>
           <p>{topic.description}</p>
         </a>
