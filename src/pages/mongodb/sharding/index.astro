@@ -1,0 +1,483 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="MongoDB Sharding & Chunks: Data Distribution Visualized" 
+  description="Interactive visualization of MongoDB sharding — chunk splitting, balancing, shard key selection, and operational best practices"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "MongoDB", href: "/mongodb/" },
+    { label: "Sharding & Chunks", href: "/mongodb/sharding/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🍃 Sharding & Chunks</h1>
+      <p class="subtitle">How MongoDB Distributes Data — and How to Avoid Hotspots</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          MongoDB shards data by splitting collections into <strong>chunks</strong> (64MB by default), 
+          each covering a range of the <em>shard key</em>. The <strong>balancer</strong> moves chunks 
+          between shards to keep data even. The shard key you choose determines everything — 
+          good keys distribute writes evenly; bad keys create hotspots that kill performance.
+        </p>
+      </div>
+    </section>
+
+    <!-- Shard Key Simulator -->
+    <section class="sim-section">
+      <h2>🔑 Shard Key Simulator</h2>
+      <p class="section-desc">Watch how different shard key strategies distribute writes across shards</p>
+
+      <div class="sim-controls">
+        <div class="key-selector">
+          <label>Shard Key Strategy:</label>
+          <div class="key-buttons">
+            <button class="key-btn active" data-key="monotonic" id="keyMono">📈 Monotonic (_id: ObjectId)</button>
+            <button class="key-btn" data-key="hashed" id="keyHash">🔀 Hashed (_id)</button>
+            <button class="key-btn" data-key="compound" id="keyCompound">🏷️ Compound (region + ts)</button>
+            <button class="key-btn" data-key="random" id="keyRandom">🎲 Random (UUID)</button>
+          </div>
+        </div>
+        <div class="sim-actions">
+          <button id="insertBtn" class="action-btn primary-btn">✏️ Insert 1</button>
+          <button id="insert100Btn" class="action-btn primary-btn-secondary">⚡ Insert 100</button>
+          <button id="simResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <!-- Shards Visualization -->
+      <div class="shards-container">
+        <div class="shard" id="shard0">
+          <div class="shard-header">Shard 0</div>
+          <div class="shard-bar"><div class="shard-fill" id="fill0"></div></div>
+          <div class="shard-count" id="count0">0 docs</div>
+          <div class="shard-chunks" id="chunks0"></div>
+        </div>
+        <div class="shard" id="shard1">
+          <div class="shard-header">Shard 1</div>
+          <div class="shard-bar"><div class="shard-fill" id="fill1"></div></div>
+          <div class="shard-count" id="count1">0 docs</div>
+          <div class="shard-chunks" id="chunks1"></div>
+        </div>
+        <div class="shard" id="shard2">
+          <div class="shard-header">Shard 2</div>
+          <div class="shard-bar"><div class="shard-fill" id="fill2"></div></div>
+          <div class="shard-count" id="count2">0 docs</div>
+          <div class="shard-chunks" id="chunks2"></div>
+        </div>
+      </div>
+
+      <div class="sim-stats">
+        <div class="stat-card">
+          <span class="stat-label">Total Docs</span>
+          <span class="stat-value" id="totalDocs">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Imbalance</span>
+          <span class="stat-value" id="imbalance">0%</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Hotspot?</span>
+          <span class="stat-value" id="hotspot">No</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Balancer Moves</span>
+          <span class="stat-value" id="balancerMoves">0</span>
+        </div>
+      </div>
+
+      <div class="sim-log" id="simLog">
+        <div class="log-entry">Ready. Choose a shard key strategy and start inserting.</div>
+      </div>
+    </section>
+
+    <!-- Explanation -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card bad-card">
+          <h3>🚨 Monotonic Keys (ObjectId, Timestamp)</h3>
+          <p>
+            New documents always go to the <strong>last chunk</strong> — creating a single-shard hotspot.
+            The balancer can't help because writes keep piling onto one shard. This is the #1 sharding mistake.
+          </p>
+          <div class="verdict">❌ Avoid for write-heavy collections</div>
+        </div>
+        <div class="explain-card good-card">
+          <h3>✅ Hashed Shard Keys</h3>
+          <p>
+            MongoDB hashes the key value before routing — perfect distribution, no hotspots.
+            Downside: <strong>range queries</strong> become scatter-gather (must hit all shards).
+          </p>
+          <div class="verdict">✅ Great for write-heavy, point-query workloads</div>
+        </div>
+        <div class="explain-card good-card">
+          <h3>✅ Compound Keys (region + timestamp)</h3>
+          <p>
+            A <strong>high-cardinality prefix</strong> (like region or user_id) distributes chunks across shards,
+            while the timestamp suffix keeps data sorted within each prefix. Best of both worlds.
+          </p>
+          <div class="verdict">✅ Best for mixed read/write workloads</div>
+        </div>
+        <div class="explain-card good-card">
+          <h3>✅ Random Keys (UUID)</h3>
+          <p>
+            UUIDs distribute evenly. Similar to hashed, but you can still do range queries on the key itself.
+            Watch out for <strong>index fragmentation</strong> — UUIDs are random, so B-tree pages fill unevenly.
+          </p>
+          <div class="verdict">✅ Good distribution, watch index size</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Chunk Splitting & Balancing -->
+    <section class="chunk-section">
+      <h2>⚖️ Chunk Splitting & Balancing</h2>
+      <p class="section-desc">When chunks grow beyond 64MB, they split. When shards are uneven, the balancer migrates chunks.</p>
+
+      <div class="chunk-viz">
+        <div class="chunk-timeline" id="chunkTimeline">
+          <div class="chunk-row">
+            <div class="chunk-label">Initial</div>
+            <div class="chunk-bar-container">
+              <div class="chunk-block" style="width: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa);">
+                [MinKey, MaxKey] → Shard 0
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chunk-controls">
+          <button id="splitBtn" class="action-btn primary-btn">✂️ Split Chunk</button>
+          <button id="balanceBtn" class="action-btn balance-btn">⚖️ Balance</button>
+          <button id="chunkResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ops Best Practices -->
+    <section class="ops-section">
+      <h2>🛠️ Operational Best Practices</h2>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h4>📊 Monitor Chunk Distribution</h4>
+          <code>db.collection.getShardDistribution()</code>
+          <p>Run regularly. If one shard has 2x+ the chunks of others, investigate.</p>
+        </div>
+        <div class="ops-card">
+          <h4>⏰ Balancer Window</h4>
+          <code>sh.setBalancerWindow("02:00", "06:00")</code>
+          <p>Chunk migrations are I/O heavy. Schedule during off-peak hours.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📏 Jumbo Chunks</h4>
+          <code>{"sh.splitAt('db.coll', { key: splitPoint })"}</code>
+          <p>Chunks that can't split (low cardinality key) become "jumbo" — unmovable. Manual split needed.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔍 Scatter-Gather Detection</h4>
+          <code>{"db.coll.find({...}).explain('executionStats')"}</code>
+          <p>If "nShards" equals total shards, your query isn't using the shard key. Add it to the filter.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🏷️ Zone Sharding</h4>
+          <code>sh.addShardToZone("shard0", "US-EAST")</code>
+          <p>Pin data to specific shards by region for compliance or latency. Chunks stay in their zone.</p>
+        </div>
+        <div class="ops-card">
+          <h4>⚠️ Pre-Split Before Bulk Load</h4>
+          <code>{"sh.splitAt('db.coll', { _id: ... })"}</code>
+          <p>Before large imports, pre-split chunks to avoid overwhelming one shard. Critical for initial loads.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.mongodb.com/docs/manual/sharding/" target="_blank">MongoDB Sharding Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20MongoDB%20Sharding%20Visualizer%20-%20see%20how%20shard%20key%20choice%20affects%20data%20distribution&url=https://systeminternals.dev/mongodb/sharding/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/mongodb/sharding/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/mongodb/sharding/&t=Interactive%20MongoDB%20Sharding%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #22c55e, #4ade80, #86efac); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(74,222,128,0.05)); border: 1px solid rgba(34,197,94,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #4ade80; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .primary-btn-secondary { background: linear-gradient(135deg, #16a34a, #15803d); color: white; }
+  .balance-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .sim-section { margin-bottom: 50px; }
+  .sim-controls { margin-bottom: 24px; }
+  .key-selector { margin-bottom: 16px; }
+  .key-selector label { display: block; color: #aaa; margin-bottom: 8px; font-size: 0.9rem; }
+  .key-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  .key-btn { padding: 10px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .key-btn:hover { border-color: rgba(34,197,94,0.5); }
+  .key-btn.active { border-color: #22c55e; background: rgba(34,197,94,0.15); color: #4ade80; }
+  .sim-actions { display: flex; gap: 12px; }
+
+  .shards-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
+  .shard { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; text-align: center; transition: all 0.3s; }
+  .shard.hot { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.05); }
+  .shard-header { font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .shard-bar { height: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+  .shard-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease-out, background 0.3s; background: linear-gradient(90deg, #22c55e, #4ade80); }
+  :global(.shard-fill.hot) { background: linear-gradient(90deg, #ef4444, #f87171) !important; }
+  .shard-count { font-size: 0.85rem; color: #888; margin-bottom: 8px; }
+  .shard-chunks { min-height: 30px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  :global(.mini-chunk) { width: 12px; height: 12px; border-radius: 3px; background: #3b82f6; transition: all 0.3s; }
+
+  .sim-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+  .stat-card { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 14px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .stat-label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 4px; }
+  .stat-value { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+  .sim-log { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 14px; max-height: 120px; overflow-y: auto; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; }
+  :global(.log-entry) { padding: 3px 0; color: #888; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  :global(.log-entry.warn) { color: #fbbf24; }
+  :global(.log-entry.good) { color: #4ade80; }
+  :global(.log-entry.bad) { color: #f87171; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; margin-bottom: 10px; }
+  .explain-card strong { color: #00d4ff; }
+  .bad-card { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); }
+  .good-card { border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.05); }
+  .verdict { font-size: 0.85rem; font-weight: 600; padding: 6px 12px; border-radius: 6px; display: inline-block; }
+  .bad-card .verdict { background: rgba(239,68,68,0.15); color: #fca5a5; }
+  .good-card .verdict { background: rgba(34,197,94,0.15); color: #86efac; }
+
+  .chunk-section { margin-bottom: 50px; }
+  .chunk-viz { background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); }
+  .chunk-timeline { margin-bottom: 20px; }
+  :global(.chunk-row) { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; animation: eventAppear 0.4s ease-out; }
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.chunk-label) { width: 80px; font-size: 0.8rem; color: #888; text-align: right; flex-shrink: 0; }
+  :global(.chunk-bar-container) { flex: 1; display: flex; gap: 4px; min-height: 32px; }
+  :global(.chunk-block) { border-radius: 6px; padding: 6px 10px; font-size: 0.7rem; color: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; text-align: center; transition: all 0.3s; white-space: nowrap; overflow: hidden; }
+  .chunk-controls { display: flex; gap: 12px; }
+
+  .ops-section { margin-bottom: 50px; }
+  .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .ops-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ops-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 10px; }
+  .ops-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.75rem; color: #4ade80; margin-bottom: 10px; overflow-x: auto; }
+  .ops-card p { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #4ade80; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .shards-container { grid-template-columns: 1fr; }
+    .sim-stats { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+    .key-buttons { flex-direction: column; }
+  }
+</style>
+
+<script>
+  let shardKey = 'monotonic';
+  let shards = [0, 0, 0];
+  let totalInserted = 0;
+  let balancerMoves = 0;
+  let nextMonotonic = 0;
+  const regions = ['us-east', 'us-west', 'eu-west', 'ap-south'];
+
+  function log(msg: string, cls = '') {
+    const el = document.getElementById('simLog')!;
+    const entry = document.createElement('div');
+    entry.className = 'log-entry ' + cls;
+    entry.textContent = msg;
+    el.insertBefore(entry, el.firstChild);
+    if (el.children.length > 30) el.removeChild(el.lastChild!);
+  }
+
+  function getTargetShard(): number {
+    switch (shardKey) {
+      case 'monotonic':
+        return 2; // Always the last shard (hotspot!)
+      case 'hashed':
+        return Math.floor(Math.random() * 3);
+      case 'compound': {
+        const regionIdx = Math.floor(Math.random() * regions.length);
+        return regionIdx % 3;
+      }
+      case 'random':
+        return Math.floor(Math.random() * 3);
+      default:
+        return 0;
+    }
+  }
+
+  function updateViz() {
+    const max = Math.max(...shards, 1);
+    for (let i = 0; i < 3; i++) {
+      const pct = (shards[i] / max) * 100;
+      const fill = document.getElementById(`fill${i}`)!;
+      fill.style.width = pct + '%';
+      document.getElementById(`count${i}`)!.textContent = shards[i] + ' docs';
+
+      const chunkContainer = document.getElementById(`chunks${i}`)!;
+      chunkContainer.innerHTML = '';
+      const numChunks = Math.ceil(shards[i] / 20);
+      for (let c = 0; c < Math.min(numChunks, 30); c++) {
+        const mini = document.createElement('div');
+        mini.className = 'mini-chunk';
+        chunkContainer.appendChild(mini);
+      }
+
+      const isHot = shards[i] > max * 0.7 && max > 10 && shardKey === 'monotonic';
+      document.getElementById(`shard${i}`)!.classList.toggle('hot', isHot);
+      fill.classList.toggle('hot', isHot);
+    }
+
+    document.getElementById('totalDocs')!.textContent = String(totalInserted);
+    const imbalance = max > 0 ? Math.round(((max - Math.min(...shards)) / max) * 100) : 0;
+    document.getElementById('imbalance')!.textContent = imbalance + '%';
+    const hotEl = document.getElementById('hotspot')!;
+    hotEl.textContent = imbalance > 60 ? '🔥 YES' : 'No';
+    hotEl.style.color = imbalance > 60 ? '#ef4444' : '#4ade80';
+    document.getElementById('balancerMoves')!.textContent = String(balancerMoves);
+  }
+
+  function insert(count: number) {
+    for (let i = 0; i < count; i++) {
+      const target = getTargetShard();
+      shards[target]++;
+      totalInserted++;
+    }
+
+    if (shardKey === 'monotonic') {
+      log(`Inserted ${count} doc(s) → all to Shard 2 (monotonic hotspot!)`, 'bad');
+    } else {
+      log(`Inserted ${count} doc(s) → distributed across shards`, 'good');
+    }
+
+    // Auto-balance check
+    const max = Math.max(...shards);
+    const min = Math.min(...shards);
+    if (max - min > 30 && shardKey !== 'monotonic') {
+      const fromIdx = shards.indexOf(max);
+      const toIdx = shards.indexOf(min);
+      const moved = Math.floor((max - min) / 3);
+      shards[fromIdx] -= moved;
+      shards[toIdx] += moved;
+      balancerMoves++;
+      log(`Balancer: moved ${moved} chunks from Shard ${fromIdx} → Shard ${toIdx}`, 'warn');
+    }
+
+    updateViz();
+  }
+
+  // Key selector
+  document.querySelectorAll('.key-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.key-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      shardKey = (btn as HTMLElement).dataset.key!;
+      shards = [0, 0, 0]; totalInserted = 0; balancerMoves = 0;
+      updateViz();
+      log(`Switched to ${shardKey} shard key`, 'warn');
+    });
+  });
+
+  document.getElementById('insertBtn')?.addEventListener('click', () => insert(1));
+  document.getElementById('insert100Btn')?.addEventListener('click', () => insert(100));
+  document.getElementById('simResetBtn')?.addEventListener('click', () => {
+    shards = [0, 0, 0]; totalInserted = 0; balancerMoves = 0;
+    updateViz();
+    document.getElementById('simLog')!.innerHTML = '<div class="log-entry">Reset. Ready.</div>';
+  });
+
+  // Chunk splitting demo
+  let splitStep = 0;
+  const splitSteps = [
+    { label: 'Split 1', chunks: [
+      { text: '[MinKey, M) → S0', w: 50, bg: 'linear-gradient(90deg, #3b82f6, #60a5fa)' },
+      { text: '[M, MaxKey] → S0', w: 50, bg: 'linear-gradient(90deg, #8b5cf6, #a78bfa)' },
+    ]},
+    { label: 'Split 2', chunks: [
+      { text: '[MinKey, G) → S0', w: 25, bg: 'linear-gradient(90deg, #3b82f6, #60a5fa)' },
+      { text: '[G, M) → S0', w: 25, bg: 'linear-gradient(90deg, #06b6d4, #22d3ee)' },
+      { text: '[M, T) → S0', w: 25, bg: 'linear-gradient(90deg, #8b5cf6, #a78bfa)' },
+      { text: '[T, MaxKey] → S0', w: 25, bg: 'linear-gradient(90deg, #ec4899, #f472b6)' },
+    ]},
+    { label: 'Balanced', chunks: [
+      { text: '[MinKey, G) → S0', w: 25, bg: 'linear-gradient(90deg, #3b82f6, #60a5fa)' },
+      { text: '[G, M) → S1', w: 25, bg: 'linear-gradient(90deg, #22c55e, #4ade80)' },
+      { text: '[M, T) → S2', w: 25, bg: 'linear-gradient(90deg, #f59e0b, #fbbf24)' },
+      { text: '[T, MaxKey] → S0', w: 25, bg: 'linear-gradient(90deg, #ec4899, #f472b6)' },
+    ]},
+  ];
+
+  function renderChunkStep(step: any) {
+    const timeline = document.getElementById('chunkTimeline')!;
+    const row = document.createElement('div');
+    row.className = 'chunk-row';
+    row.innerHTML = `<div class="chunk-label">${step.label}</div><div class="chunk-bar-container">` +
+      step.chunks.map(c => `<div class="chunk-block" style="width:${c.w}%;background:${c.bg}">${c.text}</div>`).join('') +
+      `</div>`;
+    timeline.appendChild(row);
+  }
+
+  document.getElementById('splitBtn')?.addEventListener('click', () => {
+    if (splitStep < splitSteps.length) {
+      renderChunkStep(splitSteps[splitStep]);
+      splitStep++;
+    }
+  });
+
+  document.getElementById('balanceBtn')?.addEventListener('click', () => {
+    if (splitStep < splitSteps.length) {
+      while (splitStep < splitSteps.length) {
+        renderChunkStep(splitSteps[splitStep]);
+        splitStep++;
+      }
+    }
+  });
+
+  document.getElementById('chunkResetBtn')?.addEventListener('click', () => {
+    splitStep = 0;
+    document.getElementById('chunkTimeline')!.innerHTML = `
+      <div class="chunk-row">
+        <div class="chunk-label">Initial</div>
+        <div class="chunk-bar-container">
+          <div class="chunk-block" style="width:100%;background:linear-gradient(90deg,#3b82f6,#60a5fa)">[MinKey, MaxKey] → Shard 0</div>
+        </div>
+      </div>`;
+  });
+
+  updateViz();
+</script>

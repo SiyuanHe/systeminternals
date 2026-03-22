@@ -1,0 +1,396 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Spark DAG Execution: From Code to Cluster" 
+  description="Interactive visualization of Spark's execution model — jobs, stages, tasks, shuffles, and performance tuning"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Spark", href: "/spark/" },
+    { label: "DAG Execution", href: "/spark/dag-execution/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ DAG Execution</h1>
+      <p class="subtitle">From Code to Cluster — How Spark Plans and Executes Your Job</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          When you call an <em>action</em> (collect, save, count), Spark builds a <strong>DAG</strong> 
+          (Directed Acyclic Graph) of transformations, splits it into <strong>stages</strong> at shuffle boundaries,
+          and executes each stage as parallel <strong>tasks</strong> — one per partition. 
+          Understanding this pipeline is key to writing fast Spark jobs.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pipeline Simulator -->
+    <section class="pipeline-section">
+      <h2>🔄 Execution Pipeline</h2>
+      <p class="section-desc">Click through to see how Spark transforms your code into cluster work</p>
+
+      <div class="code-block">
+        <div class="code-header">Your Code</div>
+        <pre id="codeDisplay">
+spark.read.parquet("orders")          <span class="comment"># Read: 4 partitions</span>
+  .filter(col("amount") > 100)        <span class="comment"># Narrow transform</span>
+  .groupBy("region")                  <span class="comment"># Wide transform (SHUFFLE)</span>
+  .agg(sum("amount").alias("total"))  <span class="comment"># Aggregation</span>
+  .orderBy(desc("total"))             <span class="comment"># Wide transform (SHUFFLE)</span>
+  .collect()                          <span class="comment"># ACTION → triggers execution</span></pre>
+      </div>
+
+      <div class="pipeline-controls">
+        <button id="pipeStepBtn" class="action-btn primary-btn">⏭ Next Step</button>
+        <button id="pipeAutoBtn" class="action-btn auto-btn">⚡ Auto-Play</button>
+        <button id="pipeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="pipeline-status">
+        <span class="pipe-badge" id="pipeBadge">Ready</span>
+        <span id="pipeText">Click "Next Step" to begin</span>
+      </div>
+
+      <!-- DAG Visualization -->
+      <div class="dag-container" id="dagContainer">
+        <div class="dag-placeholder">DAG will appear here as you step through</div>
+      </div>
+    </section>
+
+    <!-- Stage Detail -->
+    <section class="stage-section">
+      <h2>📊 Stage Execution: Tasks in Parallel</h2>
+      <p class="section-desc">Each stage runs tasks in parallel — one per partition. Adjust executors to see the effect.</p>
+
+      <div class="stage-controls">
+        <div class="ctrl-group">
+          <label>Partitions: <strong id="sparkPartLabel">4</strong></label>
+          <input type="range" id="sparkPartSlider" min="1" max="16" value="4">
+        </div>
+        <div class="ctrl-group">
+          <label>Executors (cores): <strong id="execLabel">2</strong></label>
+          <input type="range" id="execSlider" min="1" max="8" value="2">
+        </div>
+        <button id="runStageBtn" class="action-btn primary-btn">▶ Run Stage</button>
+      </div>
+
+      <div class="task-grid" id="taskGrid">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="stage-stats">
+        <div class="stat-card"><span class="stat-label">Tasks</span><span class="stat-value" id="taskCount">4</span></div>
+        <div class="stat-card"><span class="stat-label">Waves</span><span class="stat-value" id="waveCount">2</span></div>
+        <div class="stat-card"><span class="stat-label">Parallelism</span><span class="stat-value" id="parallelism">2x</span></div>
+        <div class="stat-card"><span class="stat-label">Est. Time</span><span class="stat-value" id="estTime">2 waves</span></div>
+      </div>
+    </section>
+
+    <!-- Explanation -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🔀 Narrow vs Wide Transforms</h3>
+          <p>
+            <strong>Narrow</strong> (map, filter): each output partition depends on one input partition. No data movement.
+            <strong>Wide</strong> (groupBy, join, orderBy): requires <strong>shuffle</strong> — redistributing data across the network.
+            Shuffles are stage boundaries and the #1 performance bottleneck.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📦 Shuffle: The Expensive Operation</h3>
+          <p>
+            During shuffle, every executor writes data to local disk (shuffle write), then other executors
+            fetch it over the network (shuffle read). This involves <strong>disk I/O + network I/O + serialization</strong>.
+            Minimize shuffles: use broadcast joins, pre-partition data, avoid unnecessary groupBys.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🧮 Catalyst Optimizer</h3>
+          <p>
+            Before execution, Spark's <strong>Catalyst</strong> optimizes the logical plan: predicate pushdown,
+            column pruning, join reordering. Then <strong>Tungsten</strong> generates optimized bytecode.
+            Use <code>.explain(true)</code> to see all plans.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>💾 Caching & Persistence</h3>
+          <p>
+            Use <code>.cache()</code> or <code>.persist()</code> to avoid recomputing DAGs.
+            Spark stores data in memory (MEMORY_ONLY) or disk (MEMORY_AND_DISK).
+            Cache when you'll reuse a DataFrame multiple times — but don't over-cache (steals memory from execution).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ops Best Practices -->
+    <section class="ops-section">
+      <h2>🛠️ Performance Tuning Best Practices</h2>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h4>📏 Right-Size Partitions</h4>
+          <code>spark.sql.shuffle.partitions = 200  # default<br># Rule: 128MB per partition</code>
+          <p>Too few = OOM or slow tasks. Too many = scheduler overhead. Target 100-200MB per partition for shuffles.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📡 Broadcast Joins</h4>
+          <code>spark.sql.autoBroadcastJoinThreshold = 10MB<br># or: broadcast(small_df)</code>
+          <p>If one side of a join is small (<100MB), broadcast it to avoid a shuffle. Massive speedup for dimension joins.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔍 Data Skew</h4>
+          <code># Check: df.groupBy("key").count().orderBy(desc("count"))<br># Fix: salting or AQE skew join</code>
+          <p>One key with 100x more data = one task runs 100x longer. Enable AQE (adaptive query execution) to auto-handle.</p>
+        </div>
+        <div class="ops-card">
+          <h4>⚡ AQE (Adaptive Query Execution)</h4>
+          <code>spark.sql.adaptive.enabled = true<br>spark.sql.adaptive.coalescePartitions.enabled = true</code>
+          <p>Spark 3.0+: dynamically adjusts partition count, handles skew, and optimizes joins at runtime. Always enable this.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🗑️ Avoid collect() on Large Data</h4>
+          <code># ❌ df.collect()  → pulls ALL data to driver<br># ✅ df.write.parquet("output/")</code>
+          <p>collect() brings everything to the driver's memory. Use write/show/take for large DataFrames.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📊 Spark UI: Your Best Friend</h4>
+          <code>http://driver:4040/jobs/</code>
+          <p>Check: stage timeline (stragglers?), shuffle read/write size, GC time, task skew. The UI tells you exactly what's slow.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://spark.apache.org/docs/latest/cluster-overview.html" target="_blank">Apache Spark Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Spark%20DAG%20Execution%20Visualizer%20-%20see%20how%20stages%2C%20tasks%2C%20and%20shuffles%20work&url=https://systeminternals.dev/spark/dag-execution/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/spark/dag-execution/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/spark/dag-execution/&t=Interactive%20Spark%20DAG%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f97316, #fb923c, #fdba74); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(249,115,22,0.1), rgba(251,146,60,0.05)); border: 1px solid rgba(249,115,22,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #fb923c; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249,115,22,0.4); }
+  .auto-btn { background: linear-gradient(135deg, #f472b6, #ec4899); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .code-block { background: #0d1117; border-radius: 12px; overflow: hidden; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .code-header { padding: 8px 16px; background: rgba(255,255,255,0.05); font-size: 0.8rem; color: #888; }
+  .code-block pre { padding: 16px; font-family: 'Monaco','Menlo',monospace; font-size: 0.85rem; color: #e6edf3; line-height: 1.7; overflow-x: auto; margin: 0; }
+  .comment { color: #8b949e; }
+
+  .pipeline-section { margin-bottom: 50px; }
+  .pipeline-controls { display: flex; gap: 12px; margin-bottom: 16px; }
+  .pipeline-status { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 10px 14px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+  .pipe-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: rgba(107,114,128,0.3); color: #9ca3af; }
+  :global(.pipe-badge.stage0) { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  :global(.pipe-badge.stage1) { background: rgba(249,115,22,0.2); color: #fb923c; }
+  :global(.pipe-badge.stage2) { background: rgba(34,197,94,0.2); color: #4ade80; }
+  :global(.pipe-badge.done) { background: rgba(167,139,250,0.2); color: #a78bfa; }
+
+  .dag-container { background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); min-height: 200px; }
+  .dag-placeholder { color: #555; text-align: center; padding: 60px 0; }
+  :global(.dag-stage) { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; animation: eventAppear 0.4s ease-out; }
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.dag-label) { width: 80px; font-weight: 700; font-size: 0.9rem; flex-shrink: 0; }
+  :global(.dag-nodes) { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+  :global(.dag-node) { padding: 8px 14px; border-radius: 8px; font-size: 0.8rem; color: rgba(255,255,255,0.9); }
+  :global(.dag-arrow) { text-align: center; color: #555; font-size: 1.2rem; margin: 4px 0; }
+  :global(.shuffle-arrow) { text-align: center; padding: 8px; background: rgba(239,68,68,0.1); border: 1px dashed rgba(239,68,68,0.3); border-radius: 8px; margin: 8px 0; color: #f87171; font-size: 0.85rem; }
+
+  .stage-section { margin-bottom: 50px; }
+  .stage-controls { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .ctrl-group { }
+  .ctrl-group label { display: block; color: #ccc; margin-bottom: 6px; font-size: 0.9rem; }
+  .ctrl-group strong { color: #fb923c; }
+  .ctrl-group input[type="range"] { width: 200px; display: block; -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; }
+  .ctrl-group input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #f97316; cursor: pointer; }
+
+  .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; margin-bottom: 20px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-height: 80px; }
+  :global(.task-box) { height: 50px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; color: rgba(255,255,255,0.8); transition: all 0.3s; }
+  :global(.task-box.pending) { background: rgba(255,255,255,0.05); border: 1px dashed rgba(255,255,255,0.2); color: #666; }
+  :global(.task-box.running) { animation: taskRun 1s ease-in-out infinite; }
+  @keyframes taskRun { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  :global(.task-box.done) { opacity: 0.6; }
+
+  .stage-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .stat-card { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 14px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .stat-label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 4px; }
+  .stat-value { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #fb923c; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #4ade80; }
+
+  .ops-section { margin-bottom: 50px; }
+  .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .ops-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ops-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 10px; }
+  .ops-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.75rem; color: #fb923c; margin-bottom: 10px; overflow-x: auto; white-space: pre; }
+  .ops-card p { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #fb923c; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .stage-stats { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // Pipeline stepper
+  let pipeStep = 0;
+  const pipeSteps = [
+    { badge: 'stage0', badgeText: 'Stage 0', text: 'Read parquet → 4 partitions created. Filter applied (narrow, no shuffle).',
+      html: `<div class="dag-stage"><div class="dag-label" style="color:#60a5fa">Stage 0</div><div class="dag-nodes">
+        <div class="dag-node" style="background:rgba(59,130,246,0.3)">📂 Read Parquet (4 parts)</div>
+        <div class="dag-node" style="background:rgba(59,130,246,0.2)">🔍 Filter amount > 100</div>
+      </div></div>` },
+    { badge: 'stage0', badgeText: 'Shuffle', text: '⚠️ groupBy("region") triggers a SHUFFLE — data redistributed by region hash.',
+      html: `<div class="shuffle-arrow">🔀 SHUFFLE: groupBy("region") — all data for each region must be on the same partition</div>` },
+    { badge: 'stage1', badgeText: 'Stage 1', text: 'Partial aggregation + shuffle read. Sum computed per region.',
+      html: `<div class="dag-stage"><div class="dag-label" style="color:#fb923c">Stage 1</div><div class="dag-nodes">
+        <div class="dag-node" style="background:rgba(249,115,22,0.3)">📥 Shuffle Read</div>
+        <div class="dag-node" style="background:rgba(249,115,22,0.2)">∑ Aggregate sum(amount)</div>
+      </div></div>` },
+    { badge: 'stage1', badgeText: 'Shuffle', text: '⚠️ orderBy("total") triggers another SHUFFLE — global sort requires redistribution.',
+      html: `<div class="shuffle-arrow">🔀 SHUFFLE: orderBy(desc("total")) — range partitioning for global sort</div>` },
+    { badge: 'stage2', badgeText: 'Stage 2', text: 'Final sort and collect to driver. 3 stages total, 2 shuffles.',
+      html: `<div class="dag-stage"><div class="dag-label" style="color:#4ade80">Stage 2</div><div class="dag-nodes">
+        <div class="dag-node" style="background:rgba(34,197,94,0.3)">📥 Shuffle Read</div>
+        <div class="dag-node" style="background:rgba(34,197,94,0.2)">🔢 Sort desc</div>
+        <div class="dag-node" style="background:rgba(167,139,250,0.2)">📤 Collect to driver</div>
+      </div></div>` },
+  ];
+
+  document.getElementById('pipeStepBtn')?.addEventListener('click', () => {
+    if (pipeStep >= pipeSteps.length) return;
+    const step = pipeSteps[pipeStep];
+    const badge = document.getElementById('pipeBadge')!;
+    badge.className = 'pipe-badge ' + step.badge;
+    badge.textContent = step.badgeText;
+    document.getElementById('pipeText')!.textContent = step.text;
+
+    const container = document.getElementById('dagContainer')!;
+    if (pipeStep === 0) container.innerHTML = '';
+    container.insertAdjacentHTML('beforeend', step.html);
+    pipeStep++;
+
+    if (pipeStep >= pipeSteps.length) {
+      badge.className = 'pipe-badge done';
+      badge.textContent = 'Complete';
+    }
+  });
+
+  document.getElementById('pipeAutoBtn')?.addEventListener('click', async () => {
+    while (pipeStep < pipeSteps.length) {
+      document.getElementById('pipeStepBtn')?.click();
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  });
+
+  document.getElementById('pipeResetBtn')?.addEventListener('click', () => {
+    pipeStep = 0;
+    const badge = document.getElementById('pipeBadge')!;
+    badge.className = 'pipe-badge';
+    badge.textContent = 'Ready';
+    document.getElementById('pipeText')!.textContent = 'Click "Next Step" to begin';
+    document.getElementById('dagContainer')!.innerHTML = '<div class="dag-placeholder">DAG will appear here as you step through</div>';
+  });
+
+  // Task execution simulator
+  const taskColors = ['#3b82f6','#f97316','#22c55e','#ec4899','#8b5cf6','#06b6d4','#f59e0b','#ef4444',
+                       '#14b8a6','#e879f9','#84cc16','#fb923c','#a78bfa','#fbbf24','#4ade80','#f472b6'];
+
+  function updateStageStats() {
+    const parts = parseInt((document.getElementById('sparkPartSlider') as HTMLInputElement).value);
+    const execs = parseInt((document.getElementById('execSlider') as HTMLInputElement).value);
+    document.getElementById('sparkPartLabel')!.textContent = String(parts);
+    document.getElementById('execLabel')!.textContent = String(execs);
+    document.getElementById('taskCount')!.textContent = String(parts);
+    const waves = Math.ceil(parts / execs);
+    document.getElementById('waveCount')!.textContent = String(waves);
+    document.getElementById('parallelism')!.textContent = execs + 'x';
+    document.getElementById('estTime')!.textContent = waves + (waves === 1 ? ' wave' : ' waves');
+
+    // Render pending tasks
+    const grid = document.getElementById('taskGrid')!;
+    grid.innerHTML = '';
+    for (let i = 0; i < parts; i++) {
+      const box = document.createElement('div');
+      box.className = 'task-box pending';
+      box.id = `task${i}`;
+      box.textContent = `T${i}`;
+      box.style.background = 'rgba(255,255,255,0.05)';
+      grid.appendChild(box);
+    }
+  }
+
+  document.getElementById('sparkPartSlider')?.addEventListener('input', updateStageStats);
+  document.getElementById('execSlider')?.addEventListener('input', updateStageStats);
+
+  document.getElementById('runStageBtn')?.addEventListener('click', async () => {
+    const parts = parseInt((document.getElementById('sparkPartSlider') as HTMLInputElement).value);
+    const execs = parseInt((document.getElementById('execSlider') as HTMLInputElement).value);
+
+    // Reset
+    updateStageStats();
+
+    // Run wave by wave
+    for (let wave = 0; wave < Math.ceil(parts / execs); wave++) {
+      const start = wave * execs;
+      const end = Math.min(start + execs, parts);
+
+      // Mark running
+      for (let t = start; t < end; t++) {
+        const el = document.getElementById(`task${t}`)!;
+        el.className = 'task-box running';
+        el.style.background = taskColors[t % taskColors.length];
+      }
+
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Mark done
+      for (let t = start; t < end; t++) {
+        const el = document.getElementById(`task${t}`)!;
+        el.className = 'task-box done';
+      }
+    }
+  });
+
+  updateStageStats();
+</script>

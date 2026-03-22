@@ -1,0 +1,50 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Partitions & Offsets", description: "The anatomy of a Kafka topic — and how to choose partition counts", href: "/kafka/partitions/", status: "live" },
+  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "#", status: "coming" },
+  { title: "Log Compaction", description: "Keeping the latest value per key", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Apache Kafka Internals" 
+  description="Interactive visualizations for understanding Kafka architecture and operational best practices"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Kafka", href: "/kafka/" }]}
+>
+  <section class="section-header">
+    <h1>📨 Apache Kafka Internals</h1>
+    <p>
+      Kafka is a distributed event streaming platform built around an append-only log.
+      These visualizations help you understand partitioning, replication, and consumer group mechanics.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 40px; }
+  .section-header h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 16px; color: #fff; }
+  .section-header p { font-size: 1.1rem; color: #888; max-width: 700px; line-height: 1.7; }
+  .topics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .topic-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; transition: all 0.3s; display: block; color: inherit; }
+  .topic-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(0,212,255,0.3); transform: translateY(-4px); box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+  .topic-card.coming { opacity: 0.5; cursor: default; }
+  .topic-card.coming:hover { transform: none; background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); box-shadow: none; }
+  .topic-status { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; color: #666; }
+  .topic-card.live .topic-status { color: #22c55e; }
+  .topic-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; color: #fff; }
+  .topic-card p { font-size: 0.95rem; color: #888; line-height: 1.5; }
+</style>

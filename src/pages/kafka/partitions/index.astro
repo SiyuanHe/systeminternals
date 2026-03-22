@@ -1,0 +1,394 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kafka Partitions & Offsets: The Anatomy of a Topic" 
+  description="Interactive visualization of Kafka partitions, consumer groups, offset management, and operational best practices"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kafka", href: "/kafka/" },
+    { label: "Partitions & Offsets", href: "/kafka/partitions/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📨 Partitions & Offsets</h1>
+      <p class="subtitle">The Anatomy of a Kafka Topic — and How to Choose Partition Counts</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A Kafka topic is split into <strong>partitions</strong> — ordered, append-only logs.
+          Each message gets an <em>offset</em> (sequence number) within its partition.
+          Producers choose partitions by key hash (or round-robin). 
+          <strong>Consumer groups</strong> divide partitions among members — each partition is read by exactly one consumer.
+        </p>
+      </div>
+    </section>
+
+    <!-- Producer Simulator -->
+    <section class="producer-section">
+      <h2>📤 Producer: How Messages Land in Partitions</h2>
+      <div class="producer-controls">
+        <div class="partition-config">
+          <label>Partitions: <strong id="partCountLabel">4</strong></label>
+          <input type="range" id="partSlider" min="1" max="12" value="4">
+        </div>
+        <div class="routing-config">
+          <label>Routing:</label>
+          <div class="route-buttons">
+            <button class="route-btn active" data-route="key" id="routeKey">🔑 By Key</button>
+            <button class="route-btn" data-route="round-robin" id="routeRR">🔄 Round-Robin</button>
+            <button class="route-btn" data-route="random" id="routeRand">🎲 Random</button>
+          </div>
+        </div>
+        <div class="produce-actions">
+          <input type="text" id="msgKey" placeholder="Message key (e.g. user-42)" value="user-42">
+          <button id="produceBtn" class="action-btn primary-btn">📤 Produce</button>
+          <button id="produce20Btn" class="action-btn primary-btn-secondary">⚡ Produce 20</button>
+          <button id="prodResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="partitions-viz" id="partitionsViz">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="prod-stats">
+        <div class="stat-card"><span class="stat-label">Messages</span><span class="stat-value" id="msgCount">0</span></div>
+        <div class="stat-card"><span class="stat-label">Keys Seen</span><span class="stat-value" id="keyCount">0</span></div>
+        <div class="stat-card"><span class="stat-label">Hottest Partition</span><span class="stat-value" id="hottestPart">—</span></div>
+        <div class="stat-card"><span class="stat-label">Skew</span><span class="stat-value" id="skewPct">0%</span></div>
+      </div>
+    </section>
+
+    <!-- Consumer Group Viz -->
+    <section class="consumer-section">
+      <h2>👥 Consumer Groups: Partition Assignment</h2>
+      <p class="section-desc">Each partition is assigned to exactly one consumer. More consumers than partitions = idle consumers.</p>
+
+      <div class="cg-controls">
+        <label>Consumers: <strong id="consumerCountLabel">2</strong></label>
+        <input type="range" id="consumerSlider" min="1" max="8" value="2">
+      </div>
+
+      <div class="cg-viz" id="cgViz">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="cg-warning" id="cgWarning" style="display:none">
+        ⚠️ <strong id="idleCount">0</strong> idle consumer(s) — more consumers than partitions!
+      </div>
+    </section>
+
+    <!-- Explanation -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📏 How Many Partitions?</h3>
+          <p>
+            <strong>Rule of thumb:</strong> target throughput ÷ per-partition throughput.
+            If you need 100MB/s and each partition handles ~10MB/s, use 10 partitions.
+            More partitions = more parallelism, but also more overhead (file handles, replication traffic, leader elections).
+          </p>
+          <div class="formula">Partitions ≥ max(target_throughput / partition_throughput, consumer_count)</div>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 Key-Based Ordering</h3>
+          <p>
+            Messages with the <strong>same key</strong> always go to the same partition → 
+            guaranteed ordering per key. This is how you get ordered event streams per user/entity.
+            But beware: <strong>hot keys</strong> (one key with 80% of traffic) create partition hotspots.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Offset Tracking</h3>
+          <p>
+            Each consumer tracks its position per partition via <strong>committed offsets</strong> 
+            (stored in __consumer_offsets topic). On restart, consumers resume from their last commit.
+            <strong>Auto-commit</strong> (default) vs <strong>manual commit</strong> trades convenience for exactly-once guarantees.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚖️ Rebalancing</h3>
+          <p>
+            When consumers join/leave, Kafka <strong>rebalances</strong> — reassigning partitions.
+            During rebalance, consumption pauses (stop-the-world). Use <strong>CooperativeStickyAssignor</strong>
+            to minimize partition movement and reduce downtime.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ops Best Practices -->
+    <section class="ops-section">
+      <h2>🛠️ Operational Best Practices</h2>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h4>📈 Monitor Consumer Lag</h4>
+          <code>kafka-consumer-groups.sh --describe --group mygroup</code>
+          <p>If lag grows steadily, you need more consumers or faster processing. Alert when lag > N minutes.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔢 Never Decrease Partitions</h4>
+          <code># You can only ADD partitions, not remove<br>kafka-topics.sh --alter --partitions 12</code>
+          <p>Adding partitions changes key routing — messages with the same key may land in different partitions. Plan ahead.</p>
+        </div>
+        <div class="ops-card">
+          <h4>⏰ Retention & Compaction</h4>
+          <code>retention.ms=604800000  # 7 days<br>cleanup.policy=compact  # or delete</code>
+          <p>Delete: remove old messages by time/size. Compact: keep latest per key. Use compact for changelog topics.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔧 Producer Tuning</h4>
+          <code>batch.size=65536<br>linger.ms=5<br>acks=all</code>
+          <p>Batch + linger for throughput. acks=all for durability. acks=1 for latency. Never acks=0 in production.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🏥 Under-Replicated Partitions</h4>
+          <code>kafka-topics.sh --describe --under-replicated</code>
+          <p>Non-zero URP = data at risk. Check broker health, disk I/O, network. This is your #1 Kafka alert.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🎯 Rack-Aware Replication</h4>
+          <code>broker.rack=us-east-1a</code>
+          <p>Ensure replicas spread across racks/AZs. Losing one rack shouldn't lose any partition's quorum.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://kafka.apache.org/documentation/" target="_blank">Apache Kafka Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20Partition%20Visualizer%20-%20see%20how%20keys%2C%20consumers%2C%20and%20offsets%20work&url=https://systeminternals.dev/kafka/partitions/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/partitions/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/partitions/&t=Interactive%20Kafka%20Partition%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f59e0b, #fbbf24, #fde68a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(251,191,36,0.05)); border: 1px solid rgba(245,158,11,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #fbbf24; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(245,158,11,0.4); }
+  .primary-btn-secondary { background: linear-gradient(135deg, #d97706, #b45309); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .producer-section { margin-bottom: 50px; }
+  .producer-controls { margin-bottom: 24px; }
+  .partition-config, .routing-config { margin-bottom: 16px; }
+  .partition-config label, .routing-config label { color: #ccc; font-size: 0.95rem; }
+  .partition-config strong { color: #fbbf24; }
+  .partition-config input[type="range"] { width: 300px; margin-top: 8px; display: block; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; cursor: pointer; }
+
+  .route-buttons { display: flex; gap: 10px; margin-top: 8px; }
+  .route-btn { padding: 8px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .route-btn.active { border-color: #f59e0b; background: rgba(245,158,11,0.15); color: #fbbf24; }
+
+  .produce-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .produce-actions input[type="text"] { padding: 10px 14px; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; background: rgba(255,255,255,0.05); color: #fff; font-size: 0.9rem; width: 200px; }
+
+  .partitions-viz { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+
+  :global(.partition-row) { display: flex; align-items: center; gap: 12px; }
+  :global(.part-label) { width: 30px; font-size: 0.85rem; font-weight: 700; color: #fbbf24; flex-shrink: 0; }
+  :global(.part-log) { flex: 1; display: flex; gap: 3px; min-height: 36px; align-items: center; background: rgba(255,255,255,0.03); border-radius: 8px; padding: 4px 8px; overflow: hidden; }
+  :global(.msg-block) { min-width: 24px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: rgba(255,255,255,0.8); flex-shrink: 0; animation: msgAppear 0.3s ease-out; }
+  @keyframes msgAppear { from { transform: scale(0); } to { transform: scale(1); } }
+  :global(.part-offset) { width: 60px; font-size: 0.75rem; color: #888; text-align: right; flex-shrink: 0; }
+
+  .prod-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 14px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .stat-label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 4px; }
+  .stat-value { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+  .consumer-section { margin-bottom: 50px; }
+  .cg-controls { margin-bottom: 20px; }
+  .cg-controls label { color: #ccc; }
+  .cg-controls strong { color: #60a5fa; }
+  .cg-controls input[type="range"] { width: 300px; display: block; margin-top: 8px; }
+  .cg-controls input[type="range"]::-webkit-slider-thumb { background: #3b82f6; }
+
+  .cg-viz { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; min-height: 80px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  :global(.consumer-card) { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); border-radius: 10px; padding: 12px 16px; min-width: 120px; }
+  :global(.consumer-card.idle) { background: rgba(107,114,128,0.1); border-color: rgba(107,114,128,0.3); opacity: 0.5; }
+  :global(.consumer-name) { font-weight: 700; color: #60a5fa; font-size: 0.9rem; margin-bottom: 6px; }
+  :global(.consumer-card.idle .consumer-name) { color: #6b7280; }
+  :global(.consumer-parts) { font-size: 0.8rem; color: #aaa; }
+
+  .cg-warning { padding: 12px 16px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; color: #fbbf24; font-size: 0.9rem; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #fbbf24; }
+  .formula { background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 8px; font-family: 'Monaco','Menlo',monospace; font-size: 0.85rem; color: #fbbf24; margin-top: 12px; }
+
+  .ops-section { margin-bottom: 50px; }
+  .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .ops-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ops-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 10px; }
+  .ops-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.75rem; color: #fbbf24; margin-bottom: 10px; overflow-x: auto; white-space: pre; }
+  .ops-card p { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #fbbf24; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .prod-stats { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  let partCount = 4;
+  let routing = 'key';
+  let partitions: string[][] = [];
+  let msgTotal = 0;
+  let keys = new Set<string>();
+  let rrIndex = 0;
+  const colors = ['#ef4444','#f59e0b','#22c55e','#3b82f6','#8b5cf6','#ec4899','#06b6d4','#f97316','#14b8a6','#e879f9','#84cc16','#fb923c'];
+  const sampleKeys = ['user-1','user-2','user-3','user-42','user-7','order-100','order-200','order-300','tx-a','tx-b','tx-c','tx-d'];
+
+  function hashKey(key: string, n: number): number {
+    let h = 0;
+    for (let i = 0; i < key.length; i++) { h = ((h << 5) - h + key.charCodeAt(i)) | 0; }
+    return Math.abs(h) % n;
+  }
+
+  function initPartitions() {
+    partitions = Array.from({ length: partCount }, () => []);
+    msgTotal = 0; keys.clear(); rrIndex = 0;
+  }
+
+  function renderPartitions() {
+    const viz = document.getElementById('partitionsViz')!;
+    viz.innerHTML = '';
+    const maxMsgs = Math.max(...partitions.map(p => p.length), 1);
+
+    partitions.forEach((part, i) => {
+      const row = document.createElement('div');
+      row.className = 'partition-row';
+      row.innerHTML = `<div class="part-label">P${i}</div>` +
+        `<div class="part-log">${part.slice(-40).map((k, j) =>
+          `<div class="msg-block" style="background:${colors[hashKey(k, colors.length)]}" title="${k}">${part.length - 40 + j >= 0 ? part.length - 40 + j : j}</div>`
+        ).join('')}</div>` +
+        `<div class="part-offset">off: ${part.length}</div>`;
+      viz.appendChild(row);
+    });
+
+    document.getElementById('msgCount')!.textContent = String(msgTotal);
+    document.getElementById('keyCount')!.textContent = String(keys.size);
+    const counts = partitions.map(p => p.length);
+    const max = Math.max(...counts);
+    const hottestIdx = counts.indexOf(max);
+    document.getElementById('hottestPart')!.textContent = max > 0 ? `P${hottestIdx} (${max})` : '—';
+    const min = Math.min(...counts);
+    const skew = max > 0 ? Math.round(((max - min) / max) * 100) : 0;
+    document.getElementById('skewPct')!.textContent = skew + '%';
+  }
+
+  function produce(key: string) {
+    let target: number;
+    switch (routing) {
+      case 'key': target = hashKey(key, partCount); break;
+      case 'round-robin': target = rrIndex % partCount; rrIndex++; break;
+      case 'random': target = Math.floor(Math.random() * partCount); break;
+      default: target = 0;
+    }
+    partitions[target].push(key);
+    keys.add(key);
+    msgTotal++;
+  }
+
+  function renderConsumerGroup() {
+    const consumers = parseInt((document.getElementById('consumerSlider') as HTMLInputElement).value);
+    document.getElementById('consumerCountLabel')!.textContent = String(consumers);
+    const cg = document.getElementById('cgViz')!;
+    cg.innerHTML = '';
+
+    const idle = Math.max(0, consumers - partCount);
+    document.getElementById('cgWarning')!.style.display = idle > 0 ? 'block' : 'none';
+    document.getElementById('idleCount')!.textContent = String(idle);
+
+    for (let c = 0; c < consumers; c++) {
+      const card = document.createElement('div');
+      const isIdle = c >= partCount;
+      card.className = `consumer-card ${isIdle ? 'idle' : ''}`;
+
+      let assignedParts: string[] = [];
+      if (!isIdle) {
+        for (let p = 0; p < partCount; p++) {
+          if (p % Math.min(consumers, partCount) === c) assignedParts.push(`P${p}`);
+        }
+      }
+
+      card.innerHTML = `<div class="consumer-name">Consumer ${c}</div>` +
+        `<div class="consumer-parts">${isIdle ? '💤 Idle' : assignedParts.join(', ')}</div>`;
+      cg.appendChild(card);
+    }
+  }
+
+  // Events
+  document.getElementById('partSlider')?.addEventListener('input', (e) => {
+    partCount = parseInt((e.target as HTMLInputElement).value);
+    document.getElementById('partCountLabel')!.textContent = String(partCount);
+    initPartitions(); renderPartitions(); renderConsumerGroup();
+  });
+
+  document.querySelectorAll('.route-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.route-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      routing = (btn as HTMLElement).dataset.route!;
+    });
+  });
+
+  document.getElementById('produceBtn')?.addEventListener('click', () => {
+    const key = (document.getElementById('msgKey') as HTMLInputElement).value || 'default';
+    produce(key); renderPartitions();
+  });
+
+  document.getElementById('produce20Btn')?.addEventListener('click', () => {
+    for (let i = 0; i < 20; i++) {
+      const key = sampleKeys[Math.floor(Math.random() * sampleKeys.length)];
+      produce(key);
+    }
+    renderPartitions();
+  });
+
+  document.getElementById('prodResetBtn')?.addEventListener('click', () => {
+    initPartitions(); renderPartitions();
+  });
+
+  document.getElementById('consumerSlider')?.addEventListener('input', renderConsumerGroup);
+
+  initPartitions(); renderPartitions(); renderConsumerGroup();
+</script>
