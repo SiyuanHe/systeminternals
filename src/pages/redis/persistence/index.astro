@@ -1,0 +1,1799 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Redis Persistence: RDB & AOF" 
+  description="Interactive visualization of Redis persistence mechanisms — RDB snapshots, AOF logging, crash recovery, and hybrid persistence"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Redis", href: "/redis/" },
+    { label: "Persistence", href: "/redis/persistence/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔴 Redis Persistence: RDB & AOF</h1>
+      <p class="subtitle">How Redis Saves Data to Disk and Recovers From Crashes</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Redis is an in-memory database, but it needs <strong>persistence</strong> to survive restarts and crashes.
+          Two mechanisms exist: <em>RDB snapshots</em> (periodic point-in-time dumps) and <em>AOF</em> (append-only log of every write).
+          Each has different tradeoffs for <strong>durability</strong>, <strong>performance</strong>, and <strong>recovery speed</strong>.
+          Redis 7+ introduces a <em>hybrid mode</em> that combines both for the best of each world.
+        </p>
+      </div>
+    </section>
+
+    <!-- RDB Snapshots: BGSAVE Visualization -->
+    <section class="flow-section">
+      <h2>📸 RDB Snapshots: BGSAVE with Fork &amp; Copy-on-Write</h2>
+      <p class="section-desc">Watch Redis fork a child process to write a point-in-time snapshot while the parent keeps serving requests</p>
+
+      <div class="flow-controls">
+        <button id="bgsaveBtn" class="action-btn primary-btn">🚀 Trigger BGSAVE</button>
+        <button id="saveBtn" class="action-btn step-btn">⏸ Trigger SAVE (blocking)</button>
+        <button id="resetBgsaveBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-status" id="bgsaveStatus">
+        <span class="status-badge idle" id="bgsaveBadge">Ready</span>
+        <span class="status-text" id="bgsaveStatusText">Click BGSAVE to see fork + copy-on-write in action</span>
+      </div>
+
+      <div class="memory-viz-container">
+        <div class="mem-section">
+          <h4 class="mem-title parent-title">Parent Process (serves clients)</h4>
+          <div class="memory-grid" id="parentMemory"></div>
+          <div class="mem-label" id="parentLabel">Redis Main Process — all memory pages</div>
+        </div>
+        <div class="fork-arrow" id="forkArrow" style="opacity:0;">
+          <div class="fork-label">fork()</div>
+          <div class="fork-line"></div>
+          <div class="cow-label" id="cowLabel" style="opacity:0;">COW: only modified pages copied</div>
+        </div>
+        <div class="mem-section" id="childSection" style="opacity:0;">
+          <h4 class="mem-title child-title">Child Process (writes .rdb)</h4>
+          <div class="memory-grid" id="childMemory"></div>
+          <div class="mem-label" id="childLabel">Snapshot frozen at fork time</div>
+        </div>
+      </div>
+
+      <div class="rdb-disk" id="rdbDisk">
+        <div class="disk-icon">💾</div>
+        <div class="disk-file" id="diskFile">dump.rdb</div>
+        <div class="disk-progress" id="diskProgress"></div>
+      </div>
+
+      <div class="rdb-timeline" id="bgsaveTimeline"></div>
+    </section>
+
+    <!-- RDB Config -->
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>⚙️ RDB Save Triggers</h3>
+        <p>
+          Redis can automatically trigger BGSAVE based on configurable thresholds:<br>
+          <code>save 900 1</code> — snapshot if at least <strong>1 key</strong> changed in 900 seconds<br>
+          <code>save 300 10</code> — snapshot if at least <strong>10 keys</strong> changed in 300 seconds<br>
+          <code>save 60 10000</code> — snapshot if at least <strong>10,000 keys</strong> changed in 60 seconds<br><br>
+          The <em>fork()</em> system call creates a child process that shares the parent's memory pages.
+          Thanks to <strong>copy-on-write (COW)</strong>, only pages modified by the parent after forking
+          are actually duplicated — making BGSAVE memory-efficient even for large datasets.
+        </p>
+      </div>
+    </section>
+
+    <!-- AOF: Append-Only File -->
+    <section class="flow-section">
+      <h2>📝 AOF: Append-Only File</h2>
+      <p class="section-desc">Every write command is appended to a log. Watch commands flow in and trigger a rewrite to compact.</p>
+
+      <div class="flow-controls">
+        <div class="slider-group">
+          <label>fsync mode:</label>
+          <select id="fsyncSelect" class="fsync-select">
+            <option value="always">always (every write)</option>
+            <option value="everysec" selected>everysec (every second)</option>
+            <option value="no">no (OS decides)</option>
+          </select>
+        </div>
+        <button id="aofWriteBtn" class="action-btn primary-btn">✏️ Write Commands</button>
+        <button id="aofRewriteBtn" class="action-btn step-btn" disabled>🗜️ AOF Rewrite</button>
+        <button id="resetAofBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="aof-container">
+        <div class="aof-input-panel">
+          <h4>Redis Commands</h4>
+          <div class="aof-commands" id="aofCommands"></div>
+        </div>
+        <div class="aof-arrow-col">
+          <div class="aof-flow-arrow">→</div>
+          <div class="fsync-indicator" id="fsyncIndicator">
+            <div class="fsync-dot"></div>
+            <span id="fsyncLabel">everysec</span>
+          </div>
+        </div>
+        <div class="aof-file-panel">
+          <h4>appendonly.aof <span class="aof-size" id="aofSize">0 bytes</span></h4>
+          <div class="aof-log" id="aofLog"></div>
+        </div>
+      </div>
+
+      <div class="latency-meters">
+        <div class="latency-meter">
+          <div class="meter-label">Write Latency</div>
+          <div class="meter-bar-bg">
+            <div class="meter-bar" id="latencyBar" style="width:10%;"></div>
+          </div>
+          <div class="meter-value" id="latencyValue">~0.1ms</div>
+        </div>
+        <div class="latency-meter">
+          <div class="meter-label">Durability</div>
+          <div class="meter-bar-bg">
+            <div class="meter-bar durability-bar" id="durabilityBar" style="width:80%;"></div>
+          </div>
+          <div class="meter-value" id="durabilityValue">High</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AOF Rewrite Explainer -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🔄 AOF Rewrite</h3>
+          <p>
+            Over time, the AOF file grows with redundant commands (e.g., 100 INCRs on the same key).
+            <strong>BGREWRITEAOF</strong> forks a child that replays the current dataset to generate a
+            <em>minimal</em> command set — replacing 100 INCRs with a single <code>SET key 100</code>.
+            The parent buffers new writes and appends them after the rewrite completes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ appendfsync Modes</h3>
+          <p>
+            <code>always</code> — fsync after every write. <strong>Safest</strong> but slowest (~1ms per write).<br>
+            <code>everysec</code> — fsync once per second. <strong>Good balance</strong>. At most 1 second of data loss.<br>
+            <code>no</code> — let the OS flush when it wants. <strong>Fastest</strong> but up to 30 seconds of data loss.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RDB vs AOF Comparison -->
+    <section class="flow-section">
+      <h2>⚖️ RDB vs AOF: Crash Simulation</h2>
+      <p class="section-desc">See what happens when Redis crashes — how much data does each mode lose?</p>
+
+      <div class="flow-controls">
+        <div class="slider-group">
+          <label>Persistence mode:</label>
+          <select id="modeSelect" class="fsync-select">
+            <option value="rdb">RDB only</option>
+            <option value="aof-always">AOF (always)</option>
+            <option value="aof-everysec">AOF (everysec)</option>
+            <option value="aof-no">AOF (no)</option>
+            <option value="both" selected>RDB + AOF</option>
+          </select>
+        </div>
+        <button id="crashBtn" class="action-btn kill-btn">💥 Crash After 5s</button>
+        <button id="resetCrashBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="crash-viz">
+        <div class="crash-timeline-bar" id="crashTimeline">
+          <div class="crash-bar-bg">
+            <div class="crash-bar-rdb" id="crashBarRdb"></div>
+            <div class="crash-bar-aof" id="crashBarAof"></div>
+            <div class="crash-marker" id="crashMarker" style="display:none;">💥</div>
+          </div>
+          <div class="crash-labels">
+            <span>0s</span><span>1s</span><span>2s</span><span>3s</span><span>4s</span><span>5s</span>
+          </div>
+        </div>
+        <div class="crash-results" id="crashResults"></div>
+      </div>
+
+      <div class="comparison-table" id="comparisonTable">
+        <div class="comp-header">
+          <div class="comp-cell"></div>
+          <div class="comp-cell comp-h">RDB</div>
+          <div class="comp-cell comp-h">AOF</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell comp-label">Startup Speed</div>
+          <div class="comp-cell comp-good">⚡ Fast (binary load)</div>
+          <div class="comp-cell comp-warn">🐢 Slower (replay commands)</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell comp-label">File Size</div>
+          <div class="comp-cell comp-good">📦 Compact</div>
+          <div class="comp-cell comp-warn">📄 Larger (command log)</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell comp-label">Data Loss Window</div>
+          <div class="comp-cell comp-warn">⚠️ Minutes (between saves)</div>
+          <div class="comp-cell comp-good">✅ 0–1 second</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell comp-label">CPU Impact</div>
+          <div class="comp-cell comp-warn">🔥 Fork spike</div>
+          <div class="comp-cell comp-good">📊 Steady (append)</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell comp-label">Best For</div>
+          <div class="comp-cell">Backups, replication</div>
+          <div class="comp-cell">Durability-critical</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hybrid Persistence -->
+    <section class="flow-section">
+      <h2>🔀 RDB+AOF Hybrid Persistence (Redis 7+)</h2>
+      <p class="section-desc">The AOF file starts with an RDB preamble for fast loading, followed by an AOF tail for recent writes</p>
+
+      <div class="flow-controls">
+        <button id="hybridPlayBtn" class="action-btn primary-btn">▶ Play Timeline</button>
+        <button id="resetHybridBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hybrid-viz">
+        <div class="hybrid-file" id="hybridFile">
+          <div class="hybrid-segment rdb-segment" id="hybridRdb">
+            <div class="seg-label">RDB Preamble</div>
+            <div class="seg-desc">Binary snapshot — fast to load</div>
+          </div>
+          <div class="hybrid-segment aof-segment" id="hybridAof" style="flex:0;">
+            <div class="seg-label">AOF Tail</div>
+            <div class="seg-desc">Recent write commands</div>
+          </div>
+        </div>
+        <div class="hybrid-timeline" id="hybridTimeline"></div>
+      </div>
+
+      <div class="hybrid-stats">
+        <div class="hybrid-stat">
+          <div class="stat-num" id="hybridStartup">~200ms</div>
+          <div class="stat-label">Startup Time</div>
+        </div>
+        <div class="hybrid-stat">
+          <div class="stat-num" id="hybridLoss">&lt;1s</div>
+          <div class="stat-label">Max Data Loss</div>
+        </div>
+        <div class="hybrid-stat">
+          <div class="stat-num" id="hybridSize">Compact</div>
+          <div class="stat-label">File Size</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hybrid Explainer -->
+    <section class="explain-section">
+      <div class="explain-card highlight-card">
+        <h3>💡 Why Hybrid?</h3>
+        <p>
+          Pure RDB is fast to load but loses minutes of data. Pure AOF is durable but slow to replay on restart.
+          <strong>Hybrid persistence</strong> (<code>aof-use-rdb-preamble yes</code>) writes the AOF file as:
+          an <em>RDB binary preamble</em> (fast loading) followed by an <em>AOF command tail</em> (recent writes since the last rewrite).
+          On restart, Redis loads the RDB portion instantly, then replays only the small AOF tail —
+          giving you <strong>fast startup AND minimal data loss</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- File Size Growth -->
+    <section class="flow-section">
+      <h2>📊 File Size Growth: RDB vs AOF</h2>
+      <p class="section-desc">Watch how file sizes change over time with continuous writes</p>
+
+      <div class="flow-controls">
+        <button id="growthPlayBtn" class="action-btn primary-btn">▶ Simulate Writes</button>
+        <button id="resetGrowthBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="growth-chart-container">
+        <canvas id="growthCanvas" width="780" height="300"></canvas>
+      </div>
+      <div class="growth-legend">
+        <span class="growth-legend-item"><span class="growth-swatch" style="background:#ef4444;"></span> RDB file size</span>
+        <span class="growth-legend-item"><span class="growth-swatch" style="background:#3b82f6;"></span> AOF file size</span>
+        <span class="growth-legend-item"><span class="growth-swatch" style="background:#22c55e;"></span> AOF after rewrite</span>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://redis.io/docs/management/persistence/" target="_blank">Redis Persistence Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Redis%20Persistence%20RDB%20%26%20AOF&url=https://systeminternals.dev/redis/persistence/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/redis/persistence/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/redis/persistence/&t=Interactive%20Redis%20Persistence%20RDB%20%26%20AOF%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #ef4444, #f97316, #eab308);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(249, 115, 22, 0.05));
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .kill-btn {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+    color: white;
+  }
+
+  .kill-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.5);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Flow Section */
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.forking { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.writing { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.done { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.blocking { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  /* Memory Visualization */
+  .memory-viz-container {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 20px;
+  }
+
+  .mem-section {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: opacity 0.5s;
+  }
+
+  .mem-title {
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  .parent-title { color: #f97316; }
+  .child-title { color: #60a5fa; }
+
+  .memory-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  :global(.mem-page) {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    transition: all 0.3s;
+    position: relative;
+  }
+
+  :global(.mem-page.shared) {
+    background: rgba(34, 197, 94, 0.4);
+    border: 1px solid rgba(34, 197, 94, 0.6);
+  }
+
+  :global(.mem-page.modified) {
+    background: rgba(249, 115, 22, 0.5);
+    border: 1px solid rgba(249, 115, 22, 0.8);
+    animation: pageModify 0.4s ease-out;
+  }
+
+  :global(.mem-page.cow-copied) {
+    background: rgba(239, 68, 68, 0.4);
+    border: 1px solid rgba(239, 68, 68, 0.7);
+    animation: pageCopy 0.4s ease-out;
+  }
+
+  :global(.mem-page.frozen) {
+    background: rgba(96, 165, 250, 0.3);
+    border: 1px solid rgba(96, 165, 250, 0.5);
+  }
+
+  :global(.mem-page.written) {
+    background: rgba(34, 197, 94, 0.5);
+    border: 1px solid rgba(34, 197, 94, 0.8);
+    animation: pageWrite 0.3s ease-out;
+  }
+
+  @keyframes pageModify {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes pageCopy {
+    0% { opacity: 0; transform: scale(0.5); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes pageWrite {
+    0% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  .mem-label {
+    font-size: 0.8rem;
+    color: #666;
+    text-align: center;
+  }
+
+  .fork-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-top: 40px;
+    transition: opacity 0.5s;
+  }
+
+  .fork-label {
+    color: #fbbf24;
+    font-weight: 700;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9rem;
+  }
+
+  .fork-line {
+    width: 3px;
+    height: 60px;
+    background: rgba(251, 191, 36, 0.4);
+    border-radius: 2px;
+  }
+
+  .cow-label {
+    color: #ef4444;
+    font-size: 0.75rem;
+    text-align: center;
+    max-width: 100px;
+    transition: opacity 0.5s;
+  }
+
+  /* RDB Disk */
+  .rdb-disk {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  .disk-icon { font-size: 1.5rem; }
+
+  .disk-file {
+    font-family: 'Monaco', 'Menlo', monospace;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .disk-progress {
+    flex: 1;
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  :global(.disk-progress-fill) {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #4ade80);
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+
+  .rdb-timeline {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 40px;
+    border: 1px solid rgba(255,255,255,0.1);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  :global(.rdb-event) {
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.rdb-event.fork-event) { background: rgba(251, 191, 36, 0.1); color: #fde68a; border-left: 3px solid #fbbf24; }
+  :global(.rdb-event.write-event) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.rdb-event.cow-event) { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.rdb-event.done-event) { background: rgba(34, 197, 94, 0.1); color: #86efac; border-left: 3px solid #22c55e; }
+  :global(.rdb-event.block-event) { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-left: 3px solid #ef4444; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* AOF */
+  .fsync-select {
+    padding: 8px 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .aof-container {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 20px;
+  }
+
+  .aof-input-panel, .aof-file-panel {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .aof-input-panel h4 { color: #f97316; font-size: 0.9rem; margin-bottom: 12px; }
+  .aof-file-panel h4 { color: #60a5fa; font-size: 0.9rem; margin-bottom: 12px; }
+
+  .aof-size {
+    color: #888;
+    font-weight: 400;
+    font-size: 0.8rem;
+    margin-left: 8px;
+  }
+
+  .aof-commands {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  :global(.aof-cmd) {
+    padding: 4px 8px;
+    margin-bottom: 3px;
+    border-radius: 4px;
+    background: rgba(249, 115, 22, 0.1);
+    color: #fed7aa;
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  .aof-log {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  :global(.aof-entry) {
+    padding: 3px 6px;
+    margin-bottom: 2px;
+    color: #93c5fd;
+    border-left: 2px solid rgba(96, 165, 250, 0.3);
+    animation: eventAppear 0.2s ease-out;
+  }
+
+  :global(.aof-entry.rewritten) {
+    color: #86efac;
+    border-left-color: rgba(34, 197, 94, 0.5);
+    background: rgba(34, 197, 94, 0.05);
+  }
+
+  .aof-arrow-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding-top: 40px;
+  }
+
+  .aof-flow-arrow {
+    color: rgba(255,255,255,0.3);
+    font-size: 1.5rem;
+  }
+
+  .fsync-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #888;
+  }
+
+  .fsync-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+
+  :global(.fsync-dot.syncing) {
+    animation: fsyncPulse 0.5s ease-in-out;
+  }
+
+  @keyframes fsyncPulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.5); opacity: 1; }
+  }
+
+  /* Latency Meters */
+  .latency-meters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .latency-meter {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .meter-label {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 8px;
+  }
+
+  .meter-bar-bg {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  .meter-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+    border-radius: 4px;
+    transition: width 0.5s;
+  }
+
+  .durability-bar {
+    background: linear-gradient(90deg, #ef4444, #eab308, #22c55e);
+  }
+
+  .meter-value {
+    font-size: 0.85rem;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* Crash Simulation */
+  .crash-viz {
+    margin-bottom: 24px;
+  }
+
+  .crash-timeline-bar {
+    margin-bottom: 16px;
+  }
+
+  .crash-bar-bg {
+    height: 40px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  .crash-bar-rdb {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: rgba(239, 68, 68, 0.3);
+    border-right: 2px solid #ef4444;
+    transition: width 1s;
+  }
+
+  .crash-bar-aof {
+    position: absolute;
+    left: 0; top: 50%; bottom: 0;
+    background: rgba(96, 165, 250, 0.3);
+    border-right: 2px solid #3b82f6;
+    transition: width 1s;
+  }
+
+  .crash-marker {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translate(50%, -50%);
+    font-size: 1.5rem;
+    z-index: 2;
+  }
+
+  .crash-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #666;
+    padding: 0 4px;
+  }
+
+  .crash-results {
+    min-height: 60px;
+  }
+
+  :global(.crash-result-card) {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 10px;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.crash-result-card h4) {
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+  }
+
+  :global(.crash-result-card p) {
+    font-size: 0.85rem;
+    color: #aaa;
+    line-height: 1.6;
+  }
+
+  :global(.lost) { color: #ef4444; }
+  :global(.saved) { color: #22c55e; }
+
+  /* Comparison Table */
+  .comparison-table {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .comp-header, .comp-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .comp-header {
+    background: rgba(255,255,255,0.05);
+  }
+
+  .comp-cell {
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    color: #ccc;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .comp-h {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+
+  .comp-label {
+    color: #888;
+    font-weight: 600;
+  }
+
+  .comp-good { color: #4ade80; }
+  .comp-warn { color: #fbbf24; }
+
+  /* Hybrid */
+  .hybrid-viz {
+    margin-bottom: 20px;
+  }
+
+  .hybrid-file {
+    display: flex;
+    height: 80px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  .hybrid-segment {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: flex 1s ease-in-out;
+    overflow: hidden;
+  }
+
+  .rdb-segment {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.1));
+    flex: 3;
+  }
+
+  .aof-segment {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.1));
+  }
+
+  .seg-label {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #fff;
+  }
+
+  .seg-desc {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 4px;
+  }
+
+  .hybrid-timeline {
+    min-height: 40px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  :global(.hybrid-event) {
+    padding: 5px 10px;
+    margin-bottom: 5px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    animation: eventAppear 0.3s ease-out;
+  }
+
+  :global(.hybrid-event.rdb-ev) { background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.hybrid-event.aof-ev) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.hybrid-event.done-ev) { background: rgba(34, 197, 94, 0.1); color: #86efac; border-left: 3px solid #22c55e; }
+
+  .hybrid-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .hybrid-stat {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .stat-num {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #22c55e;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  /* Growth Chart */
+  .growth-chart-container {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 12px;
+    overflow-x: auto;
+  }
+
+  .growth-legend {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+
+  .growth-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #ccc;
+  }
+
+  .growth-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  /* Slider Group */
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-group label {
+    color: #ccc;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  /* Explanation Cards */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #f97316; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(249, 115, 22, 0.08));
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .memory-viz-container { grid-template-columns: 1fr; }
+    .aof-container { grid-template-columns: 1fr; }
+    .aof-arrow-col { flex-direction: row; padding-top: 0; }
+    .hybrid-stats { grid-template-columns: 1fr; }
+    .comp-header, .comp-row { grid-template-columns: 1fr 1fr 1fr; font-size: 0.75rem; }
+    .latency-meters { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+  // ========== BGSAVE VISUALIZATION ==========
+  var NUM_PAGES = 32;
+  var parentPages = [];
+  var childPages = [];
+  var bgsaveRunning = false;
+
+  var parentMemory = document.getElementById('parentMemory');
+  var childMemory = document.getElementById('childMemory');
+  var childSection = document.getElementById('childSection');
+  var forkArrow = document.getElementById('forkArrow');
+  var cowLabel = document.getElementById('cowLabel');
+  var bgsaveBadge = document.getElementById('bgsaveBadge');
+  var bgsaveStatusText = document.getElementById('bgsaveStatusText');
+  var bgsaveTimeline = document.getElementById('bgsaveTimeline');
+  var diskProgress = document.getElementById('diskProgress');
+
+  function initPages() {
+    parentPages = [];
+    childPages = [];
+    for (var i = 0; i < NUM_PAGES; i++) {
+      parentPages.push('shared');
+      childPages.push('frozen');
+    }
+  }
+
+  function renderPages(container, pages, prefix) {
+    container.innerHTML = '';
+    for (var i = 0; i < pages.length; i++) {
+      var div = document.createElement('div');
+      div.className = 'mem-page ' + pages[i];
+      div.title = prefix + ' page ' + i + ' (' + pages[i] + ')';
+      container.appendChild(div);
+    }
+  }
+
+  function addBgsaveEvent(text, cls) {
+    var el = document.createElement('div');
+    el.className = 'rdb-event ' + cls;
+    el.textContent = text;
+    bgsaveTimeline.appendChild(el);
+    bgsaveTimeline.scrollTop = bgsaveTimeline.scrollHeight;
+  }
+
+  function setBgsaveStatus(badge, badgeText, statusText) {
+    bgsaveBadge.className = 'status-badge ' + badge;
+    bgsaveBadge.textContent = badgeText;
+    bgsaveStatusText.textContent = statusText;
+  }
+
+  function sleep(ms) {
+    return new Promise(function(resolve) { setTimeout(resolve, ms); });
+  }
+
+  initPages();
+  renderPages(parentMemory, parentPages, 'Parent');
+
+  // disk progress bar
+  diskProgress.innerHTML = '<div class="disk-progress-fill" style="width:0%"></div>';
+
+  document.getElementById('bgsaveBtn').addEventListener('click', function() {
+    if (bgsaveRunning) return;
+    bgsaveRunning = true;
+    runBgsave();
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', function() {
+    if (bgsaveRunning) return;
+    bgsaveRunning = true;
+    runSave();
+  });
+
+  document.getElementById('resetBgsaveBtn').addEventListener('click', function() {
+    bgsaveRunning = false;
+    initPages();
+    renderPages(parentMemory, parentPages, 'Parent');
+    childSection.style.opacity = '0';
+    forkArrow.style.opacity = '0';
+    cowLabel.style.opacity = '0';
+    setBgsaveStatus('idle', 'Ready', 'Click BGSAVE to see fork + copy-on-write in action');
+    bgsaveTimeline.innerHTML = '';
+    diskProgress.innerHTML = '<div class="disk-progress-fill" style="width:0%"></div>';
+    document.getElementById('parentLabel').textContent = 'Redis Main Process \u2014 all memory pages';
+  });
+
+  async function runBgsave() {
+    initPages();
+    bgsaveTimeline.innerHTML = '';
+    diskProgress.innerHTML = '<div class="disk-progress-fill" style="width:0%"></div>';
+
+    // Step 1: Fork
+    setBgsaveStatus('forking', 'FORKING', 'Calling fork() to create child process...');
+    addBgsaveEvent('\uD83D\uDD00 BGSAVE started \u2014 calling fork()', 'fork-event');
+    renderPages(parentMemory, parentPages, 'Parent');
+    await sleep(800);
+
+    // Show child
+    forkArrow.style.opacity = '1';
+    childSection.style.opacity = '1';
+    renderPages(childMemory, childPages, 'Child');
+    addBgsaveEvent('\uD83D\uDC76 Child process created \u2014 shares all memory pages via COW', 'fork-event');
+    await sleep(600);
+
+    // Step 2: Child writes to disk while parent serves
+    setBgsaveStatus('writing', 'WRITING', 'Child writing .rdb to disk, parent still serving clients...');
+    addBgsaveEvent('\uD83D\uDCBE Child begins serializing dataset to dump.rdb', 'write-event');
+
+    var progressFill = diskProgress.querySelector('.disk-progress-fill');
+    var totalSteps = NUM_PAGES;
+    var cowPages = [3, 7, 12, 19, 25]; // pages parent modifies during BGSAVE
+
+    for (var step = 0; step < totalSteps; step++) {
+      if (!bgsaveRunning) return;
+
+      // Child writes a page to disk
+      childPages[step] = 'written';
+      renderPages(childMemory, childPages, 'Child');
+      var pct = Math.round(((step + 1) / totalSteps) * 100);
+      progressFill.style.width = pct + '%';
+
+      // Parent modifies a page (COW)
+      if (cowPages.indexOf(step) !== -1) {
+        parentPages[step] = 'modified';
+        childPages[step] = 'written';
+        cowLabel.style.opacity = '1';
+        addBgsaveEvent('\u270F\uFE0F Parent modified page ' + step + ' \u2014 COW: page duplicated', 'cow-event');
+        renderPages(parentMemory, parentPages, 'Parent');
+      }
+
+      await sleep(200);
+    }
+
+    // Done
+    setBgsaveStatus('done', 'COMPLETE', 'BGSAVE complete! dump.rdb written to disk.');
+    addBgsaveEvent('\u2705 dump.rdb saved successfully \u2014 child process exits', 'done-event');
+    document.getElementById('parentLabel').textContent = 'Parent served clients throughout \u2014 ' + cowPages.length + ' COW pages duplicated';
+    bgsaveRunning = false;
+  }
+
+  async function runSave() {
+    initPages();
+    bgsaveTimeline.innerHTML = '';
+    diskProgress.innerHTML = '<div class="disk-progress-fill" style="width:0%"></div>';
+    childSection.style.opacity = '0';
+    forkArrow.style.opacity = '0';
+
+    setBgsaveStatus('blocking', '\u26D4 BLOCKING', 'SAVE command \u2014 Redis is FROZEN, no client requests served!');
+    addBgsaveEvent('\u26A0\uFE0F SAVE called \u2014 Redis blocks ALL operations!', 'block-event');
+    document.getElementById('parentLabel').textContent = '\u26D4 BLOCKED \u2014 cannot serve any client requests';
+
+    var progressFill = diskProgress.querySelector('.disk-progress-fill');
+
+    for (var step = 0; step < NUM_PAGES; step++) {
+      if (!bgsaveRunning) return;
+      parentPages[step] = 'written';
+      renderPages(parentMemory, parentPages, 'Parent');
+      var pct = Math.round(((step + 1) / NUM_PAGES) * 100);
+      progressFill.style.width = pct + '%';
+      await sleep(150);
+    }
+
+    setBgsaveStatus('done', 'COMPLETE', 'SAVE complete. Redis resumes serving clients.');
+    addBgsaveEvent('\u2705 dump.rdb saved \u2014 Redis unblocked', 'done-event');
+    document.getElementById('parentLabel').textContent = 'Redis Main Process \u2014 SAVE complete, clients can connect again';
+    bgsaveRunning = false;
+  }
+
+  // ========== AOF VISUALIZATION ==========
+  var aofCommands = document.getElementById('aofCommands');
+  var aofLog = document.getElementById('aofLog');
+  var aofSizeEl = document.getElementById('aofSize');
+  var latencyBar = document.getElementById('latencyBar');
+  var latencyValue = document.getElementById('latencyValue');
+  var durabilityBar = document.getElementById('durabilityBar');
+  var durabilityValue = document.getElementById('durabilityValue');
+  var fsyncSelect = document.getElementById('fsyncSelect');
+  var aofWriteBtn = document.getElementById('aofWriteBtn');
+  var aofRewriteBtn = document.getElementById('aofRewriteBtn');
+
+  var aofEntries = [];
+  var aofRunning = false;
+  var aofByteSize = 0;
+
+  var sampleCommands = [
+    'SET user:1 "Alice"',
+    'INCR pageviews',
+    'SET user:2 "Bob"',
+    'INCR pageviews',
+    'HSET session:abc token xyz',
+    'SET user:1 "Alice Smith"',
+    'INCR pageviews',
+    'DEL session:abc',
+    'INCR pageviews',
+    'SET counter 0',
+    'INCR counter',
+    'INCR counter',
+    'INCR counter',
+    'INCR counter',
+    'SET user:3 "Charlie"',
+    'LPUSH queue "job1"',
+    'LPUSH queue "job2"',
+    'RPOP queue',
+    'INCR pageviews',
+    'SET user:1 "Alice Johnson"'
+  ];
+
+  function updateFsyncMeters() {
+    var mode = fsyncSelect.value;
+    if (mode === 'always') {
+      latencyBar.style.width = '80%';
+      latencyValue.textContent = '~1ms per write';
+      durabilityBar.style.width = '100%';
+      durabilityValue.textContent = 'Maximum — zero data loss';
+    } else if (mode === 'everysec') {
+      latencyBar.style.width = '30%';
+      latencyValue.textContent = '~0.1ms per write';
+      durabilityBar.style.width = '80%';
+      durabilityValue.textContent = 'High — up to 1s data loss';
+    } else {
+      latencyBar.style.width = '10%';
+      latencyValue.textContent = '~0.05ms per write';
+      durabilityBar.style.width = '30%';
+      durabilityValue.textContent = 'Low — up to 30s data loss';
+    }
+    document.getElementById('fsyncLabel').textContent = mode;
+  }
+
+  fsyncSelect.addEventListener('change', updateFsyncMeters);
+  updateFsyncMeters();
+
+  aofWriteBtn.addEventListener('click', function() {
+    if (aofRunning) return;
+    aofRunning = true;
+    runAofWrites();
+  });
+
+  aofRewriteBtn.addEventListener('click', function() {
+    runAofRewrite();
+  });
+
+  document.getElementById('resetAofBtn').addEventListener('click', function() {
+    aofRunning = false;
+    aofEntries = [];
+    aofByteSize = 0;
+    aofCommands.innerHTML = '';
+    aofLog.innerHTML = '';
+    aofSizeEl.textContent = '0 bytes';
+    aofRewriteBtn.disabled = true;
+  });
+
+  async function runAofWrites() {
+    for (var i = 0; i < sampleCommands.length; i++) {
+      if (!aofRunning) return;
+      var cmd = sampleCommands[i];
+
+      // Show command
+      var cmdEl = document.createElement('div');
+      cmdEl.className = 'aof-cmd';
+      cmdEl.textContent = '> ' + cmd;
+      aofCommands.appendChild(cmdEl);
+      aofCommands.scrollTop = aofCommands.scrollHeight;
+
+      // Add to AOF log
+      aofEntries.push(cmd);
+      var entry = document.createElement('div');
+      entry.className = 'aof-entry';
+      entry.textContent = cmd;
+      aofLog.appendChild(entry);
+      aofLog.scrollTop = aofLog.scrollHeight;
+
+      aofByteSize += cmd.length + 20; // approximate RESP overhead
+      aofSizeEl.textContent = aofByteSize + ' bytes';
+
+      // Pulse fsync dot
+      var dot = document.querySelector('.fsync-dot');
+      dot.classList.remove('syncing');
+      void dot.offsetWidth;
+      dot.classList.add('syncing');
+
+      if (aofEntries.length >= 5) {
+        aofRewriteBtn.disabled = false;
+      }
+
+      await sleep(400);
+    }
+    aofRunning = false;
+  }
+
+  async function runAofRewrite() {
+    aofRewriteBtn.disabled = true;
+
+    // Compact: group by final state
+    var finalState = {};
+    for (var i = 0; i < aofEntries.length; i++) {
+      var parts = aofEntries[i].split(' ');
+      var op = parts[0];
+      var key = parts[1];
+      if (op === 'INCR') {
+        var cur = finalState[key] || 0;
+        if (typeof cur === 'number') {
+          finalState[key] = cur + 1;
+        } else {
+          finalState[key] = 1;
+        }
+      } else if (op === 'SET' || op === 'HSET') {
+        finalState[key] = aofEntries[i];
+      } else if (op === 'DEL') {
+        delete finalState[key];
+      } else {
+        finalState[key + ':' + i] = aofEntries[i];
+      }
+    }
+
+    // Generate compact commands
+    var compacted = [];
+    var keys = Object.keys(finalState);
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      var val = finalState[key];
+      if (typeof val === 'number') {
+        compacted.push('SET ' + key + ' ' + val);
+      } else {
+        compacted.push(val);
+      }
+    }
+
+    // Animate rewrite
+    aofLog.innerHTML = '';
+    var oldSize = aofByteSize;
+    aofByteSize = 0;
+    aofEntries = compacted;
+
+    for (var j = 0; j < compacted.length; j++) {
+      var entry = document.createElement('div');
+      entry.className = 'aof-entry rewritten';
+      entry.textContent = compacted[j];
+      aofLog.appendChild(entry);
+      aofByteSize += compacted[j].length + 20;
+      await sleep(150);
+    }
+
+    aofSizeEl.textContent = aofByteSize + ' bytes (was ' + oldSize + ')';
+  }
+
+  // ========== CRASH SIMULATION ==========
+  var crashBtn = document.getElementById('crashBtn');
+  var crashResults = document.getElementById('crashResults');
+  var crashBarRdb = document.getElementById('crashBarRdb');
+  var crashBarAof = document.getElementById('crashBarAof');
+  var crashMarker = document.getElementById('crashMarker');
+  var modeSelect = document.getElementById('modeSelect');
+
+  crashBtn.addEventListener('click', function() {
+    runCrashSim();
+  });
+
+  document.getElementById('resetCrashBtn').addEventListener('click', function() {
+    crashResults.innerHTML = '';
+    crashBarRdb.style.width = '0%';
+    crashBarAof.style.width = '0%';
+    crashMarker.style.display = 'none';
+  });
+
+  async function runCrashSim() {
+    var mode = modeSelect.value;
+    crashResults.innerHTML = '';
+    crashBarRdb.style.width = '0%';
+    crashBarAof.style.width = '0%';
+    crashMarker.style.display = 'none';
+
+    // Animate 5 seconds of writes
+    for (var t = 0; t <= 50; t++) {
+      await sleep(80);
+      var pct = (t / 50) * 100;
+
+      // RDB bar: last snapshot was at t=0 (beginning)
+      if (mode === 'rdb' || mode === 'both') {
+        crashBarRdb.style.width = '0%'; // RDB snapshot at time 0
+      }
+
+      // AOF bar
+      if (mode.startsWith('aof') || mode === 'both') {
+        var aofPct;
+        if (mode === 'aof-always' || mode === 'both') {
+          aofPct = pct; // synced up to current
+        } else if (mode === 'aof-everysec') {
+          aofPct = Math.max(0, pct - 20); // ~1s behind
+        } else {
+          aofPct = Math.max(0, pct - 60); // OS decides, could be way behind
+        }
+        crashBarAof.style.width = aofPct + '%';
+      }
+    }
+
+    // Crash!
+    crashMarker.style.display = 'block';
+    await sleep(300);
+
+    // Show results
+    var card = document.createElement('div');
+    card.className = 'crash-result-card';
+
+    var title = '';
+    var body = '';
+
+    if (mode === 'rdb') {
+      title = '<h4 style="color:#ef4444;">\uD83D\uDCA5 RDB Only: All 5 seconds of writes LOST</h4>';
+      body = '<p>Last RDB snapshot was taken before the writes began. ' +
+             'All <span class="lost">~500 write operations</span> since the last snapshot are gone. ' +
+             'RDB trades durability for simplicity and fast restarts.</p>';
+    } else if (mode === 'aof-always') {
+      title = '<h4 style="color:#22c55e;">\u2705 AOF (always): Zero data loss!</h4>';
+      body = '<p>Every write was fsync\'d to disk immediately. ' +
+             '<span class="saved">All ~500 operations preserved</span>. ' +
+             'Cost: higher latency per write (~1ms).</p>';
+    } else if (mode === 'aof-everysec') {
+      title = '<h4 style="color:#fbbf24;">\u26A0\uFE0F AOF (everysec): ~1 second of writes lost</h4>';
+      body = '<p>AOF was synced once per second. The last <span class="lost">~100 operations</span> (from the final second) are lost. ' +
+             '<span class="saved">~400 operations preserved</span>. Best balance of durability and performance.</p>';
+    } else if (mode === 'aof-no') {
+      title = '<h4 style="color:#ef4444;">\uD83D\uDCA5 AOF (no fsync): ~3 seconds of writes lost</h4>';
+      body = '<p>OS flushes when it wants (every ~30s). Up to <span class="lost">~300 operations lost</span>. ' +
+             '<span class="saved">~200 operations preserved</span>. Fastest, but risky.</p>';
+    } else if (mode === 'both') {
+      title = '<h4 style="color:#22c55e;">\u2705 RDB+AOF: Minimal data loss + fast recovery</h4>';
+      body = '<p>AOF (everysec) preserves all but the last second of writes: <span class="saved">~400 operations saved</span>. ' +
+             'RDB provides a fast-loading baseline. On restart, Redis loads from AOF (more complete). ' +
+             '<span class="lost">~100 operations lost</span> from the final second.</p>';
+    }
+
+    card.innerHTML = title + body;
+    crashResults.appendChild(card);
+  }
+
+  // ========== HYBRID PERSISTENCE ==========
+  var hybridPlayBtn = document.getElementById('hybridPlayBtn');
+  var hybridRdb = document.getElementById('hybridRdb');
+  var hybridAof = document.getElementById('hybridAof');
+  var hybridTimeline = document.getElementById('hybridTimeline');
+  var hybridRunning = false;
+
+  hybridPlayBtn.addEventListener('click', function() {
+    if (hybridRunning) return;
+    hybridRunning = true;
+    runHybridTimeline();
+  });
+
+  document.getElementById('resetHybridBtn').addEventListener('click', function() {
+    hybridRunning = false;
+    hybridRdb.style.flex = '3';
+    hybridAof.style.flex = '0';
+    hybridTimeline.innerHTML = '';
+    document.getElementById('hybridStartup').textContent = '~200ms';
+    document.getElementById('hybridLoss').innerHTML = '&lt;1s';
+    document.getElementById('hybridSize').textContent = 'Compact';
+  });
+
+  function addHybridEvent(text, cls) {
+    var el = document.createElement('div');
+    el.className = 'hybrid-event ' + cls;
+    el.textContent = text;
+    hybridTimeline.appendChild(el);
+    hybridTimeline.scrollTop = hybridTimeline.scrollHeight;
+  }
+
+  async function runHybridTimeline() {
+    hybridTimeline.innerHTML = '';
+    hybridRdb.style.flex = '3';
+    hybridAof.style.flex = '0';
+
+    addHybridEvent('\uD83D\uDD04 BGREWRITEAOF triggered \u2014 generating hybrid AOF file', 'rdb-ev');
+    await sleep(1000);
+
+    addHybridEvent('\uD83D\uDCF8 Writing RDB preamble (binary snapshot of current dataset)', 'rdb-ev');
+    await sleep(1200);
+
+    addHybridEvent('\u2705 RDB preamble complete \u2014 this is the "fast load" portion', 'rdb-ev');
+    await sleep(800);
+
+    // Now AOF tail grows
+    addHybridEvent('\u270F\uFE0F New writes begin appending as AOF commands after the preamble', 'aof-ev');
+    hybridAof.style.flex = '0.5';
+    await sleep(800);
+
+    addHybridEvent('SET user:1 "Alice" \u2192 appended to AOF tail', 'aof-ev');
+    hybridAof.style.flex = '1';
+    await sleep(600);
+
+    addHybridEvent('INCR pageviews \u2192 appended to AOF tail', 'aof-ev');
+    hybridAof.style.flex = '1.3';
+    await sleep(600);
+
+    addHybridEvent('SET session:x token123 \u2192 appended to AOF tail', 'aof-ev');
+    hybridAof.style.flex = '1.5';
+    await sleep(600);
+
+    addHybridEvent('\uD83D\uDCA5 If Redis crashes NOW: load RDB preamble (~200ms) then replay 3 AOF commands (~instant)', 'done-ev');
+    document.getElementById('hybridStartup').textContent = '~200ms';
+    document.getElementById('hybridLoss').innerHTML = '&lt;1s';
+    document.getElementById('hybridSize').textContent = 'Optimal';
+    await sleep(1000);
+
+    addHybridEvent('\uD83D\uDD04 Next BGREWRITEAOF: entire dataset becomes new RDB preamble, AOF tail resets', 'done-ev');
+    hybridRunning = false;
+  }
+
+  // ========== FILE SIZE GROWTH CHART ==========
+  var growthCanvas = document.getElementById('growthCanvas');
+  var growthCtx = growthCanvas.getContext('2d');
+  var growthRunning = false;
+
+  document.getElementById('growthPlayBtn').addEventListener('click', function() {
+    if (growthRunning) return;
+    growthRunning = true;
+    runGrowthChart();
+  });
+
+  document.getElementById('resetGrowthBtn').addEventListener('click', function() {
+    growthRunning = false;
+    growthCtx.clearRect(0, 0, growthCanvas.width, growthCanvas.height);
+    drawGrowthAxes();
+  });
+
+  function drawGrowthAxes() {
+    var w = growthCanvas.width;
+    var h = growthCanvas.height;
+    var pad = 50;
+
+    growthCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+    growthCtx.lineWidth = 1;
+    growthCtx.beginPath();
+    growthCtx.moveTo(pad, 10);
+    growthCtx.lineTo(pad, h - pad);
+    growthCtx.lineTo(w - 10, h - pad);
+    growthCtx.stroke();
+
+    growthCtx.fillStyle = '#666';
+    growthCtx.font = '11px Inter';
+    growthCtx.textAlign = 'center';
+    growthCtx.fillText('Time (writes)', w / 2, h - 10);
+    growthCtx.save();
+    growthCtx.translate(15, h / 2);
+    growthCtx.rotate(-Math.PI / 2);
+    growthCtx.fillText('File Size', 0, 0);
+    growthCtx.restore();
+  }
+
+  drawGrowthAxes();
+
+  async function runGrowthChart() {
+    growthCtx.clearRect(0, 0, growthCanvas.width, growthCanvas.height);
+    drawGrowthAxes();
+
+    var w = growthCanvas.width;
+    var h = growthCanvas.height;
+    var pad = 50;
+    var plotW = w - pad - 10;
+    var plotH = h - pad - 10;
+    var steps = 100;
+
+    var rdbPoints = [];
+    var aofPoints = [];
+    var aofRewritePoints = [];
+
+    var rdbSize = 50;
+    var aofSize = 0;
+    var aofRewriteSize = 0;
+    var aofRewriteAt = 60;
+
+    for (var i = 0; i <= steps; i++) {
+      if (!growthRunning) return;
+
+      // RDB: step function (jumps at snapshots)
+      if (i === 0) rdbSize = 50;
+      else if (i === 40) rdbSize = 80;
+      else if (i === 80) rdbSize = 110;
+
+      // AOF: grows linearly
+      aofSize += 2.5;
+
+      // AOF after rewrite at step 60
+      if (i === aofRewriteAt) {
+        aofRewriteSize = 60; // compacted
+      } else if (i > aofRewriteAt) {
+        aofRewriteSize += 2.5;
+      }
+
+      rdbPoints.push(rdbSize);
+      aofPoints.push(aofSize);
+      aofRewritePoints.push(aofRewriteSize);
+
+      // Redraw
+      growthCtx.clearRect(pad + 1, 0, plotW + 10, h - pad);
+
+      var maxVal = 280;
+
+      // Draw AOF line (blue)
+      growthCtx.strokeStyle = '#3b82f6';
+      growthCtx.lineWidth = 2;
+      growthCtx.beginPath();
+      for (var j = 0; j <= i; j++) {
+        var x = pad + (j / steps) * plotW;
+        var y = (h - pad) - (aofPoints[j] / maxVal) * plotH;
+        if (j === 0) growthCtx.moveTo(x, y);
+        else growthCtx.lineTo(x, y);
+      }
+      growthCtx.stroke();
+
+      // Draw AOF rewrite line (green)
+      if (i >= aofRewriteAt) {
+        growthCtx.strokeStyle = '#22c55e';
+        growthCtx.lineWidth = 2;
+        growthCtx.setLineDash([4, 4]);
+        growthCtx.beginPath();
+        for (var k = aofRewriteAt; k <= i; k++) {
+          var x2 = pad + (k / steps) * plotW;
+          var y2 = (h - pad) - (aofRewritePoints[k] / maxVal) * plotH;
+          if (k === aofRewriteAt) growthCtx.moveTo(x2, y2);
+          else growthCtx.lineTo(x2, y2);
+        }
+        growthCtx.stroke();
+        growthCtx.setLineDash([]);
+
+        // Rewrite marker
+        var rwX = pad + (aofRewriteAt / steps) * plotW;
+        growthCtx.fillStyle = '#22c55e';
+        growthCtx.font = '10px Inter';
+        growthCtx.textAlign = 'center';
+        growthCtx.fillText('\u2193 rewrite', rwX, 20);
+      }
+
+      // Draw RDB line (red, step function)
+      growthCtx.strokeStyle = '#ef4444';
+      growthCtx.lineWidth = 2;
+      growthCtx.beginPath();
+      for (var m = 0; m <= i; m++) {
+        var x3 = pad + (m / steps) * plotW;
+        var y3 = (h - pad) - (rdbPoints[m] / maxVal) * plotH;
+        if (m === 0) growthCtx.moveTo(x3, y3);
+        else growthCtx.lineTo(x3, y3);
+      }
+      growthCtx.stroke();
+
+      await sleep(60);
+    }
+    growthRunning = false;
+  }
+</script>

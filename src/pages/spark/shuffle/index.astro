@@ -1,0 +1,986 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Spark Shuffle Internals: Data Redistribution Deep Dive" 
+  description="Interactive visualization of Apache Spark's shuffle mechanism — map/reduce sides, shuffle managers, spills, AQE, and performance tuning"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Spark", href: "/spark/" },
+    { label: "Shuffle Internals", href: "/spark/shuffle/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔀 Shuffle Internals</h1>
+      <p class="subtitle">How Spark Redistributes Data Across the Cluster</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A <strong>shuffle</strong> is Spark's mechanism for redistributing data across partitions — the most
+          expensive operation in any Spark job. It's triggered by <em>wide dependencies</em> like groupByKey,
+          reduceByKey, join, repartition, and distinct. On the <strong>map side</strong>, each task sorts and
+          writes shuffle files; on the <strong>reduce side</strong>, tasks fetch blocks from all map outputs
+          over the network. Understanding shuffle internals is key to tuning Spark performance.
+        </p>
+      </div>
+    </section>
+
+    <!-- Shuffle Flow Visualization -->
+    <section class="pipeline-section">
+      <h2>🔄 Shuffle Data Flow</h2>
+      <p class="section-desc">Watch data flow from map partitions to reduce partitions during a shuffle</p>
+
+      <div class="shuffle-flow-controls">
+        <div class="ctrl-group">
+          <label>Map Tasks: <strong id="mapCountLabel">4</strong></label>
+          <input type="range" id="mapCountSlider" min="2" max="8" value="4">
+        </div>
+        <div class="ctrl-group">
+          <label>Reduce Tasks: <strong id="reduceCountLabel">3</strong></label>
+          <input type="range" id="reduceCountSlider" min="2" max="6" value="3">
+        </div>
+        <button id="shuffleFlowBtn" class="action-btn primary-btn">▶ Run Shuffle</button>
+        <button id="shuffleResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="shuffle-flow-container" id="shuffleFlowContainer">
+        <div class="flow-column" id="mapColumn">
+          <div class="flow-col-title">Map Side (Write)</div>
+        </div>
+        <div class="flow-middle" id="flowMiddle">
+          <div class="flow-col-title">Network Transfer</div>
+          <svg id="flowSvg" width="100%" height="100%"></svg>
+        </div>
+        <div class="flow-column" id="reduceColumn">
+          <div class="flow-col-title">Reduce Side (Read)</div>
+        </div>
+      </div>
+
+      <div class="flow-stats">
+        <div class="stat-card"><span class="stat-label">Shuffle Files</span><span class="stat-value" id="shuffleFileCount">4</span></div>
+        <div class="stat-card"><span class="stat-label">Network Transfers</span><span class="stat-value" id="transferCount">12</span></div>
+        <div class="stat-card"><span class="stat-label">Data Written</span><span class="stat-value" id="dataWritten">—</span></div>
+        <div class="stat-card"><span class="stat-label">Data Read</span><span class="stat-value" id="dataRead">—</span></div>
+      </div>
+    </section>
+
+    <!-- Shuffle Manager Implementations -->
+    <section class="manager-section">
+      <h2>⚙️ Shuffle Manager Implementations</h2>
+      <p class="section-desc">Toggle between implementations to see how they differ in file output and memory usage</p>
+
+      <div class="manager-tabs">
+        <button class="manager-tab active" data-manager="sort">SortShuffle (Default)</button>
+        <button class="manager-tab" data-manager="hash">Hash-Based (Deprecated)</button>
+        <button class="manager-tab" data-manager="tungsten">Tungsten/Unsafe</button>
+      </div>
+
+      <div class="manager-detail" id="managerDetail">
+        <div class="manager-info" id="managerInfo"></div>
+        <div class="manager-viz" id="managerViz"></div>
+      </div>
+
+      <div class="manager-comparison">
+        <div class="stat-card"><span class="stat-label">Files Created</span><span class="stat-value" id="mgFileCount">—</span></div>
+        <div class="stat-card"><span class="stat-label">Memory Model</span><span class="stat-value" id="mgMemory">—</span></div>
+        <div class="stat-card"><span class="stat-label">Serialization</span><span class="stat-value" id="mgSerial">—</span></div>
+        <div class="stat-card"><span class="stat-label">Best For</span><span class="stat-value" id="mgBestFor">—</span></div>
+      </div>
+    </section>
+
+    <!-- Shuffle Write Process -->
+    <section class="write-section">
+      <h2>📝 Shuffle Write (Map Side)</h2>
+      <p class="section-desc">Step through the write process: buffer → sort → spill → merge</p>
+
+      <div class="pipeline-controls">
+        <button id="writeStepBtn" class="action-btn primary-btn">⏭ Next Step</button>
+        <button id="writeAutoBtn" class="action-btn auto-btn">⚡ Auto-Play</button>
+        <button id="writeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="pipeline-status">
+        <span class="pipe-badge" id="writeBadge">Ready</span>
+        <span id="writeText">Click "Next Step" to walk through the shuffle write process</span>
+      </div>
+
+      <div class="write-viz" id="writeViz">
+        <div class="dag-placeholder">Shuffle write animation will appear here</div>
+      </div>
+    </section>
+
+    <!-- Shuffle Read Process -->
+    <section class="read-section">
+      <h2>📥 Shuffle Read (Reduce Side)</h2>
+      <p class="section-desc">Visualize network transfers from map tasks to reducers with bandwidth pipelining</p>
+
+      <div class="read-controls">
+        <div class="ctrl-group">
+          <label>Fetch Window: <strong id="fetchLabel">48MB</strong></label>
+          <input type="range" id="fetchSlider" min="12" max="96" step="12" value="48">
+        </div>
+        <div class="ctrl-group">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="extShuffleCheck">
+            External Shuffle Service
+          </label>
+        </div>
+        <button id="readRunBtn" class="action-btn primary-btn">▶ Fetch Blocks</button>
+      </div>
+
+      <div class="read-viz" id="readViz">
+        <div class="read-timeline" id="readTimeline"></div>
+        <div class="read-info" id="readInfo">
+          <p>Each reducer fetches blocks from <strong>all</strong> map tasks. The fetch window
+          (<code>spark.reducer.maxSizeInFlight</code>) controls how much data is requested in parallel —
+          larger windows pipeline more but use more memory.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Performance Tuning -->
+    <section class="tuning-section">
+      <h2>🎯 Performance Tuning: Partition Sizing &amp; Skew</h2>
+      <p class="section-desc">Adjust the skew slider to see how data skew creates straggler tasks</p>
+
+      <div class="tuning-controls">
+        <div class="ctrl-group">
+          <label>Shuffle Partitions: <strong id="tunePartLabel">200</strong></label>
+          <input type="range" id="tunePartSlider" min="10" max="500" step="10" value="200">
+        </div>
+        <div class="ctrl-group">
+          <label>Data Skew: <strong id="skewLabel">None</strong></label>
+          <input type="range" id="skewSlider" min="0" max="100" value="0">
+        </div>
+      </div>
+
+      <div class="tuning-viz">
+        <div class="partition-chart" id="partitionChart"></div>
+        <div class="task-timeline" id="taskTimeline"></div>
+      </div>
+
+      <div class="tuning-stats">
+        <div class="stat-card"><span class="stat-label">Avg Partition</span><span class="stat-value" id="avgPartSize">5MB</span></div>
+        <div class="stat-card"><span class="stat-label">Max Partition</span><span class="stat-value" id="maxPartSize">5MB</span></div>
+        <div class="stat-card"><span class="stat-label">Skew Ratio</span><span class="stat-value" id="skewRatio">1.0x</span></div>
+        <div class="stat-card"><span class="stat-label">Straggler?</span><span class="stat-value" id="stragglerStatus">No</span></div>
+      </div>
+
+      <div class="skew-tips" id="skewTips"></div>
+    </section>
+
+    <!-- AQE Section -->
+    <section class="aqe-section">
+      <h2>🧠 Adaptive Query Execution (AQE)</h2>
+      <p class="section-desc">See how AQE dynamically optimizes partition sizes at runtime</p>
+
+      <div class="aqe-controls">
+        <button id="aqeToggleBtn" class="action-btn primary-btn">▶ Apply AQE</button>
+        <button id="aqeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="aqe-viz">
+        <div class="aqe-panel">
+          <h3 id="aqeBeforeTitle">Before AQE: 200 Partitions</h3>
+          <div class="aqe-bar-chart" id="aqeBeforeChart"></div>
+          <div class="aqe-label">Many tiny partitions → scheduler overhead, wasted tasks</div>
+        </div>
+        <div class="aqe-arrow" id="aqeArrow">→</div>
+        <div class="aqe-panel">
+          <h3 id="aqeAfterTitle">After AQE</h3>
+          <div class="aqe-bar-chart" id="aqeAfterChart"></div>
+          <div class="aqe-label" id="aqeAfterLabel">Click "Apply AQE" to see optimization</div>
+        </div>
+      </div>
+
+      <div class="aqe-stats">
+        <div class="stat-card"><span class="stat-label">Partitions Before</span><span class="stat-value" id="aqePartsBefore">200</span></div>
+        <div class="stat-card"><span class="stat-label">Partitions After</span><span class="stat-value" id="aqePartsAfter">—</span></div>
+        <div class="stat-card"><span class="stat-label">Coalesced</span><span class="stat-value" id="aqeCoalesced">—</span></div>
+        <div class="stat-card"><span class="stat-label">Speedup</span><span class="stat-value" id="aqeSpeedup">—</span></div>
+      </div>
+    </section>
+
+    <!-- Best Practices -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🔀 What Triggers a Shuffle?</h3>
+          <p>
+            Operations with <strong>wide dependencies</strong>: groupByKey, reduceByKey, join, repartition,
+            distinct, intersection, cogroup. Each requires data to be redistributed by key across the network.
+            Every shuffle = <strong>disk I/O + network I/O + serialization</strong>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📦 Sort vs Hash Shuffle</h3>
+          <p>
+            <strong>Sort shuffle</strong> (default since 1.2): produces 1 data file + 1 index file per map task.
+            The old hash shuffle created M×R files (mappers × reducers) — unusable at scale.
+            Tungsten further optimizes by operating on <strong>raw binary data</strong> without deserialization.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>💾 Spill &amp; Merge</h3>
+          <p>
+            When the in-memory buffer exceeds the threshold, Spark <strong>spills</strong> sorted runs to disk.
+            Multiple spill files are <strong>merged</strong> into the final output file. Excessive spills mean
+            you need more executor memory (<code>spark.executor.memory</code>) or fewer partitions.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🌐 External Shuffle Service</h3>
+          <p>
+            By default, shuffle files live on the executor. If it dies, data is lost and must be recomputed.
+            The <strong>external shuffle service</strong> runs independently — shuffle files survive executor
+            failures. Essential for dynamic allocation (<code>spark.dynamicAllocation.enabled</code>).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ops Best Practices -->
+    <section class="ops-section">
+      <h2>🛠️ Shuffle Tuning Cheatsheet</h2>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h4>📏 spark.sql.shuffle.partitions</h4>
+          <code>spark.sql.shuffle.partitions = 200  # default — often wrong!&#10;# Rule: target 100-200MB per partition&#10;# 10GB data → ~50-100 partitions</code>
+          <p>Default 200 is rarely correct. Too many = tiny tasks and scheduler overhead. Too few = OOM and stragglers.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🧊 spark.shuffle.compress</h4>
+          <code>spark.shuffle.compress = true  # default&#10;spark.io.compression.codec = lz4  # fast&#10;# or: zstd, snappy, lzf</code>
+          <p>Compressing shuffle data reduces network I/O at the cost of CPU. LZ4 is default — fast with decent ratios. Use zstd for better compression.</p>
+        </div>
+        <div class="ops-card">
+          <h4>📡 spark.reducer.maxSizeInFlight</h4>
+          <code>spark.reducer.maxSizeInFlight = 48m  # default&#10;# Increase for fast networks&#10;# Decrease if memory-constrained</code>
+          <p>Controls the buffer size for fetching shuffle blocks. Larger = more pipelining but more memory per reducer.</p>
+        </div>
+        <div class="ops-card">
+          <h4>⚡ AQE Settings</h4>
+          <code>spark.sql.adaptive.enabled = true&#10;spark.sql.adaptive.coalescePartitions.enabled = true&#10;spark.sql.adaptive.skewJoin.enabled = true</code>
+          <p>AQE (Spark 3.0+) auto-coalesces tiny partitions, splits skewed ones, and picks optimal join strategies at runtime. Always enable.</p>
+        </div>
+        <div class="ops-card">
+          <h4>🔍 Diagnosing Skew</h4>
+          <code># Check partition sizes:&#10;df.groupBy("key").count()&#10;  .orderBy(desc("count"))&#10;# Fix: salt keys, AQE skew join</code>
+          <p>If one task takes 100x longer, you have skew. Salting adds a random suffix to the hot key, splitting it across partitions.</p>
+        </div>
+        <div class="ops-card">
+          <h4>💾 Spill Thresholds</h4>
+          <code>spark.shuffle.spill.initialMemoryThreshold&#10;  = 5242880  # 5MB — when to start tracking&#10;spark.shuffle.sort.bypassMergeThreshold&#10;  = 200  # skip sort if &lt; 200 reducers</code>
+          <p>If you see heavy spills in the Spark UI, increase executor memory or reduce partition count to keep more data in memory.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://spark.apache.org/docs/latest/job-scheduling.html" target="_blank">Apache Spark Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Spark%20Shuffle%20Internals%20Visualizer%20-%20understand%20map%2Freduce%20sides%2C%20AQE%2C%20and%20skew&url=https://systeminternals.dev/spark/shuffle/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/spark/shuffle/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/spark/shuffle/&t=Interactive%20Spark%20Shuffle%20Internals%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f97316, #fb923c, #fdba74); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(249,115,22,0.1), rgba(251,146,60,0.05)); border: 1px solid rgba(249,115,22,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #fb923c; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249,115,22,0.4); }
+  .auto-btn { background: linear-gradient(135deg, #f472b6, #ec4899); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .pipeline-section { margin-bottom: 50px; }
+  .pipeline-controls { display: flex; gap: 12px; margin-bottom: 16px; }
+  .pipeline-status { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 10px 14px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+  .pipe-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: rgba(107,114,128,0.3); color: #9ca3af; }
+
+  .ctrl-group { }
+  .ctrl-group label { display: block; color: #ccc; margin-bottom: 6px; font-size: 0.9rem; }
+  .ctrl-group strong { color: #fb923c; }
+  .ctrl-group input[type="range"] { width: 200px; display: block; -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; }
+  .ctrl-group input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #f97316; cursor: pointer; }
+
+  /* Shuffle Flow */
+  .shuffle-flow-controls { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .shuffle-flow-container { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 0; background: rgba(0,0,0,0.2); border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 300px; overflow: hidden; }
+  .flow-column { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .flow-col-title { font-size: 0.8rem; color: #888; text-align: center; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .flow-middle { padding: 16px; position: relative; border-left: 1px solid rgba(255,255,255,0.08); border-right: 1px solid rgba(255,255,255,0.08); }
+  .flow-middle svg { position: absolute; top: 40px; left: 0; width: 100%; height: calc(100% - 40px); }
+
+  .map-block, .reduce-block { padding: 10px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; text-align: center; transition: all 0.3s; }
+  .map-block { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+  .reduce-block { background: rgba(34,197,94,0.2); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .map-block.active { background: rgba(59,130,246,0.4); box-shadow: 0 0 15px rgba(59,130,246,0.3); }
+  .reduce-block.active { background: rgba(34,197,94,0.4); box-shadow: 0 0 15px rgba(34,197,94,0.3); }
+
+  .flow-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 16px; }
+
+  /* Manager Section */
+  .manager-section { margin-bottom: 50px; }
+  .manager-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .manager-tab { padding: 10px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.03); color: #888; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .manager-tab.active { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); color: #fb923c; }
+  .manager-tab:hover { background: rgba(255,255,255,0.08); }
+  .manager-detail { background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 150px; }
+  .manager-info { margin-bottom: 16px; color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+  .manager-info strong { color: #fff; }
+  .manager-info code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #4ade80; }
+  .manager-viz { display: flex; gap: 8px; flex-wrap: wrap; }
+  .mgr-file { padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
+  .manager-comparison { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* Write Section */
+  .write-section { margin-bottom: 50px; }
+  .write-viz { background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); min-height: 150px; }
+  .dag-placeholder { color: #555; text-align: center; padding: 60px 0; }
+  .write-step { animation: eventAppear 0.4s ease-out; margin-bottom: 12px; padding: 14px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+  @keyframes eventAppear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  .write-step-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 6px; }
+  .write-step-desc { font-size: 0.85rem; color: #aaa; line-height: 1.5; }
+  .write-step-viz { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .mem-block { padding: 4px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+
+  /* Read Section */
+  .read-section { margin-bottom: 50px; }
+  .read-controls { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .read-viz { background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); }
+  .read-timeline { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .read-row { display: flex; align-items: center; gap: 12px; }
+  .read-row-label { width: 80px; font-size: 0.8rem; font-weight: 600; color: #4ade80; flex-shrink: 0; }
+  .read-row-bar { flex: 1; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.03); overflow: hidden; display: flex; position: relative; }
+  .fetch-block { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 600; color: rgba(255,255,255,0.8); transition: width 0.5s; }
+  .read-info { color: #888; font-size: 0.85rem; line-height: 1.6; }
+  .read-info strong { color: #fff; }
+  .read-info code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #4ade80; }
+
+  /* Tuning Section */
+  .tuning-section { margin-bottom: 50px; }
+  .tuning-controls { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .tuning-viz { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .partition-chart { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-height: 200px; }
+  .partition-chart-title { font-size: 0.8rem; color: #888; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .part-bars { display: flex; align-items: flex-end; gap: 1px; height: 160px; }
+  .part-bar { flex: 1; border-radius: 2px 2px 0 0; transition: height 0.3s, background 0.3s; min-width: 2px; }
+  .task-timeline { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-height: 200px; }
+  .timeline-title { font-size: 0.8rem; color: #888; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .timeline-bars { display: flex; flex-direction: column; gap: 4px; }
+  .tl-bar { height: 14px; border-radius: 3px; transition: width 0.3s; font-size: 0.6rem; display: flex; align-items: center; padding-left: 6px; color: rgba(255,255,255,0.7); }
+  .tuning-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+  .skew-tips { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 12px; padding: 16px 20px; color: #f87171; font-size: 0.9rem; line-height: 1.6; display: none; }
+
+  /* AQE Section */
+  .aqe-section { margin-bottom: 50px; }
+  .aqe-controls { display: flex; gap: 12px; margin-bottom: 20px; }
+  .aqe-viz { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .aqe-panel { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .aqe-panel h3 { font-size: 0.95rem; color: #fff; margin-bottom: 12px; }
+  .aqe-bar-chart { display: flex; align-items: flex-end; gap: 1px; height: 120px; margin-bottom: 8px; }
+  .aqe-bar { flex: 1; border-radius: 1px 1px 0 0; min-width: 1px; transition: all 0.5s; }
+  .aqe-label { font-size: 0.8rem; color: #888; }
+  .aqe-arrow { font-size: 2rem; color: #555; }
+  .aqe-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  .stat-card { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 14px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .stat-label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 4px; }
+  .stat-value { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #fb923c; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #4ade80; }
+
+  .ops-section { margin-bottom: 50px; }
+  .ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .ops-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .ops-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 10px; }
+  .ops-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.75rem; color: #fb923c; margin-bottom: 10px; overflow-x: auto; white-space: pre; }
+  .ops-card p { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #fb923c; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .shuffle-flow-container { grid-template-columns: 1fr; }
+    .flow-middle { min-height: 100px; }
+    .tuning-viz { grid-template-columns: 1fr; }
+    .aqe-viz { grid-template-columns: 1fr; }
+    .aqe-arrow { transform: rotate(90deg); text-align: center; }
+    .flow-stats, .manager-comparison, .tuning-stats, .aqe-stats { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+  // ========== SHUFFLE FLOW VISUALIZATION ==========
+  var mapColors = ['#3b82f6','#6366f1','#8b5cf6','#06b6d4','#0ea5e9','#2563eb','#7c3aed','#0891b2'];
+  var reduceColors = ['#22c55e','#10b981','#14b8a6','#4ade80','#34d399','#2dd4bf'];
+
+  function renderShuffleFlow() {
+    var mapCount = parseInt(document.getElementById('mapCountSlider').value);
+    var reduceCount = parseInt(document.getElementById('reduceCountSlider').value);
+    document.getElementById('mapCountLabel').textContent = String(mapCount);
+    document.getElementById('reduceCountLabel').textContent = String(reduceCount);
+    document.getElementById('shuffleFileCount').textContent = String(mapCount);
+    document.getElementById('transferCount').textContent = String(mapCount * reduceCount);
+    document.getElementById('dataWritten').textContent = '—';
+    document.getElementById('dataRead').textContent = '—';
+
+    var mapCol = document.getElementById('mapColumn');
+    mapCol.innerHTML = '<div class="flow-col-title">Map Side (Write)</div>';
+    for (var i = 0; i < mapCount; i++) {
+      var el = document.createElement('div');
+      el.className = 'map-block';
+      el.id = 'map' + i;
+      el.textContent = 'Map ' + i;
+      mapCol.appendChild(el);
+    }
+
+    var reduceCol = document.getElementById('reduceColumn');
+    reduceCol.innerHTML = '<div class="flow-col-title">Reduce Side (Read)</div>';
+    for (var j = 0; j < reduceCount; j++) {
+      var el2 = document.createElement('div');
+      el2.className = 'reduce-block';
+      el2.id = 'reduce' + j;
+      el2.textContent = 'Reduce ' + j;
+      reduceCol.appendChild(el2);
+    }
+
+    document.getElementById('flowSvg').innerHTML = '';
+  }
+
+  document.getElementById('mapCountSlider').addEventListener('input', renderShuffleFlow);
+  document.getElementById('reduceCountSlider').addEventListener('input', renderShuffleFlow);
+
+  document.getElementById('shuffleFlowBtn').addEventListener('click', function() {
+    var mapCount = parseInt(document.getElementById('mapCountSlider').value);
+    var reduceCount = parseInt(document.getElementById('reduceCountSlider').value);
+    var svg = document.getElementById('flowSvg');
+    svg.innerHTML = '';
+
+    var totalData = 0;
+    var step = 0;
+    var totalSteps = mapCount;
+
+    function animateStep() {
+      if (step >= totalSteps) {
+        document.getElementById('dataWritten').textContent = totalData + 'MB';
+        document.getElementById('dataRead').textContent = totalData + 'MB';
+        return;
+      }
+
+      var mapEl = document.getElementById('map' + step);
+      if (mapEl) mapEl.classList.add('active');
+
+      for (var r = 0; r < reduceCount; r++) {
+        var size = Math.floor(Math.random() * 20) + 5;
+        totalData += size;
+
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        var svgRect = svg.getBoundingClientRect();
+        var mapBox = mapEl.getBoundingClientRect();
+        var reduceEl = document.getElementById('reduce' + r);
+        var reduceBox = reduceEl.getBoundingClientRect();
+
+        line.setAttribute('x1', '0');
+        line.setAttribute('y1', String(mapBox.top - svgRect.top + mapBox.height / 2));
+        line.setAttribute('x2', String(svgRect.width));
+        line.setAttribute('y2', String(reduceBox.top - svgRect.top + reduceBox.height / 2));
+        line.setAttribute('stroke', mapColors[step % mapColors.length]);
+        line.setAttribute('stroke-width', String(Math.max(1, size / 8)));
+        line.setAttribute('stroke-opacity', '0.4');
+        line.setAttribute('stroke-dasharray', '4,4');
+
+        var anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+        anim.setAttribute('attributeName', 'stroke-opacity');
+        anim.setAttribute('values', '0;0.6;0.3');
+        anim.setAttribute('dur', '1s');
+        anim.setAttribute('fill', 'freeze');
+        line.appendChild(anim);
+        svg.appendChild(line);
+
+        if (reduceEl) reduceEl.classList.add('active');
+      }
+
+      step++;
+      setTimeout(animateStep, 600);
+    }
+
+    animateStep();
+  });
+
+  document.getElementById('shuffleResetBtn').addEventListener('click', function() {
+    renderShuffleFlow();
+  });
+
+  renderShuffleFlow();
+
+  // ========== SHUFFLE MANAGER IMPLEMENTATIONS ==========
+  var managerData = {
+    sort: {
+      info: '<strong>SortShuffleManager</strong> (default since Spark 1.2) sorts records by partition ID, then writes a single data file and an index file per map task. The index file contains offsets for each reducer\'s partition within the data file. This dramatically reduces file count compared to hash shuffle.',
+      files: function(m, r) { return m * 2; },
+      fileLabel: function(m, r) { return m + ' data + ' + m + ' index = ' + (m*2) + ' files'; },
+      memory: 'Java objects',
+      serial: 'Java/Kryo',
+      bestFor: 'General use',
+      vizFn: function(m, r) {
+        var html = '';
+        for (var i = 0; i < m; i++) {
+          html += '<div class="mgr-file" style="background:rgba(59,130,246,0.2);color:#60a5fa">📄 data_' + i + '</div>';
+          html += '<div class="mgr-file" style="background:rgba(59,130,246,0.1);color:#60a5fa">📋 index_' + i + '</div>';
+        }
+        return html;
+      }
+    },
+    hash: {
+      info: '<strong>Hash-Based Shuffle</strong> (deprecated) creates one file per reducer per mapper. With M mappers and R reducers, that\'s M×R files! For 1000 mappers × 200 reducers = 200,000 files. This caused massive filesystem pressure and was removed as default in Spark 1.2.',
+      files: function(m, r) { return m * r; },
+      fileLabel: function(m, r) { return m + ' × ' + r + ' = ' + (m*r) + ' files ⚠️'; },
+      memory: 'Java objects',
+      serial: 'Java/Kryo',
+      bestFor: 'Nothing (deprecated)',
+      vizFn: function(m, r) {
+        var html = '';
+        var count = Math.min(m * r, 24);
+        for (var i = 0; i < count; i++) {
+          html += '<div class="mgr-file" style="background:rgba(239,68,68,0.2);color:#f87171;font-size:0.65rem">📄</div>';
+        }
+        if (m * r > 24) {
+          html += '<div class="mgr-file" style="background:rgba(239,68,68,0.1);color:#f87171">+' + (m*r - 24) + ' more</div>';
+        }
+        return html;
+      }
+    },
+    tungsten: {
+      info: '<strong>Tungsten/UnsafeShuffleWriter</strong> operates directly on serialized binary data, avoiding deserialization overhead. It uses sun.misc.Unsafe for off-heap memory operations, enabling efficient sorting on serialized records (sort by encoded prefix, not full deserialization). Same file layout as SortShuffle.',
+      files: function(m, r) { return m * 2; },
+      fileLabel: function(m, r) { return m + ' data + ' + m + ' index = ' + (m*2) + ' files'; },
+      memory: 'Off-heap binary',
+      serial: 'Binary (no deser)',
+      bestFor: 'Large shuffles',
+      vizFn: function(m, r) {
+        var html = '';
+        for (var i = 0; i < m; i++) {
+          html += '<div class="mgr-file" style="background:rgba(168,85,247,0.2);color:#c084fc">⚡ bin_' + i + '</div>';
+          html += '<div class="mgr-file" style="background:rgba(168,85,247,0.1);color:#c084fc">📋 idx_' + i + '</div>';
+        }
+        return html;
+      }
+    }
+  };
+
+  function renderManager(name) {
+    var data = managerData[name];
+    var m = parseInt(document.getElementById('mapCountSlider').value);
+    var r = parseInt(document.getElementById('reduceCountSlider').value);
+
+    document.getElementById('managerInfo').innerHTML = data.info;
+    document.getElementById('managerViz').innerHTML = data.vizFn(m, r);
+    document.getElementById('mgFileCount').textContent = data.fileLabel(m, r);
+    document.getElementById('mgMemory').textContent = data.memory;
+    document.getElementById('mgSerial').textContent = data.serial;
+    document.getElementById('mgBestFor').textContent = data.bestFor;
+
+    var tabs = document.querySelectorAll('.manager-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.remove('active');
+      if (tabs[i].getAttribute('data-manager') === name) {
+        tabs[i].classList.add('active');
+      }
+    }
+  }
+
+  var managerTabs = document.querySelectorAll('.manager-tab');
+  for (var t = 0; t < managerTabs.length; t++) {
+    managerTabs[t].addEventListener('click', function() {
+      renderManager(this.getAttribute('data-manager'));
+    });
+  }
+  renderManager('sort');
+
+  // ========== SHUFFLE WRITE STEP-THROUGH ==========
+  var writeStep = 0;
+  var writeSteps = [
+    {
+      badge: 'buffer',
+      badgeColor: 'rgba(59,130,246,0.2)',
+      badgeTextColor: '#60a5fa',
+      title: '1. Buffer Records in Memory',
+      desc: 'Incoming records are buffered in an in-memory data structure (PartitionedAppendOnlyMap or PartitionedPairBuffer). Each record is tagged with its target partition ID based on the partitioner (hash or range).',
+      viz: function() {
+        var html = '';
+        var partColors = ['#3b82f6','#f97316','#22c55e','#ec4899'];
+        for (var i = 0; i < 12; i++) {
+          var p = i % 4;
+          html += '<div class="mem-block" style="background:' + partColors[p] + '33;color:' + partColors[p] + '">P' + p + ':rec' + i + '</div>';
+        }
+        return html;
+      }
+    },
+    {
+      badge: 'sort',
+      badgeColor: 'rgba(249,115,22,0.2)',
+      badgeTextColor: '#fb923c',
+      title: '2. Sort by Partition ID',
+      desc: 'Records are sorted by partition ID (and optionally by key within each partition for SortShuffleWriter). This groups all records for the same reducer together, enabling sequential writes.',
+      viz: function() {
+        var html = '';
+        var partColors = ['#3b82f6','#f97316','#22c55e','#ec4899'];
+        var labels = ['P0','P0','P0','P1','P1','P1','P2','P2','P2','P3','P3','P3'];
+        for (var i = 0; i < labels.length; i++) {
+          var p = parseInt(labels[i].charAt(1));
+          html += '<div class="mem-block" style="background:' + partColors[p] + '33;color:' + partColors[p] + '">' + labels[i] + '</div>';
+        }
+        return html;
+      }
+    },
+    {
+      badge: 'spill',
+      badgeColor: 'rgba(239,68,68,0.2)',
+      badgeTextColor: '#f87171',
+      title: '3. Spill to Disk (if needed)',
+      desc: 'When memory pressure is detected (via the memory manager), the buffer is sorted and spilled to a temporary file on disk. This can happen multiple times, creating several spill files. Each spill file is a sorted run.',
+      viz: function() {
+        return '<div class="mem-block" style="background:rgba(239,68,68,0.2);color:#f87171">💾 spill_0.tmp</div>' +
+               '<div class="mem-block" style="background:rgba(239,68,68,0.2);color:#f87171">💾 spill_1.tmp</div>' +
+               '<div class="mem-block" style="background:rgba(239,68,68,0.2);color:#f87171">💾 spill_2.tmp</div>' +
+               '<div class="mem-block" style="background:rgba(107,114,128,0.2);color:#9ca3af">📊 memory freed</div>';
+      }
+    },
+    {
+      badge: 'merge',
+      badgeColor: 'rgba(168,85,247,0.2)',
+      badgeTextColor: '#a78bfa',
+      title: '4. Merge Spill Files',
+      desc: 'All spill files and any remaining in-memory data are merge-sorted into a single output file. This is similar to the merge phase of an external merge sort. Records are ordered by partition ID.',
+      viz: function() {
+        return '<div class="mem-block" style="background:rgba(239,68,68,0.15);color:#f87171">spill_0</div>' +
+               '<div class="mem-block" style="background:rgba(255,255,255,0.05);color:#888">+</div>' +
+               '<div class="mem-block" style="background:rgba(239,68,68,0.15);color:#f87171">spill_1</div>' +
+               '<div class="mem-block" style="background:rgba(255,255,255,0.05);color:#888">+</div>' +
+               '<div class="mem-block" style="background:rgba(239,68,68,0.15);color:#f87171">spill_2</div>' +
+               '<div class="mem-block" style="background:rgba(255,255,255,0.05);color:#888">→</div>' +
+               '<div class="mem-block" style="background:rgba(168,85,247,0.2);color:#a78bfa">🔀 merge-sort</div>';
+      }
+    },
+    {
+      badge: 'output',
+      badgeColor: 'rgba(34,197,94,0.2)',
+      badgeTextColor: '#4ade80',
+      title: '5. Write Final Output',
+      desc: 'The final result is one sorted data file containing all partitions sequentially, plus one index file with byte offsets for each partition boundary. Reducers use the index to seek directly to their partition\'s data.',
+      viz: function() {
+        var partColors = ['#3b82f6','#f97316','#22c55e','#ec4899'];
+        var html = '<div class="mem-block" style="background:rgba(34,197,94,0.2);color:#4ade80">📄 shuffle_0.data</div>';
+        html += '<div class="mem-block" style="background:rgba(255,255,255,0.03);color:#888">[</div>';
+        for (var p = 0; p < 4; p++) {
+          html += '<div class="mem-block" style="background:' + partColors[p] + '22;color:' + partColors[p] + '">P' + p + '</div>';
+        }
+        html += '<div class="mem-block" style="background:rgba(255,255,255,0.03);color:#888">]</div>';
+        html += '<div class="mem-block" style="background:rgba(34,197,94,0.15);color:#4ade80">📋 shuffle_0.index</div>';
+        return html;
+      }
+    }
+  ];
+
+  document.getElementById('writeStepBtn').addEventListener('click', function() {
+    if (writeStep >= writeSteps.length) return;
+    var s = writeSteps[writeStep];
+    var badge = document.getElementById('writeBadge');
+    badge.style.background = s.badgeColor;
+    badge.style.color = s.badgeTextColor;
+    badge.textContent = s.badge;
+    document.getElementById('writeText').textContent = s.title;
+
+    var container = document.getElementById('writeViz');
+    if (writeStep === 0) container.innerHTML = '';
+
+    var stepEl = document.createElement('div');
+    stepEl.className = 'write-step';
+    stepEl.style.background = s.badgeColor;
+    stepEl.innerHTML = '<div class="write-step-title" style="color:' + s.badgeTextColor + '">' + s.title + '</div>' +
+      '<div class="write-step-desc">' + s.desc + '</div>' +
+      '<div class="write-step-viz">' + s.viz() + '</div>';
+    container.appendChild(stepEl);
+
+    writeStep++;
+    if (writeStep >= writeSteps.length) {
+      badge.textContent = 'Done';
+      badge.style.background = 'rgba(34,197,94,0.2)';
+      badge.style.color = '#4ade80';
+    }
+  });
+
+  document.getElementById('writeAutoBtn').addEventListener('click', function() {
+    function autoStep() {
+      if (writeStep >= writeSteps.length) return;
+      document.getElementById('writeStepBtn').click();
+      setTimeout(autoStep, 1500);
+    }
+    autoStep();
+  });
+
+  document.getElementById('writeResetBtn').addEventListener('click', function() {
+    writeStep = 0;
+    var badge = document.getElementById('writeBadge');
+    badge.style.background = 'rgba(107,114,128,0.3)';
+    badge.style.color = '#9ca3af';
+    badge.textContent = 'Ready';
+    document.getElementById('writeText').textContent = 'Click "Next Step" to walk through the shuffle write process';
+    document.getElementById('writeViz').innerHTML = '<div class="dag-placeholder">Shuffle write animation will appear here</div>';
+  });
+
+  // ========== SHUFFLE READ VISUALIZATION ==========
+  document.getElementById('fetchSlider').addEventListener('input', function() {
+    document.getElementById('fetchLabel').textContent = this.value + 'MB';
+  });
+
+  document.getElementById('readRunBtn').addEventListener('click', function() {
+    var mapCount = parseInt(document.getElementById('mapCountSlider').value);
+    var reduceCount = parseInt(document.getElementById('reduceCountSlider').value);
+    var fetchWindow = parseInt(document.getElementById('fetchSlider').value);
+    var extShuffle = document.getElementById('extShuffleCheck').checked;
+
+    var timeline = document.getElementById('readTimeline');
+    timeline.innerHTML = '';
+
+    var fetchColors = ['#3b82f6','#6366f1','#8b5cf6','#06b6d4','#0ea5e9','#2563eb','#7c3aed','#0891b2'];
+
+    for (var r = 0; r < reduceCount; r++) {
+      var row = document.createElement('div');
+      row.className = 'read-row';
+
+      var label = document.createElement('div');
+      label.className = 'read-row-label';
+      label.textContent = 'Reduce ' + r;
+      row.appendChild(label);
+
+      var bar = document.createElement('div');
+      bar.className = 'read-row-bar';
+
+      var totalSize = 0;
+      var sizes = [];
+      for (var m = 0; m < mapCount; m++) {
+        var s = Math.floor(Math.random() * 30) + 5;
+        sizes.push(s);
+        totalSize += s;
+      }
+
+      for (var m2 = 0; m2 < mapCount; m2++) {
+        var block = document.createElement('div');
+        block.className = 'fetch-block';
+        block.style.width = (sizes[m2] / totalSize * 100) + '%';
+        block.style.background = fetchColors[m2 % fetchColors.length];
+        block.textContent = 'M' + m2 + ' ' + sizes[m2] + 'MB';
+        block.style.opacity = '0';
+        bar.appendChild(block);
+      }
+
+      row.appendChild(bar);
+      timeline.appendChild(row);
+    }
+
+    // Animate blocks appearing
+    var allBlocks = timeline.querySelectorAll('.fetch-block');
+    var blockIndex = 0;
+    function showBlock() {
+      if (blockIndex >= allBlocks.length) return;
+      allBlocks[blockIndex].style.opacity = '1';
+      allBlocks[blockIndex].style.transition = 'opacity 0.3s';
+      blockIndex++;
+      setTimeout(showBlock, 100);
+    }
+    showBlock();
+
+    var info = document.getElementById('readInfo');
+    var extMsg = extShuffle
+      ? ' <strong style="color:#4ade80">External shuffle service enabled</strong> — shuffle files survive executor failures. Safe for dynamic allocation.'
+      : ' Standard mode — if an executor dies, its shuffle files are lost and the stage must be recomputed.';
+    info.innerHTML = '<p>Fetching with <strong>' + fetchWindow + 'MB</strong> window (spark.reducer.maxSizeInFlight). ' +
+      'Each reducer issues up to ' + Math.ceil(fetchWindow / 16) + ' concurrent fetch requests.' + extMsg + '</p>';
+  });
+
+  // ========== PERFORMANCE TUNING ==========
+  function renderTuning() {
+    var partitions = parseInt(document.getElementById('tunePartSlider').value);
+    var skew = parseInt(document.getElementById('skewSlider').value);
+    document.getElementById('tunePartLabel').textContent = String(partitions);
+
+    var skewLabels = ['None','Low','Medium','High','Extreme'];
+    var skewIdx = Math.min(Math.floor(skew / 25), 4);
+    document.getElementById('skewLabel').textContent = skewLabels[skewIdx];
+
+    // Generate partition sizes
+    var totalData = 1000; // 1GB total
+    var sizes = [];
+    var baseSize = totalData / partitions;
+
+    for (var i = 0; i < Math.min(partitions, 100); i++) {
+      var size = baseSize;
+      if (skew > 0 && i === 0) {
+        size = baseSize * (1 + skew * 0.5);
+      } else if (skew > 0) {
+        size = baseSize * Math.max(0.1, 1 - (skew * 0.005));
+      }
+      sizes.push(size);
+    }
+
+    // Normalize for display
+    var maxSize = Math.max.apply(null, sizes);
+    var avgSize = totalData / partitions;
+
+    // Render partition chart
+    var chart = document.getElementById('partitionChart');
+    var barsHtml = '<div class="partition-chart-title">Partition Size Distribution</div><div class="part-bars">';
+    for (var j = 0; j < sizes.length; j++) {
+      var height = (sizes[j] / maxSize) * 100;
+      var color = sizes[j] > avgSize * 3 ? '#ef4444' : sizes[j] > avgSize * 1.5 ? '#f97316' : '#22c55e';
+      barsHtml += '<div class="part-bar" style="height:' + height + '%;background:' + color + '"></div>';
+    }
+    barsHtml += '</div>';
+    chart.innerHTML = barsHtml;
+
+    // Render task timeline
+    var timeline = document.getElementById('taskTimeline');
+    var displayCount = Math.min(sizes.length, 20);
+    var tlHtml = '<div class="timeline-title">Task Duration (proportional to partition size)</div><div class="timeline-bars">';
+    for (var k = 0; k < displayCount; k++) {
+      var width = (sizes[k] / maxSize) * 100;
+      var tlColor = sizes[k] > avgSize * 3 ? '#ef4444' : sizes[k] > avgSize * 1.5 ? '#f97316' : '#3b82f6';
+      tlHtml += '<div class="tl-bar" style="width:' + width + '%;background:' + tlColor + '">T' + k;
+      if (sizes[k] > avgSize * 3) tlHtml += ' ⚠️ straggler';
+      tlHtml += '</div>';
+    }
+    if (sizes.length > 20) {
+      tlHtml += '<div style="color:#666;font-size:0.75rem;padding:4px">+' + (sizes.length - 20) + ' more tasks...</div>';
+    }
+    tlHtml += '</div>';
+    timeline.innerHTML = tlHtml;
+
+    // Stats
+    document.getElementById('avgPartSize').textContent = avgSize.toFixed(1) + 'MB';
+    document.getElementById('maxPartSize').textContent = sizes[0].toFixed(1) + 'MB';
+    var ratio = (sizes[0] / avgSize).toFixed(1);
+    document.getElementById('skewRatio').textContent = ratio + 'x';
+
+    var isStraggler = ratio > 3;
+    var stragglerEl = document.getElementById('stragglerStatus');
+    stragglerEl.textContent = isStraggler ? 'Yes ⚠️' : 'No ✅';
+    stragglerEl.style.color = isStraggler ? '#ef4444' : '#4ade80';
+
+    // Skew tips
+    var tips = document.getElementById('skewTips');
+    if (skew > 30) {
+      tips.style.display = 'block';
+      tips.innerHTML = '⚠️ <strong>Data skew detected!</strong> The largest partition is ' + ratio +
+        'x the average. Mitigation strategies: <br>• <strong>Key salting</strong>: append random suffix to hot keys, aggregate twice<br>' +
+        '• <strong>AQE skew join</strong>: set spark.sql.adaptive.skewJoin.enabled = true<br>' +
+        '• <strong>Repartition</strong>: manually repartition with a better key distribution';
+    } else {
+      tips.style.display = 'none';
+    }
+  }
+
+  document.getElementById('tunePartSlider').addEventListener('input', renderTuning);
+  document.getElementById('skewSlider').addEventListener('input', renderTuning);
+  renderTuning();
+
+  // ========== AQE VISUALIZATION ==========
+  var aqeApplied = false;
+
+  function renderAQE() {
+    // Before: 200 tiny partitions with some variance
+    var beforeChart = document.getElementById('aqeBeforeChart');
+    var beforeHtml = '';
+    var beforeSizes = [];
+    for (var i = 0; i < 80; i++) {
+      var s = Math.random() * 8 + 1;
+      beforeSizes.push(s);
+    }
+    var beforeMax = Math.max.apply(null, beforeSizes);
+    for (var j = 0; j < beforeSizes.length; j++) {
+      var h = (beforeSizes[j] / beforeMax) * 100;
+      beforeHtml += '<div class="aqe-bar" style="height:' + h + '%;background:rgba(239,68,68,0.5)"></div>';
+    }
+    beforeChart.innerHTML = beforeHtml;
+    document.getElementById('aqeBeforeTitle').textContent = 'Before AQE: 200 Partitions';
+    document.getElementById('aqePartsBefore').textContent = '200';
+
+    // After: reset
+    if (!aqeApplied) {
+      document.getElementById('aqeAfterChart').innerHTML = '<div style="color:#555;text-align:center;padding:40px 0;font-size:0.85rem">Click "Apply AQE"</div>';
+      document.getElementById('aqeAfterTitle').textContent = 'After AQE';
+      document.getElementById('aqeAfterLabel').textContent = 'Click "Apply AQE" to see optimization';
+      document.getElementById('aqePartsAfter').textContent = '—';
+      document.getElementById('aqeCoalesced').textContent = '—';
+      document.getElementById('aqeSpeedup').textContent = '—';
+    }
+  }
+
+  document.getElementById('aqeToggleBtn').addEventListener('click', function() {
+    aqeApplied = true;
+
+    // Generate coalesced partitions (15-25 right-sized)
+    var afterCount = Math.floor(Math.random() * 10) + 15;
+    var afterChart = document.getElementById('aqeAfterChart');
+    var afterHtml = '';
+    var targetSize = 128; // MB target
+    for (var i = 0; i < afterCount; i++) {
+      var s = targetSize + (Math.random() * 40 - 20);
+      var h = (s / 160) * 100;
+      afterHtml += '<div class="aqe-bar" style="height:' + h + '%;background:rgba(34,197,94,0.6);animation:eventAppear 0.4s ease-out"></div>';
+    }
+    afterChart.innerHTML = afterHtml;
+
+    document.getElementById('aqeAfterTitle').textContent = 'After AQE: ' + afterCount + ' Partitions';
+    document.getElementById('aqeAfterLabel').textContent = afterCount + ' right-sized partitions (~128MB each) ✅';
+    document.getElementById('aqePartsAfter').textContent = String(afterCount);
+    document.getElementById('aqeCoalesced').textContent = (200 - afterCount) + ' merged';
+    var speedup = (200 / afterCount).toFixed(1);
+    document.getElementById('aqeSpeedup').textContent = speedup + 'x fewer tasks';
+    document.getElementById('aqeArrow').textContent = '→ ✨';
+    document.getElementById('aqeArrow').style.color = '#4ade80';
+  });
+
+  document.getElementById('aqeResetBtn').addEventListener('click', function() {
+    aqeApplied = false;
+    document.getElementById('aqeArrow').textContent = '→';
+    document.getElementById('aqeArrow').style.color = '#555';
+    renderAQE();
+  });
+
+  renderAQE();
+</script>

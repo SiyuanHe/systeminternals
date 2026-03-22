@@ -1,8 +1,9 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
-const raftTopics = [
+const consensusTopics = [
   { title: "Raft Consensus", description: "Leader election, log replication, and safety — the interactive way", href: "/raft/", status: "live" },
+  { title: "Paxos vs Raft", description: "Split-screen comparison — same scenarios, different protocols", href: "/consensus/paxos-vs-raft/", status: "live" },
 ];
 
 const kafkaTopics = [
@@ -14,13 +15,18 @@ const kafkaTopics = [
 
 const redisTopics = [
   { title: "Cluster Hashing & Failover", description: "Hash slots, MOVED redirections, and automatic failover", href: "/redis/cluster-hashing/", status: "live" },
-  { title: "Persistence: RDB & AOF", description: "Snapshots vs append-only file — tradeoffs and tuning", href: "#", status: "coming" },
+  { title: "Persistence: RDB & AOF", description: "Snapshots vs append-only file — tradeoffs and tuning", href: "/redis/persistence/", status: "live" },
 ];
 
 const postgresqlTopics = [
   { title: "MVCC & Vacuum", description: "Tuple versioning, dead tuples, bloat, autovacuum, and txn ID wraparound", href: "/postgresql/mvcc-vacuum/", status: "live" },
   { title: "WAL & Replication", description: "Write-ahead log, streaming replication, and logical replication", href: "#", status: "coming" },
   { title: "Query Planner", description: "How PostgreSQL decides to scan, join, and sort", href: "#", status: "coming" },
+];
+
+const etcdTopics = [
+  { title: "Leader Election", description: "Leases, campaigns, watches, and distributed locks", href: "/etcd/leader-election/", status: "live" },
+  { title: "Watch & Revisions", description: "Event streaming, compaction, and consistency guarantees", href: "#", status: "coming" },
 ];
 
 const cassandraTopics = [
@@ -49,7 +55,7 @@ const tidbTopics = [
 
 const sparkTopics = [
   { title: "DAG Execution", description: "Stages, tasks, and the execution plan — plus tuning for performance", href: "/spark/dag-execution/", status: "live" },
-  { title: "Shuffle Internals", description: "The most expensive operation in Spark", href: "#", status: "coming" },
+  { title: "Shuffle Internals", description: "The most expensive operation in Spark", href: "/spark/shuffle/", status: "live" },
 ];
 ---
 
@@ -65,10 +71,10 @@ const sparkTopics = [
   <section class="topics-section">
     <h2>
       <span class="section-icon">🗳️</span>
-      Raft Consensus
+      Consensus Algorithms
     </h2>
     <div class="topics-grid">
-      {raftTopics.map(topic => (
+      {consensusTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}
@@ -123,6 +129,24 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {postgresqlTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔑</span>
+      etcd
+    </h2>
+    <div class="topics-grid">
+      {etcdTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

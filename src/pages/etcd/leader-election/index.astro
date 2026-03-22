@@ -1,0 +1,1310 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="etcd Leader Election" 
+  description="Interactive visualization of etcd leader election — leases, campaigns, watches, and distributed locks"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "etcd", href: "/etcd/" },
+    { label: "Leader Election", href: "/etcd/leader-election/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗳️ etcd Leader Election</h1>
+      <p class="subtitle">Leases, Campaigns, Watches &amp; Distributed Locks — Visualized</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          <a href="https://etcd.io" target="_blank">etcd</a> is a distributed key-value store that
+          uses <a href="/raft/">Raft consensus</a> under the hood. It powers
+          <strong>Kubernetes</strong> (storing all cluster state), CoreDNS, and many distributed
+          systems. etcd provides <em>linearizable</em> reads and writes, a <em>Watch API</em> for
+          real-time notifications, and <strong>lease-based primitives</strong> for building leader
+          election, distributed locks, and service discovery.
+        </p>
+      </div>
+    </section>
+
+    <!-- etcd Cluster Visualization -->
+    <section class="cluster-section">
+      <h2>🖧 etcd Cluster</h2>
+      <p class="section-desc">A 3-node etcd cluster with key-value store. The cluster uses Raft internally for consensus.</p>
+
+      <div class="cluster-visual">
+        <svg id="clusterSvg" viewBox="0 0 600 200" class="cluster-svg">
+          <defs>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <!-- Rendered by JS -->
+          <g id="clusterNodes"></g>
+          <g id="clusterMessages"></g>
+        </svg>
+      </div>
+
+      <div class="kv-store" id="kvStore">
+        <div class="kv-header">
+          <span class="kv-title">📦 Key-Value Store</span>
+          <span class="kv-revision" id="kvRevision">Revision: 1</span>
+        </div>
+        <div class="kv-entries" id="kvEntries">
+          <div class="kv-empty">Store is empty</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Lease-Based Leader Election -->
+    <section class="election-section">
+      <h2>👑 Lease-Based Leader Election</h2>
+      <div class="explain-card highlight-card">
+        <h3>💡 How It Works</h3>
+        <p>
+          A <strong>lease</strong> is a time-to-live (TTL) contract with the etcd cluster. To become
+          leader, a candidate creates a lease (e.g., 15s TTL), then tries to write a key like
+          <code>/election/leader</code> with the lease attached. The <em>first writer wins</em> via
+          atomic compare-and-create (revision = 0 means "key must not exist"). The leader must
+          keep the lease alive by sending <strong>KeepAlive</strong> requests every TTL/3. If the
+          leader crashes, the lease expires, the key is deleted, and a new election begins.
+        </p>
+      </div>
+
+      <div class="election-controls">
+        <button id="startElectionBtn" class="action-btn primary-btn">🏁 Start Election Demo</button>
+        <button id="stepElectionBtn" class="action-btn step-btn" disabled>⏭️ Next Step</button>
+        <button id="resetElectionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="election-status" id="electionStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="electionStatusText">Click "Start Election Demo" to begin</span>
+      </div>
+
+      <div class="candidates-grid" id="candidatesGrid">
+        <div class="candidate-card" data-id="0">
+          <div class="candidate-header">
+            <span class="candidate-icon">🖥️</span>
+            <span class="candidate-name">Node A</span>
+            <span class="candidate-role" id="candidateRole0">Follower</span>
+          </div>
+          <div class="lease-bar-container">
+            <div class="lease-bar" id="leaseBar0"></div>
+            <span class="lease-label" id="leaseLabel0">No lease</span>
+          </div>
+          <div class="candidate-status" id="candidateStatus0">Idle</div>
+        </div>
+        <div class="candidate-card" data-id="1">
+          <div class="candidate-header">
+            <span class="candidate-icon">🖥️</span>
+            <span class="candidate-name">Node B</span>
+            <span class="candidate-role" id="candidateRole1">Follower</span>
+          </div>
+          <div class="lease-bar-container">
+            <div class="lease-bar" id="leaseBar1"></div>
+            <span class="lease-label" id="leaseLabel1">No lease</span>
+          </div>
+          <div class="candidate-status" id="candidateStatus1">Idle</div>
+        </div>
+        <div class="candidate-card" data-id="2">
+          <div class="candidate-header">
+            <span class="candidate-icon">🖥️</span>
+            <span class="candidate-name">Node C</span>
+            <span class="candidate-role" id="candidateRole2">Follower</span>
+          </div>
+          <div class="lease-bar-container">
+            <div class="lease-bar" id="leaseBar2"></div>
+            <span class="lease-label" id="leaseLabel2">No lease</span>
+          </div>
+          <div class="candidate-status" id="candidateStatus2">Idle</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Election Campaign Flow -->
+    <section class="campaign-section">
+      <h2>🏛️ Election Campaign Flow</h2>
+      <div class="explain-card">
+        <h3>📋 Campaign, Resign &amp; Proclaim</h3>
+        <p>
+          The <strong>Campaign</strong> operation creates a lease and attempts to create an election
+          key. If the key already exists (another leader), the candidate <em>watches</em> and waits.
+          <strong>Resign</strong> deletes the key, triggering a new election. <strong>Proclaim</strong>
+          lets the leader update its value (announce a new configuration, for example).
+        </p>
+      </div>
+
+      <div class="campaign-controls">
+        <div class="campaign-node" data-node="0">
+          <span class="campaign-node-label">Node A</span>
+          <button class="action-btn campaign-btn" data-action="campaign" data-node="0">📢 Campaign</button>
+          <button class="action-btn resign-btn" data-action="resign" data-node="0" disabled>🏳️ Resign</button>
+          <button class="action-btn proclaim-btn" data-action="proclaim" data-node="0" disabled>📣 Proclaim</button>
+        </div>
+        <div class="campaign-node" data-node="1">
+          <span class="campaign-node-label">Node B</span>
+          <button class="action-btn campaign-btn" data-action="campaign" data-node="1">📢 Campaign</button>
+          <button class="action-btn resign-btn" data-action="resign" data-node="1" disabled>🏳️ Resign</button>
+          <button class="action-btn proclaim-btn" data-action="proclaim" data-node="1" disabled>📣 Proclaim</button>
+        </div>
+        <div class="campaign-node" data-node="2">
+          <span class="campaign-node-label">Node C</span>
+          <button class="action-btn campaign-btn" data-action="campaign" data-node="2">📢 Campaign</button>
+          <button class="action-btn resign-btn" data-action="resign" data-node="2" disabled>🏳️ Resign</button>
+          <button class="action-btn proclaim-btn" data-action="proclaim" data-node="2" disabled>📣 Proclaim</button>
+        </div>
+      </div>
+
+      <div class="campaign-visual" id="campaignVisual">
+        <div class="campaign-election-key">
+          <span class="ek-label">🔑 /election/leader</span>
+          <span class="ek-value" id="ekValue">&#x2205; empty</span>
+          <span class="ek-revision" id="ekRevision">rev: 0</span>
+        </div>
+        <div class="campaign-waiters" id="campaignWaiters">
+          <!-- Waiters shown here -->
+        </div>
+      </div>
+
+      <div class="campaign-status" id="campaignStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="campaignStatusText">Click Campaign on any node to begin</span>
+      </div>
+
+      <button id="killLeaderBtn" class="action-btn chaos-btn" disabled>💀 Kill Leader</button>
+    </section>
+
+    <!-- Watch-Based Coordination -->
+    <section class="watch-section">
+      <h2>👁️ Watch-Based Coordination</h2>
+      <div class="explain-card">
+        <h3>📡 Real-Time Notifications</h3>
+        <p>
+          Watchers subscribe to key prefixes and receive notifications whenever keys are created,
+          updated, or deleted. Each event includes the <strong>revision</strong> number. Watches
+          start from a specific revision, so clients never miss events. etcd compacts old revisions
+          to reclaim space — watchers that fall too far behind get a "compacted" error.
+        </p>
+      </div>
+
+      <div class="watch-demo">
+        <div class="watch-controls">
+          <div class="watch-input-group">
+            <input type="text" id="watchKeyInput" class="watch-input" placeholder="Key (e.g., /config/db)" value="/config/db">
+            <input type="text" id="watchValueInput" class="watch-input" placeholder="Value" value="host=10.0.0.1">
+            <button id="watchPutBtn" class="action-btn primary-btn">📝 Put</button>
+            <button id="watchDeleteBtn" class="action-btn reset-btn">🗑️ Delete</button>
+          </div>
+        </div>
+
+        <div class="watch-panels">
+          <div class="watch-panel">
+            <div class="watch-panel-header">
+              <span>👁️ Watcher 1</span>
+              <span class="watch-prefix">/config/*</span>
+            </div>
+            <div class="watch-events" id="watchEvents1"></div>
+          </div>
+          <div class="watch-panel">
+            <div class="watch-panel-header">
+              <span>👁️ Watcher 2</span>
+              <span class="watch-prefix">/config/*</span>
+            </div>
+            <div class="watch-events" id="watchEvents2"></div>
+          </div>
+          <div class="watch-panel">
+            <div class="watch-panel-header">
+              <span>👁️ Watcher 3</span>
+              <span class="watch-prefix">/config/*</span>
+            </div>
+            <div class="watch-events" id="watchEvents3"></div>
+          </div>
+        </div>
+
+        <div class="watch-info">
+          <div class="info-chip">
+            <span class="info-label">Watch Revision</span>
+            <span class="info-value" id="watchRevision">1</span>
+          </div>
+          <div class="info-chip">
+            <span class="info-label">Compact Revision</span>
+            <span class="info-value" id="compactRevision">0</span>
+          </div>
+          <button id="compactBtn" class="action-btn step-btn">🗜️ Compact</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Distributed Locks -->
+    <section class="lock-section">
+      <h2>🔒 Distributed Locks</h2>
+      <div class="explain-card highlight-card">
+        <h3>🔑 Fair Lock Queue (No Thundering Herd)</h3>
+        <p>
+          etcd implements distributed locks using a <em>prefix + revision ordering</em> pattern.
+          Each process creates a unique key under <code>/locks/mylock/</code> with a lease. The
+          process whose key has the <strong>smallest revision</strong> holds the lock. Others
+          don't poll — they <em>watch the key just before theirs</em> in revision order. When that
+          key is deleted, the next process gets the lock. This avoids the
+          <strong>thundering herd</strong> problem — only one waiter wakes up at a time.
+        </p>
+      </div>
+
+      <div class="lock-controls">
+        <button id="lockAcquireBtn" class="action-btn primary-btn">🔒 Acquire Lock (3 processes)</button>
+        <button id="lockReleaseBtn" class="action-btn step-btn" disabled>🔓 Release Lock (holder)</button>
+        <button id="lockResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="lock-visual">
+        <div class="lock-key-header">
+          <span>🔑 /locks/mylock/</span>
+        </div>
+        <div class="lock-queue" id="lockQueue">
+          <div class="lock-empty">No lock contention — click Acquire to start</div>
+        </div>
+        <div class="lock-watch-arrows" id="lockWatchArrows"></div>
+      </div>
+
+      <div class="lock-status" id="lockStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="lockStatusText">Click "Acquire Lock" to see the queue mechanism</span>
+      </div>
+    </section>
+
+    <!-- Event Log -->
+    <section class="event-log-section">
+      <h2>📋 Event Log</h2>
+      <div class="event-log" id="eventLog">
+        <div class="event-log-empty">Events will appear here...</div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://etcd.io/docs/v3.5/dev-guide/interacting_v3/" target="_blank">etcd v3 documentation</a> and <a href="https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency" target="_blank">etcd concurrency package</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20etcd%20leader%20election%20visualization&url=https://systeminternals.dev/etcd/leader-election/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/etcd/leader-election/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/etcd/leader-election/&t=Interactive%20etcd%20Leader%20Election%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f59e0b, #ef4444, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(139, 92, 246, 0.05));
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f59e0b; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(245, 158, 11, 0.4); }
+  .step-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .step-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #ccc; }
+  .reset-btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+  .chaos-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4); }
+  .campaign-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; font-size: 0.8rem; padding: 6px 12px; }
+  .campaign-btn:hover:not(:disabled) { transform: translateY(-1px); }
+  .resign-btn { background: linear-gradient(135deg, #fb923c, #f97316); color: white; font-size: 0.8rem; padding: 6px 12px; }
+  .resign-btn:hover:not(:disabled) { transform: translateY(-1px); }
+  .proclaim-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; font-size: 0.8rem; padding: 6px 12px; }
+  .proclaim-btn:hover:not(:disabled) { transform: translateY(-1px); }
+
+  /* Status */
+  .election-status, .campaign-status, .lock-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .status-badge.idle { background: rgba(255,255,255,0.1); color: #999; }
+  .status-badge.active { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+  .status-badge.success { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .status-badge.error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .status-text { color: #aaa; font-size: 0.9rem; }
+
+  /* Cluster SVG */
+  .cluster-section { margin-bottom: 50px; }
+  .cluster-visual { margin-bottom: 20px; }
+  .cluster-svg { width: 100%; height: auto; }
+
+  /* KV Store */
+  .kv-store {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 30px;
+  }
+  .kv-header {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .kv-title { font-weight: 600; color: #fff; }
+  .kv-revision { font-size: 0.85rem; color: #888; font-family: monospace; }
+  .kv-entries { padding: 12px 16px; min-height: 40px; }
+  .kv-empty { color: #555; font-style: italic; }
+  .kv-entry {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    margin: 4px 0;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    transition: all 0.3s;
+  }
+  .kv-entry.new { animation: kvFlash 0.6s ease; }
+  @keyframes kvFlash {
+    0% { background: rgba(245, 158, 11, 0.4); }
+    100% { background: rgba(245, 158, 11, 0.08); }
+  }
+  .kv-key { color: #f59e0b; }
+  .kv-val { color: #ccc; }
+  .kv-lease { color: #8b5cf6; font-size: 0.75rem; }
+
+  /* Election Section */
+  .election-section { margin-bottom: 50px; }
+  .election-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+
+  /* Candidates Grid */
+  .candidates-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 30px;
+  }
+  .candidate-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s;
+  }
+  .candidate-card.leader {
+    border-color: rgba(245, 158, 11, 0.5);
+    background: rgba(245, 158, 11, 0.05);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.1);
+  }
+  .candidate-card.waiting {
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+  .candidate-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .candidate-icon { font-size: 1.2rem; }
+  .candidate-name { font-weight: 600; color: #fff; }
+  .candidate-role {
+    margin-left: auto;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(255,255,255,0.1);
+    color: #999;
+  }
+  .candidate-role.leader-role { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+  .candidate-role.waiting-role { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+
+  .lease-bar-container {
+    position: relative;
+    height: 20px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .lease-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 10px;
+    transition: width 0.3s linear;
+  }
+  .lease-bar.active { background: linear-gradient(90deg, #4ade80, #22c55e); }
+  .lease-bar.expiring { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .lease-bar.expired { background: #ef4444; width: 0% !important; }
+  .lease-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  .candidate-status { font-size: 0.8rem; color: #888; }
+
+  /* Campaign Section */
+  .campaign-section { margin-bottom: 50px; }
+  .campaign-controls {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .campaign-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+  }
+  .campaign-node-label { font-weight: 600; color: #fff; min-width: 55px; }
+
+  .campaign-visual {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .campaign-election-key {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    font-family: monospace;
+  }
+  .ek-label { color: #f59e0b; font-weight: 600; }
+  .ek-value { color: #ccc; }
+  .ek-revision { margin-left: auto; color: #888; font-size: 0.85rem; }
+
+  .campaign-waiters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .waiter-chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    animation: fadeIn 0.3s ease;
+  }
+  .waiter-chip.watching { background: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); }
+  @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+
+  /* Watch Section */
+  .watch-section { margin-bottom: 50px; }
+  .watch-demo { margin-top: 20px; }
+  .watch-controls { margin-bottom: 20px; }
+  .watch-input-group { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .watch-input {
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #fff;
+    font-family: monospace;
+    font-size: 0.9rem;
+    width: 200px;
+  }
+  .watch-input::placeholder { color: #555; }
+
+  .watch-panels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .watch-panel {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .watch-panel-header {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-size: 0.85rem;
+  }
+  .watch-prefix { color: #888; font-family: monospace; font-size: 0.75rem; }
+  .watch-events {
+    padding: 10px;
+    min-height: 80px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .watch-event {
+    padding: 6px 10px;
+    margin: 4px 0;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-family: monospace;
+    animation: watchFlash 0.5s ease;
+  }
+  .watch-event.put { background: rgba(74, 222, 128, 0.1); border-left: 3px solid #4ade80; color: #4ade80; }
+  .watch-event.delete { background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; color: #ef4444; }
+  @keyframes watchFlash {
+    0% { opacity: 0; transform: translateX(-10px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+
+  .watch-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .info-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+  }
+  .info-label { font-size: 0.8rem; color: #888; }
+  .info-value { font-weight: 600; color: #fff; font-family: monospace; }
+
+  /* Lock Section */
+  .lock-section { margin-bottom: 50px; }
+  .lock-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .lock-visual {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .lock-key-header {
+    font-family: monospace;
+    font-weight: 600;
+    color: #8b5cf6;
+    margin-bottom: 16px;
+    font-size: 1rem;
+  }
+  .lock-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .lock-empty { color: #555; font-style: italic; }
+  .lock-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    animation: fadeIn 0.3s ease;
+    transition: all 0.3s;
+  }
+  .lock-entry.holder {
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+  .lock-entry.waiting {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .lock-icon { font-size: 1.2rem; }
+  .lock-name { color: #fff; font-weight: 600; }
+  .lock-rev { color: #888; }
+  .lock-state { margin-left: auto; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .lock-state.holding { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+  .lock-state.queued { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+  .lock-watch-info {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  /* Explain Cards */
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px 28px;
+    margin-bottom: 24px;
+  }
+  .explain-card.highlight-card {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(139, 92, 246, 0.04));
+    border-color: rgba(245, 158, 11, 0.25);
+  }
+  .explain-card h3 { font-size: 1.1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #bbb; line-height: 1.8; font-size: 0.95rem; }
+  .explain-card code {
+    background: rgba(255,255,255,0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #f59e0b;
+  }
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #f59e0b; font-style: normal; font-weight: 500; }
+
+  /* Event Log */
+  .event-log-section { margin-bottom: 40px; }
+  .event-log {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+  }
+  .event-log-empty { color: #555; font-style: italic; }
+  .log-entry { padding: 4px 0; color: #aaa; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .log-entry .log-time { color: #666; margin-right: 8px; }
+  .log-entry .log-type { font-weight: 600; margin-right: 6px; }
+  .log-type.election { color: #f59e0b; }
+  .log-type.campaign { color: #4ade80; }
+  .log-type.watch { color: #60a5fa; }
+  .log-type.lock { color: #8b5cf6; }
+  .log-type.lease { color: #fb923c; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    padding: 30px 0;
+    color: #666;
+    font-size: 0.85rem;
+  }
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 20px 0 40px;
+    color: #666;
+    font-size: 0.9rem;
+    flex-wrap: wrap;
+  }
+  .share-btn {
+    padding: 8px 16px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ccc;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  .share-btn:hover { border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); }
+
+  @media (max-width: 768px) {
+    .candidates-grid { grid-template-columns: 1fr; }
+    .watch-panels { grid-template-columns: 1fr; }
+    .campaign-controls { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+(function() {
+  // ===================== UTILITIES =====================
+  var NODE_NAMES = ['Node A', 'Node B', 'Node C'];
+  var NODE_COLORS = ['#4ade80', '#60a5fa', '#a78bfa'];
+  var revision = 1;
+  var kvData = {};
+
+  function logEvent(type, msg) {
+    var log = document.getElementById('eventLog');
+    var empty = log.querySelector('.event-log-empty');
+    if (empty) empty.remove();
+    var entry = document.createElement('div');
+    entry.className = 'log-entry';
+    var now = new Date();
+    var time = now.toLocaleTimeString();
+    entry.innerHTML = '<span class="log-time">' + time + '</span><span class="log-type ' + type + '">[' + type.toUpperCase() + ']</span> ' + msg;
+    log.prepend(entry);
+    if (log.children.length > 100) log.removeChild(log.lastChild);
+  }
+
+  function updateKvDisplay() {
+    var entries = document.getElementById('kvEntries');
+    var keys = Object.keys(kvData);
+    if (keys.length === 0) {
+      entries.innerHTML = '<div class="kv-empty">Store is empty</div>';
+    } else {
+      entries.innerHTML = '';
+      keys.forEach(function(k) {
+        var d = kvData[k];
+        var div = document.createElement('div');
+        div.className = 'kv-entry new';
+        div.innerHTML = '<span class="kv-key">' + k + '</span><span class="kv-val">' + d.value + '</span>' + (d.lease ? '<span class="kv-lease">lease:' + d.lease + '</span>' : '');
+        entries.appendChild(div);
+      });
+    }
+    document.getElementById('kvRevision').textContent = 'Revision: ' + revision;
+  }
+
+  function putKv(key, value, lease) {
+    revision++;
+    kvData[key] = { value: value, lease: lease || null, rev: revision };
+    updateKvDisplay();
+    return revision;
+  }
+
+  function deleteKv(key) {
+    if (kvData[key]) {
+      revision++;
+      delete kvData[key];
+      updateKvDisplay();
+      return revision;
+    }
+    return null;
+  }
+
+  // ===================== CLUSTER SVG =====================
+  (function drawCluster() {
+    var svg = document.getElementById('clusterNodes');
+    var positions = [
+      { x: 100, y: 100 },
+      { x: 300, y: 100 },
+      { x: 500, y: 100 }
+    ];
+    positions.forEach(function(pos, i) {
+      var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      // Circle
+      var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', pos.x);
+      circle.setAttribute('cy', pos.y);
+      circle.setAttribute('r', 40);
+      circle.setAttribute('fill', 'rgba(255,255,255,0.05)');
+      circle.setAttribute('stroke', NODE_COLORS[i]);
+      circle.setAttribute('stroke-width', '2');
+      circle.id = 'clusterCircle' + i;
+      g.appendChild(circle);
+      // Label
+      var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', pos.x);
+      text.setAttribute('y', pos.y - 8);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('fill', '#fff');
+      text.setAttribute('font-size', '14');
+      text.setAttribute('font-weight', '600');
+      text.textContent = NODE_NAMES[i];
+      g.appendChild(text);
+      // Role label
+      var role = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      role.setAttribute('x', pos.x);
+      role.setAttribute('y', pos.y + 12);
+      role.setAttribute('text-anchor', 'middle');
+      role.setAttribute('fill', '#888');
+      role.setAttribute('font-size', '11');
+      role.id = 'clusterRole' + i;
+      role.textContent = 'member';
+      g.appendChild(role);
+      svg.appendChild(g);
+    });
+    // Connection lines
+    var lines = [[0,1],[1,2],[0,2]];
+    lines.forEach(function(pair) {
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', positions[pair[0]].x);
+      line.setAttribute('y1', positions[pair[0]].y);
+      line.setAttribute('x2', positions[pair[1]].x);
+      line.setAttribute('y2', positions[pair[1]].y);
+      line.setAttribute('stroke', 'rgba(255,255,255,0.08)');
+      line.setAttribute('stroke-width', '1');
+      svg.insertBefore(line, svg.firstChild);
+    });
+  })();
+
+  // ===================== LEASE-BASED ELECTION DEMO =====================
+  (function() {
+    var LEASE_TTL = 15; // seconds
+    var electionState = { step: 0, running: false, leader: -1, leases: [-1, -1, -1], timers: [] };
+    var steps = [
+      function() {
+        // All nodes create leases
+        for (var i = 0; i < 3; i++) {
+          electionState.leases[i] = LEASE_TTL;
+          document.getElementById('leaseBar' + i).className = 'lease-bar active';
+          document.getElementById('leaseBar' + i).style.width = '100%';
+          document.getElementById('leaseLabel' + i).textContent = 'TTL: ' + LEASE_TTL + 's';
+          document.getElementById('candidateStatus' + i).textContent = 'Lease granted (TTL=' + LEASE_TTL + 's)';
+        }
+        setStatusBadge('electionStatus', 'active', 'All 3 candidates create leases with TTL=' + LEASE_TTL + 's');
+        logEvent('lease', 'All candidates granted leases (TTL=' + LEASE_TTL + 's)');
+      },
+      function() {
+        // Race to create key — Node A wins (lowest latency)
+        var winner = 0;
+        electionState.leader = winner;
+        var r = putKv('/election/leader', NODE_NAMES[winner], 'lease-' + winner);
+        document.getElementById('candidateRole' + winner).textContent = '👑 Leader';
+        document.getElementById('candidateRole' + winner).className = 'candidate-role leader-role';
+        document.querySelector('.candidate-card[data-id="' + winner + '"]').classList.add('leader');
+        document.getElementById('candidateStatus' + winner).textContent = 'Won election! Key created at rev=' + r;
+        for (var i = 1; i < 3; i++) {
+          document.getElementById('candidateRole' + i).textContent = '⏳ Waiting';
+          document.getElementById('candidateRole' + i).className = 'candidate-role waiting-role';
+          document.querySelector('.candidate-card[data-id="' + i + '"]').classList.add('waiting');
+          document.getElementById('candidateStatus' + i).textContent = 'Key exists — watching for deletion';
+        }
+        setStatusBadge('electionStatus', 'success', NODE_NAMES[winner] + ' wins the election (first to create key at rev=' + r + ')');
+        logEvent('election', NODE_NAMES[winner] + ' became leader (rev=' + r + ')');
+        // Start keepalive countdown
+        startLeaseCountdown();
+      },
+      function() {
+        // Leader sends KeepAlive
+        var leader = electionState.leader;
+        electionState.leases[leader] = LEASE_TTL;
+        document.getElementById('leaseBar' + leader).style.width = '100%';
+        document.getElementById('leaseLabel' + leader).textContent = 'TTL: ' + LEASE_TTL + 's (renewed)';
+        document.getElementById('candidateStatus' + leader).textContent = 'KeepAlive sent — lease renewed';
+        setStatusBadge('electionStatus', 'active', 'Leader sends KeepAlive every ' + Math.floor(LEASE_TTL / 3) + 's to refresh lease');
+        logEvent('lease', NODE_NAMES[leader] + ' sent KeepAlive — lease refreshed');
+      },
+      function() {
+        // Leader dies — simulate lease expiry
+        var oldLeader = electionState.leader;
+        stopLeaseCountdown();
+        electionState.leases[oldLeader] = 0;
+        document.getElementById('leaseBar' + oldLeader).className = 'lease-bar expired';
+        document.getElementById('leaseBar' + oldLeader).style.width = '0%';
+        document.getElementById('leaseLabel' + oldLeader).textContent = 'EXPIRED';
+        document.getElementById('candidateRole' + oldLeader).textContent = '💀 Dead';
+        document.getElementById('candidateRole' + oldLeader).className = 'candidate-role';
+        document.querySelector('.candidate-card[data-id="' + oldLeader + '"]').classList.remove('leader');
+        document.getElementById('candidateStatus' + oldLeader).textContent = 'Crashed! Lease will expire...';
+        deleteKv('/election/leader');
+        setStatusBadge('electionStatus', 'error', NODE_NAMES[oldLeader] + ' crashed! Lease expired, key deleted');
+        logEvent('election', NODE_NAMES[oldLeader] + ' crashed — lease expired, /election/leader deleted');
+      },
+      function() {
+        // Node B wins new election
+        var newLeader = 1;
+        electionState.leader = newLeader;
+        var r = putKv('/election/leader', NODE_NAMES[newLeader], 'lease-' + newLeader);
+        document.getElementById('candidateRole' + newLeader).textContent = '👑 Leader';
+        document.getElementById('candidateRole' + newLeader).className = 'candidate-role leader-role';
+        document.querySelector('.candidate-card[data-id="' + newLeader + '"]').classList.remove('waiting');
+        document.querySelector('.candidate-card[data-id="' + newLeader + '"]').classList.add('leader');
+        document.getElementById('candidateStatus' + newLeader).textContent = 'New leader! Key created at rev=' + r;
+        document.getElementById('candidateRole2').textContent = '⏳ Waiting';
+        document.getElementById('candidateStatus2').textContent = 'Still watching for next chance';
+        electionState.leases[newLeader] = LEASE_TTL;
+        document.getElementById('leaseBar' + newLeader).className = 'lease-bar active';
+        document.getElementById('leaseBar' + newLeader).style.width = '100%';
+        document.getElementById('leaseLabel' + newLeader).textContent = 'TTL: ' + LEASE_TTL + 's';
+        setStatusBadge('electionStatus', 'success', NODE_NAMES[newLeader] + ' detected deletion via watch and won new election');
+        logEvent('election', NODE_NAMES[newLeader] + ' became new leader (rev=' + r + ')');
+        startLeaseCountdown();
+      }
+    ];
+
+    var leaseInterval = null;
+    function startLeaseCountdown() {
+      stopLeaseCountdown();
+      leaseInterval = setInterval(function() {
+        var leader = electionState.leader;
+        if (leader < 0) return;
+        electionState.leases[leader]--;
+        var remaining = electionState.leases[leader];
+        if (remaining <= 0) {
+          document.getElementById('leaseBar' + leader).style.width = '0%';
+          document.getElementById('leaseLabel' + leader).textContent = 'EXPIRED';
+          stopLeaseCountdown();
+          return;
+        }
+        var pct = (remaining / LEASE_TTL) * 100;
+        document.getElementById('leaseBar' + leader).style.width = pct + '%';
+        document.getElementById('leaseLabel' + leader).textContent = 'TTL: ' + remaining + 's';
+        if (remaining <= 5) {
+          document.getElementById('leaseBar' + leader).className = 'lease-bar expiring';
+        }
+      }, 1000);
+    }
+    function stopLeaseCountdown() {
+      if (leaseInterval) { clearInterval(leaseInterval); leaseInterval = null; }
+    }
+
+    document.getElementById('startElectionBtn').addEventListener('click', function() {
+      electionState.step = 0;
+      electionState.running = true;
+      document.getElementById('stepElectionBtn').disabled = false;
+      steps[0]();
+      electionState.step = 1;
+    });
+
+    document.getElementById('stepElectionBtn').addEventListener('click', function() {
+      if (electionState.step < steps.length) {
+        steps[electionState.step]();
+        electionState.step++;
+        if (electionState.step >= steps.length) {
+          document.getElementById('stepElectionBtn').disabled = true;
+        }
+      }
+    });
+
+    document.getElementById('resetElectionBtn').addEventListener('click', function() {
+      stopLeaseCountdown();
+      electionState = { step: 0, running: false, leader: -1, leases: [-1, -1, -1], timers: [] };
+      for (var i = 0; i < 3; i++) {
+        document.getElementById('candidateRole' + i).textContent = 'Follower';
+        document.getElementById('candidateRole' + i).className = 'candidate-role';
+        document.getElementById('leaseBar' + i).className = 'lease-bar';
+        document.getElementById('leaseBar' + i).style.width = '0%';
+        document.getElementById('leaseLabel' + i).textContent = 'No lease';
+        document.getElementById('candidateStatus' + i).textContent = 'Idle';
+        document.querySelector('.candidate-card[data-id="' + i + '"]').classList.remove('leader', 'waiting');
+      }
+      deleteKv('/election/leader');
+      document.getElementById('stepElectionBtn').disabled = true;
+      setStatusBadge('electionStatus', 'idle', 'Click "Start Election Demo" to begin');
+    });
+  })();
+
+  // ===================== CAMPAIGN FLOW =====================
+  (function() {
+    var campaignState = { leader: -1, waiters: [], leaseTimers: {} };
+    var LEASE_TTL = 15;
+
+    function updateCampaignVisual() {
+      var ekVal = document.getElementById('ekValue');
+      var ekRev = document.getElementById('ekRevision');
+      var waitersDiv = document.getElementById('campaignWaiters');
+      if (campaignState.leader >= 0) {
+        ekVal.textContent = NODE_NAMES[campaignState.leader];
+        ekVal.style.color = NODE_COLORS[campaignState.leader];
+        ekRev.textContent = 'rev: ' + (kvData['/election/leader'] ? kvData['/election/leader'].rev : '?');
+      } else {
+        ekVal.innerHTML = '&#x2205; empty';
+        ekVal.style.color = '#888';
+        ekRev.textContent = 'rev: 0';
+      }
+      waitersDiv.innerHTML = '';
+      campaignState.waiters.forEach(function(w) {
+        var chip = document.createElement('span');
+        chip.className = 'waiter-chip watching';
+        chip.textContent = '👁️ ' + NODE_NAMES[w] + ' watching...';
+        waitersDiv.appendChild(chip);
+      });
+    }
+
+    function updateButtons() {
+      for (var i = 0; i < 3; i++) {
+        var isLeader = campaignState.leader === i;
+        var isWaiting = campaignState.waiters.indexOf(i) >= 0;
+        var campaignBtn = document.querySelector('[data-action="campaign"][data-node="' + i + '"]');
+        var resignBtn = document.querySelector('[data-action="resign"][data-node="' + i + '"]');
+        var proclaimBtn = document.querySelector('[data-action="proclaim"][data-node="' + i + '"]');
+        campaignBtn.disabled = isLeader || isWaiting;
+        resignBtn.disabled = !isLeader;
+        proclaimBtn.disabled = !isLeader;
+      }
+      document.getElementById('killLeaderBtn').disabled = campaignState.leader < 0;
+    }
+
+    document.querySelectorAll('[data-action="campaign"]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var nodeId = parseInt(btn.getAttribute('data-node'));
+        if (campaignState.leader < 0) {
+          // Win election
+          campaignState.leader = nodeId;
+          var r = putKv('/election/leader', NODE_NAMES[nodeId], 'lease-c' + nodeId);
+          setStatusBadge('campaignStatus', 'success', NODE_NAMES[nodeId] + ' won the campaign (rev=' + r + ')');
+          logEvent('campaign', NODE_NAMES[nodeId] + ' campaigned and won leadership');
+        } else {
+          // Wait
+          if (campaignState.waiters.indexOf(nodeId) < 0) {
+            campaignState.waiters.push(nodeId);
+          }
+          setStatusBadge('campaignStatus', 'active', NODE_NAMES[nodeId] + ' is waiting (watching /election/leader)');
+          logEvent('campaign', NODE_NAMES[nodeId] + ' campaigned but key exists — watching');
+        }
+        updateCampaignVisual();
+        updateButtons();
+      });
+    });
+
+    document.querySelectorAll('[data-action="resign"]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var nodeId = parseInt(btn.getAttribute('data-node'));
+        if (campaignState.leader !== nodeId) return;
+        var oldLeader = campaignState.leader;
+        deleteKv('/election/leader');
+        campaignState.leader = -1;
+        logEvent('campaign', NODE_NAMES[oldLeader] + ' resigned');
+        // Next waiter wins
+        if (campaignState.waiters.length > 0) {
+          var next = campaignState.waiters.shift();
+          campaignState.leader = next;
+          var r = putKv('/election/leader', NODE_NAMES[next], 'lease-c' + next);
+          setStatusBadge('campaignStatus', 'success', NODE_NAMES[oldLeader] + ' resigned. ' + NODE_NAMES[next] + ' became leader (rev=' + r + ')');
+          logEvent('campaign', NODE_NAMES[next] + ' detected resignation, became new leader');
+        } else {
+          setStatusBadge('campaignStatus', 'idle', NODE_NAMES[oldLeader] + ' resigned. No waiters — election key is empty');
+        }
+        updateCampaignVisual();
+        updateButtons();
+      });
+    });
+
+    document.querySelectorAll('[data-action="proclaim"]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var nodeId = parseInt(btn.getAttribute('data-node'));
+        if (campaignState.leader !== nodeId) return;
+        var msgs = ['config-v2', 'scale-up', 'maintenance-mode', 'ready'];
+        var msg = msgs[Math.floor(Math.random() * msgs.length)];
+        putKv('/election/leader', NODE_NAMES[nodeId] + ':' + msg, 'lease-c' + nodeId);
+        setStatusBadge('campaignStatus', 'active', NODE_NAMES[nodeId] + ' proclaimed: "' + msg + '"');
+        logEvent('campaign', NODE_NAMES[nodeId] + ' proclaimed: ' + msg);
+        updateCampaignVisual();
+      });
+    });
+
+    document.getElementById('killLeaderBtn').addEventListener('click', function() {
+      if (campaignState.leader < 0) return;
+      var dead = campaignState.leader;
+      deleteKv('/election/leader');
+      campaignState.leader = -1;
+      logEvent('election', NODE_NAMES[dead] + ' was killed! Lease expired');
+      if (campaignState.waiters.length > 0) {
+        var next = campaignState.waiters.shift();
+        campaignState.leader = next;
+        var r = putKv('/election/leader', NODE_NAMES[next], 'lease-c' + next);
+        setStatusBadge('campaignStatus', 'success', NODE_NAMES[dead] + ' killed! ' + NODE_NAMES[next] + ' took over (automatic failover, rev=' + r + ')');
+        logEvent('election', NODE_NAMES[next] + ' became leader after failover');
+      } else {
+        setStatusBadge('campaignStatus', 'error', NODE_NAMES[dead] + ' killed! No waiters — cluster has no leader');
+      }
+      updateCampaignVisual();
+      updateButtons();
+    });
+
+    updateButtons();
+    updateCampaignVisual();
+  })();
+
+  // ===================== WATCH DEMO =====================
+  (function() {
+    var watchRevision = 1;
+    var compactRevision = 0;
+
+    function addWatchEvent(panelId, type, key, value, rev) {
+      var panel = document.getElementById(panelId);
+      var div = document.createElement('div');
+      div.className = 'watch-event ' + type;
+      if (type === 'put') {
+        div.textContent = 'PUT ' + key + ' = ' + value + ' (rev:' + rev + ')';
+      } else {
+        div.textContent = 'DELETE ' + key + ' (rev:' + rev + ')';
+      }
+      panel.prepend(div);
+      if (panel.children.length > 20) panel.removeChild(panel.lastChild);
+    }
+
+    function notifyWatchers(type, key, value, rev) {
+      // Small random delay per watcher for realism
+      ['watchEvents1', 'watchEvents2', 'watchEvents3'].forEach(function(id, idx) {
+        setTimeout(function() {
+          addWatchEvent(id, type, key, value, rev);
+        }, 50 + idx * 120);
+      });
+      document.getElementById('watchRevision').textContent = rev;
+    }
+
+    document.getElementById('watchPutBtn').addEventListener('click', function() {
+      var key = document.getElementById('watchKeyInput').value || '/config/db';
+      var value = document.getElementById('watchValueInput').value || 'default';
+      var r = putKv(key, value, null);
+      watchRevision = r;
+      notifyWatchers('put', key, value, r);
+      logEvent('watch', 'PUT ' + key + ' = ' + value + ' (rev:' + r + ')');
+    });
+
+    document.getElementById('watchDeleteBtn').addEventListener('click', function() {
+      var key = document.getElementById('watchKeyInput').value || '/config/db';
+      var r = deleteKv(key);
+      if (r) {
+        watchRevision = r;
+        notifyWatchers('delete', key, '', r);
+        logEvent('watch', 'DELETE ' + key + ' (rev:' + r + ')');
+      } else {
+        logEvent('watch', 'Key not found: ' + key);
+      }
+    });
+
+    document.getElementById('compactBtn').addEventListener('click', function() {
+      compactRevision = watchRevision;
+      document.getElementById('compactRevision').textContent = compactRevision;
+      logEvent('watch', 'Compacted to revision ' + compactRevision + ' — old revisions reclaimed');
+    });
+  })();
+
+  // ===================== DISTRIBUTED LOCKS =====================
+  (function() {
+    var lockQueue = [];
+    var lockRevCounter = 100;
+    var PROCESS_NAMES = ['Process-A', 'Process-B', 'Process-C'];
+    var PROCESS_COLORS = ['#4ade80', '#60a5fa', '#a78bfa'];
+
+    function renderLockQueue() {
+      var container = document.getElementById('lockQueue');
+      if (lockQueue.length === 0) {
+        container.innerHTML = '<div class="lock-empty">No lock contention — click Acquire to start</div>';
+        return;
+      }
+      container.innerHTML = '';
+      lockQueue.forEach(function(entry, idx) {
+        var div = document.createElement('div');
+        div.className = 'lock-entry ' + (idx === 0 ? 'holder' : 'waiting');
+        var watchInfo = '';
+        if (idx > 0) {
+          watchInfo = '<div class="lock-watch-info">👁️ watching ' + PROCESS_NAMES[lockQueue[idx - 1].processId] + ' (rev:' + lockQueue[idx - 1].rev + ')</div>';
+        }
+        div.innerHTML =
+          '<span class="lock-icon">' + (idx === 0 ? '🔒' : '⏳') + '</span>' +
+          '<div>' +
+            '<span class="lock-name" style="color:' + PROCESS_COLORS[entry.processId] + '">' + PROCESS_NAMES[entry.processId] + '</span>' +
+            '<span class="lock-rev"> /locks/mylock/' + entry.key + ' (rev:' + entry.rev + ')</span>' +
+            watchInfo +
+          '</div>' +
+          '<span class="lock-state ' + (idx === 0 ? 'holding' : 'queued') + '">' + (idx === 0 ? 'HOLDING' : 'QUEUED') + '</span>';
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById('lockAcquireBtn').addEventListener('click', function() {
+      lockQueue = [];
+      // 3 processes try to acquire
+      for (var i = 0; i < 3; i++) {
+        lockRevCounter++;
+        lockQueue.push({ processId: i, key: 'proc-' + String.fromCharCode(97 + i), rev: lockRevCounter });
+        logEvent('lock', PROCESS_NAMES[i] + ' created /locks/mylock/proc-' + String.fromCharCode(97 + i) + ' (rev:' + lockRevCounter + ')');
+      }
+      // Sort by revision (first wins)
+      lockQueue.sort(function(a, b) { return a.rev - b.rev; });
+      logEvent('lock', PROCESS_NAMES[lockQueue[0].processId] + ' holds the lock (smallest revision)');
+      logEvent('lock', 'Others watch the key just before theirs (no thundering herd)');
+      renderLockQueue();
+      document.getElementById('lockReleaseBtn').disabled = false;
+      setStatusBadge('lockStatus', 'success', PROCESS_NAMES[lockQueue[0].processId] + ' holds lock. Others wait in revision order.');
+    });
+
+    document.getElementById('lockReleaseBtn').addEventListener('click', function() {
+      if (lockQueue.length === 0) return;
+      var released = lockQueue.shift();
+      logEvent('lock', PROCESS_NAMES[released.processId] + ' released lock (deleted key)');
+      if (lockQueue.length > 0) {
+        logEvent('lock', PROCESS_NAMES[lockQueue[0].processId] + ' detected deletion, now holds the lock');
+        setStatusBadge('lockStatus', 'success', PROCESS_NAMES[lockQueue[0].processId] + ' now holds the lock');
+      } else {
+        setStatusBadge('lockStatus', 'idle', 'Lock released — no more waiters');
+        document.getElementById('lockReleaseBtn').disabled = true;
+      }
+      renderLockQueue();
+    });
+
+    document.getElementById('lockResetBtn').addEventListener('click', function() {
+      lockQueue = [];
+      renderLockQueue();
+      document.getElementById('lockReleaseBtn').disabled = true;
+      setStatusBadge('lockStatus', 'idle', 'Click "Acquire Lock" to see the queue mechanism');
+    });
+  })();
+
+  // ===================== HELPERS =====================
+  function setStatusBadge(containerId, type, text) {
+    var container = document.getElementById(containerId);
+    var badge = container.querySelector('.status-badge');
+    var statusText = container.querySelector('.status-text');
+    badge.className = 'status-badge ' + type;
+    badge.textContent = type === 'idle' ? 'Ready' : type === 'active' ? 'Active' : type === 'success' ? 'Success' : 'Error';
+    statusText.textContent = text;
+  }
+})();
+</script>
+</BaseLayout>
