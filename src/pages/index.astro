@@ -11,6 +11,7 @@ const kafkaTopics = [
   { title: "Consumer Groups & Rebalancing", description: "Assignment strategies, cooperative rebalancing, and rebalance storms", href: "/kafka/consumer-groups/", status: "live" },
   { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "/kafka/isr-replication/", status: "live" },
   { title: "Log Compaction", description: "Keeping the latest value per key", href: "/kafka/log-compaction/", status: "live" },
+  { title: "KRaft", description: "Replacing ZooKeeper with Raft-based metadata management", href: "/kafka/kraft/", status: "live" },
 ];
 
 const redisTopics = [
@@ -66,6 +67,22 @@ const tidbTopics = [
   { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "#", status: "coming" },
   { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "#", status: "coming" },
   { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "#", status: "coming" },
+];
+
+const dynamodbTopics = [
+  { title: "Partitioning & Adaptive Capacity", description: "Hash partitioning, auto-split, burst capacity, GSI vs LSI", href: "/dynamodb/partitioning/", status: "live" },
+  { title: "DynamoDB Streams", description: "Change data capture and event-driven architectures", href: "#", status: "coming" },
+];
+
+const grpcTopics = [
+  { title: "gRPC Internals", description: "HTTP/2 multiplexing, Protobuf encoding, streaming, deadlines", href: "/grpc/internals/", status: "live" },
+  { title: "Load Balancing", description: "Client-side vs proxy LB, xDS, service mesh integration", href: "#", status: "coming" },
+];
+
+const clickhouseTopics = [
+  { title: "MergeTree Engine", description: "Parts, merges, sparse indexes, and column-oriented storage", href: "/clickhouse/mergetree/", status: "live" },
+  { title: "Distributed Tables", description: "Sharding, replication, and cross-shard queries", href: "#", status: "coming" },
+  { title: "Materialized Views", description: "Real-time aggregation pipelines and projection chains", href: "#", status: "coming" },
 ];
 
 const sparkTopics = [
@@ -270,6 +287,60 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {tidbTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🏠</span>
+      ClickHouse
+    </h2>
+    <div class="topics-grid">
+      {clickhouseTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">⚡</span>
+      DynamoDB
+    </h2>
+    <div class="topics-grid">
+      {dynamodbTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔌</span>
+      gRPC
+    </h2>
+    <div class="topics-grid">
+      {grpcTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

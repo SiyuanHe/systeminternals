@@ -1,0 +1,1119 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="gRPC Internals: HTTP/2, Protobuf & Streaming" 
+  description="Interactive visualization of gRPC internals — HTTP/2 multiplexing, Protocol Buffer encoding, streaming types, and connection management"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "gRPC", href: "/grpc/" },
+    { label: "Internals", href: "/grpc/internals/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ gRPC Internals</h1>
+      <p class="subtitle">HTTP/2 Multiplexing · Protobuf Encoding · Streaming Patterns</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          gRPC uses <strong>HTTP/2</strong> as its transport, giving it multiplexed streams over a single TCP connection.
+          Messages are serialized with <strong>Protocol Buffers</strong> — a compact binary format that's
+          <em>5–10x smaller</em> and <em>20–100x faster</em> than JSON. gRPC supports four RPC types:
+          <strong>unary</strong>, <strong>server streaming</strong>, <strong>client streaming</strong>,
+          and <strong>bidirectional streaming</strong> — all over a single HTTP/2 connection.
+        </p>
+      </div>
+    </section>
+
+    <!-- HTTP/2 Multiplexing -->
+    <section class="multiplex-section">
+      <h2>🔀 HTTP/2 Multiplexing vs HTTP/1.1</h2>
+      <p class="section-desc">HTTP/2 sends multiple streams over one TCP connection. HTTP/1.1 needs separate connections or suffers head-of-line blocking.</p>
+
+      <div class="multiplex-controls">
+        <div class="protocol-toggle">
+          <button class="proto-btn active" data-proto="http2">HTTP/2</button>
+          <button class="proto-btn" data-proto="http11">HTTP/1.1</button>
+        </div>
+        <div class="slider-group">
+          <label>Concurrent RPCs: <strong id="rpcCountLabel">4</strong></label>
+          <input type="range" id="rpcCountSlider" min="1" max="8" value="4">
+        </div>
+        <button id="startMultiplexBtn" class="action-btn primary-btn">▶ Send RPCs</button>
+        <button id="resetMultiplexBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="multiplex-viz">
+        <div class="multiplex-side">
+          <div class="endpoint-label">Client</div>
+          <div class="conn-box" id="clientBox"></div>
+        </div>
+        <div class="multiplex-pipes" id="multiplexPipes"></div>
+        <div class="multiplex-side">
+          <div class="endpoint-label">Server</div>
+          <div class="conn-box" id="serverBox"></div>
+        </div>
+      </div>
+
+      <div class="multiplex-stats" id="multiplexStats">
+        <div class="stat-item">
+          <span class="stat-label">Connections</span>
+          <span class="stat-value" id="statConns">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Head-of-line blocking</span>
+          <span class="stat-value" id="statHol">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Total time</span>
+          <span class="stat-value" id="statTime">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- HTTP/2 Frame Viewer -->
+    <section class="frame-section">
+      <h2>📦 HTTP/2 Frame Viewer</h2>
+      <p class="section-desc">A gRPC call is a sequence of HTTP/2 frames. Click a frame to inspect its fields.</p>
+
+      <div class="frame-sequence" id="frameSequence"></div>
+      <div class="frame-detail" id="frameDetail">
+        <div class="frame-detail-placeholder">Click a frame above to inspect its contents</div>
+      </div>
+    </section>
+
+    <!-- Protobuf Encoder -->
+    <section class="protobuf-section">
+      <h2>🔢 Protobuf Encoder / Decoder</h2>
+      <p class="section-desc">Define a message schema, set field values, and see the binary encoding in real time.</p>
+
+      <div class="proto-editor">
+        <div class="proto-schema">
+          <h4>Message Schema</h4>
+          <div class="proto-fields" id="protoFields">
+            <div class="proto-field-row" data-idx="0">
+              <select class="proto-type-sel">
+                <option value="int32">int32</option>
+                <option value="string">string</option>
+                <option value="bool">bool</option>
+                <option value="double">double</option>
+              </select>
+              <input type="text" class="proto-field-name" value="id" placeholder="field name">
+              <span class="proto-field-num">= 1</span>
+              <input type="text" class="proto-field-val" value="150" placeholder="value">
+            </div>
+            <div class="proto-field-row" data-idx="1">
+              <select class="proto-type-sel">
+                <option value="int32">int32</option>
+                <option value="string" selected>string</option>
+                <option value="bool">bool</option>
+                <option value="double">double</option>
+              </select>
+              <input type="text" class="proto-field-name" value="name" placeholder="field name">
+              <span class="proto-field-num">= 2</span>
+              <input type="text" class="proto-field-val" value="hello" placeholder="value">
+            </div>
+            <div class="proto-field-row" data-idx="2">
+              <select class="proto-type-sel">
+                <option value="int32">int32</option>
+                <option value="string">string</option>
+                <option value="bool" selected>bool</option>
+                <option value="double">double</option>
+              </select>
+              <input type="text" class="proto-field-name" value="active" placeholder="field name">
+              <span class="proto-field-num">= 3</span>
+              <input type="text" class="proto-field-val" value="true" placeholder="value">
+            </div>
+          </div>
+          <button id="addProtoFieldBtn" class="action-btn secondary-btn" style="margin-top:12px">+ Add Field</button>
+        </div>
+
+        <div class="proto-output">
+          <h4>Binary Encoding</h4>
+          <div class="proto-hex" id="protoHex"></div>
+          <div class="proto-breakdown" id="protoBreakdown"></div>
+          <div class="proto-size-compare" id="protoSizeCompare"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 RPC Types -->
+    <section class="rpc-section">
+      <h2>📡 Four RPC Types</h2>
+      <p class="section-desc">gRPC supports four communication patterns. Click each to see the message flow animation.</p>
+
+      <div class="rpc-type-tabs">
+        <button class="rpc-tab active" data-type="unary">Unary</button>
+        <button class="rpc-tab" data-type="server">Server Streaming</button>
+        <button class="rpc-tab" data-type="client">Client Streaming</button>
+        <button class="rpc-tab" data-type="bidi">Bidirectional</button>
+      </div>
+
+      <div class="rpc-viz-wrapper">
+        <div class="rpc-desc" id="rpcDesc"></div>
+        <div class="rpc-animation" id="rpcAnimation">
+          <div class="rpc-endpoint rpc-client-ep">
+            <div class="rpc-ep-label">Client</div>
+            <div class="rpc-ep-icon">📱</div>
+          </div>
+          <div class="rpc-channel" id="rpcChannel"></div>
+          <div class="rpc-endpoint rpc-server-ep">
+            <div class="rpc-ep-label">Server</div>
+            <div class="rpc-ep-icon">🖥️</div>
+          </div>
+        </div>
+        <div class="rpc-proto-example" id="rpcProtoExample"></div>
+      </div>
+
+      <button id="playRpcBtn" class="action-btn primary-btn" style="margin-top:16px">▶ Play Animation</button>
+    </section>
+
+    <!-- Channel & Connection Management -->
+    <section class="channel-section">
+      <h2>🔌 Channel & Connection Management</h2>
+      <p class="section-desc">A gRPC channel manages subchannels, each mapping to a backend. The load balancer picks which subchannel handles each RPC.</p>
+
+      <div class="channel-controls">
+        <div class="slider-group">
+          <label>Backend servers: <strong id="backendCountLabel">3</strong></label>
+          <input type="range" id="backendCountSlider" min="1" max="6" value="3">
+        </div>
+        <div class="strategy-group">
+          <label>LB Policy:</label>
+          <div class="strategy-buttons">
+            <button class="lb-btn active" data-lb="pick_first">pick_first</button>
+            <button class="lb-btn" data-lb="round_robin">round_robin</button>
+          </div>
+        </div>
+        <button id="sendRpcsBtn" class="action-btn primary-btn">📤 Send 12 RPCs</button>
+        <button id="killBackendBtn" class="action-btn danger-btn">💀 Kill Backend</button>
+      </div>
+
+      <div class="channel-viz" id="channelViz"></div>
+      <div class="channel-log" id="channelLog"></div>
+    </section>
+
+    <!-- Interceptors -->
+    <section class="interceptor-section">
+      <h2>🔗 Interceptor Chain</h2>
+      <p class="section-desc">Interceptors wrap RPC calls — for logging, auth, metrics, retries. They form a chain, each calling the next.</p>
+
+      <div class="interceptor-chain" id="interceptorChain"></div>
+      <button id="fireInterceptorBtn" class="action-btn primary-btn" style="margin-top:16px">▶ Fire RPC Through Chain</button>
+    </section>
+
+    <!-- Deadlines -->
+    <section class="deadline-section">
+      <h2>⏱️ Deadlines & Cancellation</h2>
+      <p class="section-desc">Deadlines propagate across service boundaries. If the remaining time is less than the next hop's expected latency, cancel early.</p>
+
+      <div class="deadline-controls">
+        <div class="slider-group">
+          <label>Initial deadline: <strong id="deadlineLabel">500</strong>ms</label>
+          <input type="range" id="deadlineSlider" min="100" max="2000" value="500" step="50">
+        </div>
+        <button id="startDeadlineBtn" class="action-btn primary-btn">▶ Send Request</button>
+        <button id="resetDeadlineBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="deadline-viz" id="deadlineViz"></div>
+      <div class="deadline-log" id="deadlineLog"></div>
+    </section>
+
+    <!-- Latency Comparison -->
+    <section class="latency-section">
+      <h2>📊 Latency: gRPC vs REST/JSON</h2>
+      <p class="section-desc">Compare serialization size and parsing time between Protobuf/gRPC and JSON/REST.</p>
+
+      <div class="latency-controls">
+        <div class="slider-group">
+          <label>Payload fields: <strong id="payloadFieldsLabel">10</strong></label>
+          <input type="range" id="payloadFieldsSlider" min="1" max="50" value="10">
+        </div>
+        <div class="slider-group">
+          <label>Requests: <strong id="requestCountLabel">100</strong></label>
+          <input type="range" id="requestCountSlider" min="10" max="1000" value="100" step="10">
+        </div>
+        <button id="runBenchBtn" class="action-btn primary-btn">▶ Run Benchmark</button>
+      </div>
+
+      <div class="latency-results" id="latencyResults"></div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why HTTP/2?</h3>
+          <p>
+            HTTP/1.1 suffers from <strong>head-of-line blocking</strong> — one slow response blocks all subsequent requests on that connection.
+            HTTP/2 multiplexes streams, so a slow RPC on stream 3 doesn't block stream 5.
+            Plus: header compression (HPACK), server push, and binary framing.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔢 Protobuf Wire Types</h3>
+          <p>
+            Each field is prefixed with a <em>tag byte</em>: <code>(field_number &lt;&lt; 3) | wire_type</code>.
+            Wire type 0 = varint (int32, bool), 1 = 64-bit (double), 2 = length-delimited (string, bytes, embedded messages), 5 = 32-bit (float).
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Connection States</h3>
+          <p>
+            A gRPC channel transitions through states: <code>IDLE</code> → <code>CONNECTING</code> →
+            <code>READY</code> → <code>TRANSIENT_FAILURE</code> → back to <code>CONNECTING</code>.
+            The <code>SHUTDOWN</code> state is terminal. Subchannels track individual backend health.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⏱️ Deadline Propagation</h3>
+          <p>
+            When Service A calls Service B with a 500ms deadline, and A already spent 100ms processing,
+            B receives <strong>400ms remaining</strong>. If B calls C, C gets even less.
+            Always set deadlines — without them, a stuck downstream can hold resources forever.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://grpc.io/docs/what-is-grpc/core-concepts/" target="_blank">gRPC Core Concepts</a> and <a href="https://protobuf.dev/programming-guides/encoding/" target="_blank">Protobuf Encoding Guide</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20gRPC%20Internals%20Visualizer&url=https://systeminternals.dev/grpc/internals/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/grpc/internals/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/grpc/internals/&t=Interactive%20gRPC%20Internals%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(139,92,246,0.05)); border: 1px solid rgba(6,182,212,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #06b6d4; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #06b6d4; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(6,182,212,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(139,92,246,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #06b6d4; cursor: pointer; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #06b6d4; }
+  .slider-group input[type="range"] { max-width: 400px; }
+
+  .strategy-group { margin-bottom: 16px; }
+  .strategy-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .strategy-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* Multiplex Section */
+  .multiplex-section { margin-bottom: 50px; }
+  .multiplex-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .protocol-toggle { display: flex; gap: 8px; }
+  .proto-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .proto-btn.active { border-color: #06b6d4; background: rgba(6,182,212,0.15); color: #06b6d4; font-weight: 600; }
+
+  .multiplex-viz { display: flex; align-items: center; gap: 0; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 200px; }
+  .multiplex-side { text-align: center; width: 80px; flex-shrink: 0; }
+  .endpoint-label { font-size: 0.8rem; color: #888; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; }
+  .conn-box { width: 60px; height: 60px; border-radius: 12px; background: rgba(6,182,212,0.15); border: 2px solid rgba(6,182,212,0.4); margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+  .multiplex-pipes { flex: 1; min-height: 160px; position: relative; overflow: hidden; }
+
+  .multiplex-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+  .stat-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 14px 20px; flex: 1; min-width: 140px; text-align: center; }
+  .stat-label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+  .stat-value { display: block; font-size: 1.1rem; font-weight: 700; color: #06b6d4; }
+
+  /* Frame Viewer */
+  .frame-section { margin-bottom: 50px; }
+  .frame-sequence { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; min-height: 60px; }
+  .frame-detail { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-height: 80px; }
+  .frame-detail-placeholder { color: #666; text-align: center; padding: 20px; }
+
+  /* Protobuf */
+  .protobuf-section { margin-bottom: 50px; }
+  .proto-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .proto-schema, .proto-output { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); }
+  .proto-schema h4, .proto-output h4 { color: #fff; font-size: 1rem; margin-bottom: 16px; }
+  .proto-field-row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+  .proto-type-sel { padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; }
+  .proto-type-sel option { background: #1a1a2e; }
+  .proto-field-name, .proto-field-val { padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; width: 80px; }
+  .proto-field-num { color: #06b6d4; font-size: 0.85rem; font-family: monospace; white-space: nowrap; }
+  .proto-hex { font-family: 'Monaco','Menlo',monospace; font-size: 0.9rem; word-break: break-all; margin-bottom: 16px; min-height: 30px; color: #06b6d4; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; }
+  .proto-breakdown { font-size: 0.85rem; color: #aaa; line-height: 1.8; }
+  .proto-size-compare { margin-top: 16px; padding: 12px; background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.2); border-radius: 8px; font-size: 0.85rem; color: #ccc; }
+
+  /* RPC Types */
+  .rpc-section { margin-bottom: 50px; }
+  .rpc-type-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .rpc-tab { padding: 10px 18px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; }
+  .rpc-tab.active { border-color: #8b5cf6; background: rgba(139,92,246,0.15); color: #a78bfa; font-weight: 600; }
+  .rpc-viz-wrapper { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); }
+  .rpc-desc { font-size: 0.95rem; color: #ccc; margin-bottom: 20px; line-height: 1.6; }
+  .rpc-animation { display: flex; align-items: center; gap: 0; min-height: 120px; position: relative; }
+  .rpc-endpoint { text-align: center; width: 80px; flex-shrink: 0; }
+  .rpc-ep-label { font-size: 0.8rem; color: #888; margin-bottom: 6px; font-weight: 600; }
+  .rpc-ep-icon { font-size: 2rem; }
+  .rpc-channel { flex: 1; height: 80px; position: relative; border-top: 2px dashed rgba(139,92,246,0.3); border-bottom: 2px dashed rgba(139,92,246,0.3); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .rpc-proto-example { margin-top: 16px; font-family: monospace; font-size: 0.85rem; color: #888; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; white-space: pre; overflow-x: auto; }
+
+  /* Channel Management */
+  .channel-section { margin-bottom: 50px; }
+  .channel-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .lb-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; font-family: monospace; }
+  .lb-btn.active { border-color: #06b6d4; background: rgba(6,182,212,0.15); color: #06b6d4; font-weight: 600; }
+  .channel-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; min-height: 120px; }
+  .channel-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; }
+
+  /* Interceptors */
+  .interceptor-section { margin-bottom: 50px; }
+  .interceptor-chain { display: flex; gap: 0; align-items: center; flex-wrap: wrap; min-height: 80px; }
+
+  /* Deadlines */
+  .deadline-section { margin-bottom: 50px; }
+  .deadline-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .deadline-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; min-height: 80px; }
+  .deadline-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; color: #aaa; }
+
+  /* Latency */
+  .latency-section { margin-bottom: 50px; }
+  .latency-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .latency-results { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #06b6d4; }
+  .explain-card em { color: #8b5cf6; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #06b6d4; }
+  .highlight-card { background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(139,92,246,0.08)); border-color: rgba(6,182,212,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #06b6d4; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @keyframes msgRight { from { left: 0; opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } to { left: calc(100% - 30px); opacity: 0; } }
+  @keyframes msgLeft { from { right: 0; opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } to { right: calc(100% - 30px); opacity: 0; } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 5px rgba(6,182,212,0.3); } 50% { box-shadow: 0 0 20px rgba(6,182,212,0.6); } }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .proto-editor { grid-template-columns: 1fr; }
+    .latency-results { grid-template-columns: 1fr; }
+    .multiplex-viz { flex-direction: column; min-height: auto; }
+    .multiplex-pipes { min-height: 200px; width: 100%; }
+  }
+</style>
+
+<script is:inline>
+  // ========== CONSTANTS ==========
+  var STREAM_COLORS = ['#06b6d4', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#f43f5e', '#3b82f6', '#84cc16'];
+
+  // ========== HTTP/2 MULTIPLEXING ==========
+  var currentProto = 'http2';
+  var rpcCount = 4;
+  var muxAnimRunning = false;
+
+  document.querySelectorAll('.proto-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.proto-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentProto = btn.getAttribute('data-proto');
+    });
+  });
+
+  document.getElementById('rpcCountSlider').addEventListener('input', function(e) {
+    rpcCount = parseInt(e.target.value);
+    document.getElementById('rpcCountLabel').textContent = rpcCount;
+  });
+
+  document.getElementById('startMultiplexBtn').addEventListener('click', function() {
+    if (muxAnimRunning) return;
+    muxAnimRunning = true;
+    var pipes = document.getElementById('multiplexPipes');
+    pipes.innerHTML = '';
+
+    var clientBox = document.getElementById('clientBox');
+    var serverBox = document.getElementById('serverBox');
+    clientBox.textContent = '📱';
+    serverBox.textContent = '🖥️';
+
+    if (currentProto === 'http2') {
+      // Single connection, multiple streams
+      var connLine = document.createElement('div');
+      connLine.style.cssText = 'position:absolute;top:50%;left:0;right:0;height:4px;background:linear-gradient(90deg,#06b6d4,#8b5cf6);border-radius:2px;transform:translateY(-50%);z-index:1;';
+      pipes.style.position = 'relative';
+      pipes.appendChild(connLine);
+
+      var connLabel = document.createElement('div');
+      connLabel.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:0.75rem;color:#06b6d4;white-space:nowrap;z-index:2;';
+      connLabel.textContent = '1 TCP connection, ' + rpcCount + ' streams';
+      pipes.appendChild(connLabel);
+
+      var totalTime = 0;
+      for (var i = 0; i < rpcCount; i++) {
+        (function(idx) {
+          var delay = idx * 150;
+          var duration = 800 + Math.random() * 600;
+          setTimeout(function() {
+            var msg = document.createElement('div');
+            var yOff = 30 + (idx % 4) * 25;
+            msg.style.cssText = 'position:absolute;top:' + yOff + 'px;width:24px;height:24px;border-radius:50%;background:' + STREAM_COLORS[idx % STREAM_COLORS.length] + ';z-index:3;font-size:0.65rem;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;animation:msgRight ' + duration + 'ms ease-in-out forwards;';
+            msg.textContent = 'S' + (idx + 1);
+            pipes.appendChild(msg);
+            if (delay + duration > totalTime) totalTime = delay + duration;
+          }, delay);
+        })(i);
+      }
+
+      setTimeout(function() {
+        document.getElementById('statConns').textContent = '1';
+        document.getElementById('statHol').textContent = 'No ✅';
+        document.getElementById('statTime').textContent = Math.round(totalTime) + 'ms';
+        muxAnimRunning = false;
+      }, totalTime + 200);
+
+    } else {
+      // HTTP/1.1: sequential or multiple connections
+      var perReq = 1000;
+      var maxConn = Math.min(rpcCount, 6);
+      var totalTime = 0;
+
+      for (var i = 0; i < Math.min(rpcCount, maxConn); i++) {
+        (function(idx) {
+          var yBase = 20 + idx * 28;
+          var line = document.createElement('div');
+          line.style.cssText = 'position:absolute;top:' + yBase + 'px;left:0;right:0;height:2px;background:rgba(255,255,255,0.15);z-index:1;';
+          pipes.style.position = 'relative';
+          pipes.appendChild(line);
+        })(i);
+      }
+
+      var queue = [];
+      for (var i = 0; i < rpcCount; i++) queue.push(i);
+      var connSlots = new Array(maxConn).fill(0);
+
+      function scheduleNext() {
+        if (queue.length === 0) return;
+        var minTime = Math.min.apply(null, connSlots);
+        var slotIdx = connSlots.indexOf(minTime);
+        var rpcIdx = queue.shift();
+        var startT = connSlots[slotIdx];
+        var dur = 800 + Math.random() * 400;
+        connSlots[slotIdx] = startT + dur;
+        if (connSlots[slotIdx] > totalTime) totalTime = connSlots[slotIdx];
+
+        setTimeout(function() {
+          var msg = document.createElement('div');
+          var yOff = 14 + slotIdx * 28;
+          msg.style.cssText = 'position:absolute;top:' + yOff + 'px;width:24px;height:24px;border-radius:50%;background:#f59e0b;z-index:3;font-size:0.65rem;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;animation:msgRight ' + dur + 'ms ease-in-out forwards;';
+          msg.textContent = 'R' + (rpcIdx + 1);
+          pipes.appendChild(msg);
+        }, startT);
+
+        scheduleNext();
+      }
+      scheduleNext();
+
+      setTimeout(function() {
+        document.getElementById('statConns').textContent = String(maxConn);
+        document.getElementById('statHol').textContent = rpcCount > maxConn ? 'Yes ⚠️' : 'Possible';
+        document.getElementById('statTime').textContent = Math.round(totalTime) + 'ms';
+        muxAnimRunning = false;
+      }, totalTime + 200);
+    }
+  });
+
+  document.getElementById('resetMultiplexBtn').addEventListener('click', function() {
+    muxAnimRunning = false;
+    document.getElementById('multiplexPipes').innerHTML = '';
+    document.getElementById('statConns').textContent = '—';
+    document.getElementById('statHol').textContent = '—';
+    document.getElementById('statTime').textContent = '—';
+  });
+
+  // ========== HTTP/2 FRAME VIEWER ==========
+  var grpcFrames = [
+    { type: 'HEADERS', stream: 1, label: 'HEADERS', color: '#06b6d4', detail: 'Stream 1 · Request Headers\n\n:method = POST\n:path = /grpc.UserService/GetUser\n:scheme = https\ncontent-type = application/grpc\nte = trailers\ngrpc-timeout = 500m\n\nCompressed via HPACK (saves ~60% vs HTTP/1.1 headers)' },
+    { type: 'DATA', stream: 1, label: 'DATA', color: '#8b5cf6', detail: 'Stream 1 · Request Body\n\n5-byte gRPC frame header:\n  [0] Compressed: 0 (no compression)\n  [1-4] Length: 00 00 00 07 (7 bytes)\n\nProtobuf payload (7 bytes):\n  08 96 01 — field 1 (int32): 150\n  12 02 — field 2 (string): length 2\n  ...\n\nTotal wire size: 12 bytes (vs ~45 bytes JSON)' },
+    { type: 'HEADERS', stream: 1, label: 'RESP HDR', color: '#10b981', detail: 'Stream 1 · Response Headers\n\n:status = 200\ncontent-type = application/grpc\n\nHTTP/2 allows response headers before the body.' },
+    { type: 'DATA', stream: 1, label: 'RESP DATA', color: '#f59e0b', detail: 'Stream 1 · Response Body\n\n5-byte gRPC frame header:\n  [0] Compressed: 0\n  [1-4] Length: 00 00 00 1a (26 bytes)\n\nProtobuf payload (26 bytes):\n  Response message with user data\n  Varint-encoded ints, length-prefixed strings' },
+    { type: 'HEADERS', stream: 1, label: 'TRAILERS', color: '#ec4899', detail: 'Stream 1 · Trailers\n\ngrpc-status = 0 (OK)\ngrpc-message = (empty — success)\n\nTrailers are HTTP/2 trailing headers,\nsent AFTER the response body.\nThis is how gRPC communicates status\n(not via HTTP status codes!).' },
+    { type: 'WINDOW', stream: 0, label: 'WINDOW_UPDATE', color: '#6b7280', detail: 'Stream 0 (connection-level)\n\nWindow Size Increment: 65535\n\nHTTP/2 flow control: the receiver tells\nthe sender how much more data it can accept.\nPrevents a fast sender from overwhelming\na slow receiver.' },
+  ];
+
+  function renderFrameViewer() {
+    var seq = document.getElementById('frameSequence');
+    seq.innerHTML = '';
+    grpcFrames.forEach(function(frame, i) {
+      var el = document.createElement('button');
+      el.style.cssText = 'padding:10px 16px;border:2px solid ' + frame.color + '44;border-radius:10px;background:' + frame.color + '15;color:' + frame.color + ';font-size:0.8rem;font-weight:700;cursor:pointer;transition:all 0.2s;font-family:monospace;';
+      el.textContent = frame.label;
+      el.addEventListener('mouseenter', function() { el.style.borderColor = frame.color; el.style.transform = 'translateY(-2px)'; });
+      el.addEventListener('mouseleave', function() { el.style.borderColor = frame.color + '44'; el.style.transform = 'none'; });
+      el.addEventListener('click', function() {
+        var detail = document.getElementById('frameDetail');
+        detail.innerHTML = '<pre style="color:#ccc;font-size:0.85rem;line-height:1.6;white-space:pre-wrap;margin:0;font-family:Monaco,Menlo,monospace;">' + frame.detail + '</pre>';
+        detail.style.borderColor = frame.color + '44';
+      });
+      seq.appendChild(el);
+
+      if (i < grpcFrames.length - 1) {
+        var arrow = document.createElement('span');
+        arrow.style.cssText = 'color:#444;font-size:1.2rem;';
+        arrow.textContent = '→';
+        seq.appendChild(arrow);
+      }
+    });
+  }
+  renderFrameViewer();
+
+  // ========== PROTOBUF ENCODER ==========
+  function encodeVarint(value) {
+    var bytes = [];
+    value = value >>> 0;
+    while (value > 127) {
+      bytes.push((value & 0x7f) | 0x80);
+      value = value >>> 7;
+    }
+    bytes.push(value & 0x7f);
+    return bytes;
+  }
+
+  function encodeProtoField(fieldNum, type, value) {
+    var wireType, encoded = [], breakdown = '';
+    if (type === 'int32') {
+      wireType = 0;
+      var tag = (fieldNum << 3) | wireType;
+      var tagBytes = encodeVarint(tag);
+      var val = parseInt(value) || 0;
+      var valBytes = encodeVarint(val);
+      encoded = tagBytes.concat(valBytes);
+      breakdown = 'Tag: ' + tagBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (field ' + fieldNum + ', varint) | Value: ' + valBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (' + val + ')';
+    } else if (type === 'string') {
+      wireType = 2;
+      var tag = (fieldNum << 3) | wireType;
+      var tagBytes = encodeVarint(tag);
+      var strBytes = [];
+      for (var i = 0; i < value.length; i++) strBytes.push(value.charCodeAt(i));
+      var lenBytes = encodeVarint(strBytes.length);
+      encoded = tagBytes.concat(lenBytes).concat(strBytes);
+      breakdown = 'Tag: ' + tagBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (field ' + fieldNum + ', length-delimited) | Len: ' + lenBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (' + strBytes.length + ') | Data: "' + value + '"';
+    } else if (type === 'bool') {
+      wireType = 0;
+      var tag = (fieldNum << 3) | wireType;
+      var tagBytes = encodeVarint(tag);
+      var boolVal = (value === 'true' || value === '1') ? 1 : 0;
+      encoded = tagBytes.concat([boolVal]);
+      breakdown = 'Tag: ' + tagBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (field ' + fieldNum + ', varint) | Value: 0' + boolVal + ' (' + (boolVal ? 'true' : 'false') + ')';
+    } else if (type === 'double') {
+      wireType = 1;
+      var tag = (fieldNum << 3) | wireType;
+      var tagBytes = encodeVarint(tag);
+      var buf = new ArrayBuffer(8);
+      new Float64Array(buf)[0] = parseFloat(value) || 0;
+      var view = new Uint8Array(buf);
+      encoded = tagBytes.concat(Array.from(view));
+      breakdown = 'Tag: ' + tagBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ') + ' (field ' + fieldNum + ', 64-bit) | Value: 8 bytes (' + value + ')';
+    }
+    return { bytes: encoded, breakdown: breakdown };
+  }
+
+  function updateProtoEncoding() {
+    var rows = document.querySelectorAll('.proto-field-row');
+    var allBytes = [];
+    var breakdowns = [];
+    var jsonObj = {};
+
+    rows.forEach(function(row, idx) {
+      var type = row.querySelector('.proto-type-sel').value;
+      var name = row.querySelector('.proto-field-name').value || ('field' + (idx + 1));
+      var val = row.querySelector('.proto-field-val').value;
+      var fieldNum = idx + 1;
+      row.querySelector('.proto-field-num').textContent = '= ' + fieldNum;
+
+      if (val) {
+        var result = encodeProtoField(fieldNum, type, val);
+        allBytes = allBytes.concat(result.bytes);
+        breakdowns.push('<div style="margin-bottom:8px;"><span style="color:#06b6d4;font-weight:600;">' + name + '</span> (' + type + '): ' + result.breakdown + '</div>');
+        jsonObj[name] = type === 'int32' ? parseInt(val) : type === 'bool' ? (val === 'true') : type === 'double' ? parseFloat(val) : val;
+      }
+    });
+
+    var hexStr = allBytes.map(function(b) { return b.toString(16).padStart(2, '0'); }).join(' ');
+    document.getElementById('protoHex').textContent = hexStr || '(no data)';
+    document.getElementById('protoBreakdown').innerHTML = breakdowns.join('') || '<div style="color:#666;">Add field values to see encoding</div>';
+
+    var jsonStr = JSON.stringify(jsonObj);
+    var protoSize = allBytes.length;
+    var jsonSize = jsonStr.length;
+    var saving = jsonSize > 0 ? Math.round((1 - protoSize / jsonSize) * 100) : 0;
+    document.getElementById('protoSizeCompare').innerHTML = '<strong>Protobuf:</strong> ' + protoSize + ' bytes vs <strong>JSON:</strong> ' + jsonSize + ' bytes — <span style="color:#06b6d4;font-weight:700;">' + saving + '% smaller</span>';
+  }
+
+  document.getElementById('protoFields').addEventListener('input', updateProtoEncoding);
+  document.getElementById('protoFields').addEventListener('change', updateProtoEncoding);
+
+  document.getElementById('addProtoFieldBtn').addEventListener('click', function() {
+    var container = document.getElementById('protoFields');
+    var count = container.querySelectorAll('.proto-field-row').length;
+    if (count >= 8) return;
+    var row = document.createElement('div');
+    row.className = 'proto-field-row';
+    row.setAttribute('data-idx', count);
+    row.innerHTML = '<select class="proto-type-sel"><option value="int32">int32</option><option value="string">string</option><option value="bool">bool</option><option value="double">double</option></select><input type="text" class="proto-field-name" value="field' + (count + 1) + '" placeholder="field name"><span class="proto-field-num">= ' + (count + 1) + '</span><input type="text" class="proto-field-val" value="" placeholder="value">';
+    container.appendChild(row);
+    updateProtoEncoding();
+  });
+
+  updateProtoEncoding();
+
+  // ========== 4 RPC TYPES ==========
+  var rpcType = 'unary';
+  var rpcDescs = {
+    unary: '<strong>Unary RPC:</strong> Client sends one request, server returns one response. The simplest pattern — like a function call. Used for most CRUD operations.',
+    server: '<strong>Server Streaming:</strong> Client sends one request, server returns a stream of responses. Great for feeds, real-time updates, or large result sets.',
+    client: '<strong>Client Streaming:</strong> Client sends a stream of messages, server returns one response after processing all. Used for uploads, aggregation, or batch processing.',
+    bidi: '<strong>Bidirectional Streaming:</strong> Both sides send streams independently. Messages can be interleaved freely. Used for chat, real-time collaboration, or pipeline processing.'
+  };
+  var rpcProtos = {
+    unary: 'service UserService {\n  rpc GetUser (GetUserRequest) returns (User);\n}\n\nmessage GetUserRequest { int32 id = 1; }\nmessage User { int32 id = 1; string name = 2; }',
+    server: 'service StockService {\n  rpc WatchPrice (WatchRequest) returns (stream PriceUpdate);\n}\n\nmessage WatchRequest { string symbol = 1; }\nmessage PriceUpdate { double price = 1; int64 timestamp = 2; }',
+    client: 'service UploadService {\n  rpc Upload (stream Chunk) returns (UploadResult);\n}\n\nmessage Chunk { bytes data = 1; int32 offset = 2; }\nmessage UploadResult { string url = 1; int64 size = 2; }',
+    bidi: 'service ChatService {\n  rpc Chat (stream ChatMessage) returns (stream ChatMessage);\n}\n\nmessage ChatMessage { string user = 1; string text = 2; }'
+  };
+
+  function updateRpcView() {
+    document.getElementById('rpcDesc').innerHTML = rpcDescs[rpcType];
+    document.getElementById('rpcProtoExample').textContent = rpcProtos[rpcType];
+    document.getElementById('rpcChannel').innerHTML = '';
+  }
+
+  document.querySelectorAll('.rpc-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.rpc-tab').forEach(function(t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      rpcType = tab.getAttribute('data-type');
+      updateRpcView();
+    });
+  });
+
+  document.getElementById('playRpcBtn').addEventListener('click', function() {
+    var channel = document.getElementById('rpcChannel');
+    channel.innerHTML = '';
+
+    function createMsg(text, direction, color, delay) {
+      setTimeout(function() {
+        var msg = document.createElement('div');
+        var isRight = direction === 'right';
+        msg.style.cssText = 'position:absolute;' + (isRight ? 'left:0;' : 'right:0;') + 'top:50%;transform:translateY(-50%);padding:4px 10px;border-radius:12px;background:' + color + ';color:#fff;font-size:0.7rem;font-weight:600;white-space:nowrap;z-index:2;animation:msg' + (isRight ? 'Right' : 'Left') + ' 1s ease-in-out forwards;';
+        msg.textContent = text;
+        channel.appendChild(msg);
+      }, delay);
+    }
+
+    if (rpcType === 'unary') {
+      createMsg('Request', 'right', '#06b6d4', 0);
+      createMsg('Response', 'left', '#10b981', 1200);
+    } else if (rpcType === 'server') {
+      createMsg('Request', 'right', '#06b6d4', 0);
+      createMsg('Resp 1', 'left', '#10b981', 1200);
+      createMsg('Resp 2', 'left', '#8b5cf6', 1800);
+      createMsg('Resp 3', 'left', '#ec4899', 2400);
+      createMsg('Resp 4', 'left', '#f59e0b', 3000);
+    } else if (rpcType === 'client') {
+      createMsg('Chunk 1', 'right', '#06b6d4', 0);
+      createMsg('Chunk 2', 'right', '#8b5cf6', 600);
+      createMsg('Chunk 3', 'right', '#ec4899', 1200);
+      createMsg('Chunk 4', 'right', '#f59e0b', 1800);
+      createMsg('Result', 'left', '#10b981', 3000);
+    } else {
+      createMsg('Hi!', 'right', '#06b6d4', 0);
+      createMsg('Hello!', 'left', '#10b981', 500);
+      createMsg('How are you?', 'right', '#8b5cf6', 1200);
+      createMsg("I'm great!", 'left', '#ec4899', 1700);
+      createMsg('Bye!', 'right', '#f59e0b', 2500);
+      createMsg('See ya!', 'left', '#f43f5e', 3000);
+    }
+  });
+
+  updateRpcView();
+
+  // ========== CHANNEL & LB ==========
+  var backendCount = 3;
+  var lbPolicy = 'pick_first';
+  var backends = [];
+  var rrIndex = 0;
+
+  function initBackends() {
+    backends = [];
+    for (var i = 0; i < backendCount; i++) {
+      backends.push({ name: 'backend-' + i, port: 50051 + i, alive: true, rpcs: 0 });
+    }
+    rrIndex = 0;
+  }
+
+  function renderChannel() {
+    var viz = document.getElementById('channelViz');
+    viz.innerHTML = '';
+    var html = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">';
+    html += '<div style="padding:10px 16px;border-radius:10px;background:rgba(6,182,212,0.15);border:2px solid rgba(6,182,212,0.4);font-size:0.85rem;color:#06b6d4;font-weight:600;">Channel<br><span style="font-size:0.7rem;color:#888;">LB: ' + lbPolicy + '</span></div>';
+    html += '<span style="color:#444;font-size:1.5rem;">→</span>';
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;">';
+    backends.forEach(function(b, i) {
+      var borderColor = b.alive ? (lbPolicy === 'pick_first' && i === 0 ? '#06b6d4' : 'rgba(255,255,255,0.2)') : '#ef4444';
+      var bg = b.alive ? (lbPolicy === 'pick_first' && i === 0 ? 'rgba(6,182,212,0.1)' : 'rgba(255,255,255,0.03)') : 'rgba(239,68,68,0.1)';
+      html += '<div style="padding:12px 16px;border-radius:10px;border:2px solid ' + borderColor + ';background:' + bg + ';text-align:center;min-width:90px;">';
+      html += '<div style="font-size:0.8rem;font-weight:700;color:' + (b.alive ? '#fff' : '#ef4444') + ';">' + b.name + '</div>';
+      html += '<div style="font-size:0.7rem;color:#888;">:' + b.port + '</div>';
+      html += '<div style="font-size:0.7rem;color:' + (b.alive ? '#10b981' : '#ef4444') + ';margin-top:4px;">' + (b.alive ? 'READY' : 'DEAD') + '</div>';
+      html += '<div style="font-size:0.75rem;color:#06b6d4;margin-top:4px;">' + b.rpcs + ' RPCs</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+    viz.innerHTML = html;
+  }
+
+  function addChannelLog(text) {
+    var log = document.getElementById('channelLog');
+    var el = document.createElement('div');
+    el.style.cssText = 'padding:3px 0;color:#aaa;animation:fadeIn 0.3s ease-out;';
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('backendCountSlider').addEventListener('input', function(e) {
+    backendCount = parseInt(e.target.value);
+    document.getElementById('backendCountLabel').textContent = backendCount;
+    initBackends();
+    renderChannel();
+  });
+
+  document.querySelectorAll('.lb-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.lb-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      lbPolicy = btn.getAttribute('data-lb');
+      backends.forEach(function(b) { b.rpcs = 0; });
+      rrIndex = 0;
+      renderChannel();
+      addChannelLog('LB policy changed to ' + lbPolicy);
+    });
+  });
+
+  document.getElementById('sendRpcsBtn').addEventListener('click', function() {
+    var count = 12;
+    for (var i = 0; i < count; i++) {
+      var aliveBackends = backends.filter(function(b) { return b.alive; });
+      if (aliveBackends.length === 0) { addChannelLog('ERROR: No alive backends!'); break; }
+      if (lbPolicy === 'pick_first') {
+        aliveBackends[0].rpcs++;
+      } else {
+        var target = aliveBackends[rrIndex % aliveBackends.length];
+        target.rpcs++;
+        rrIndex++;
+      }
+    }
+    renderChannel();
+    addChannelLog('Sent ' + count + ' RPCs via ' + lbPolicy);
+    if (lbPolicy === 'pick_first') {
+      addChannelLog('All RPCs went to ' + backends.filter(function(b) { return b.alive; })[0].name + ' (pick_first always uses first ready subchannel)');
+    } else {
+      addChannelLog('RPCs distributed across ' + backends.filter(function(b) { return b.alive; }).length + ' backends (round_robin)');
+    }
+  });
+
+  document.getElementById('killBackendBtn').addEventListener('click', function() {
+    var alive = backends.filter(function(b) { return b.alive; });
+    if (alive.length <= 1) { addChannelLog('Cannot kill last backend!'); return; }
+    var victim = alive[alive.length - 1];
+    victim.alive = false;
+    renderChannel();
+    addChannelLog('💀 ' + victim.name + ' killed! Subchannel → TRANSIENT_FAILURE');
+    addChannelLog('Channel will retry connecting with exponential backoff');
+  });
+
+  initBackends();
+  renderChannel();
+
+  // ========== INTERCEPTORS ==========
+  var interceptors = [
+    { name: 'Logging', color: '#06b6d4', desc: 'Logs method, duration, status' },
+    { name: 'Auth', color: '#8b5cf6', desc: 'Attaches JWT token to metadata' },
+    { name: 'Metrics', color: '#10b981', desc: 'Records latency histogram' },
+    { name: 'Retry', color: '#f59e0b', desc: 'Retries on UNAVAILABLE status' },
+  ];
+
+  function renderInterceptors(activeIdx) {
+    var chain = document.getElementById('interceptorChain');
+    chain.innerHTML = '';
+    var html = '<div style="padding:10px 16px;border-radius:10px;background:rgba(6,182,212,0.15);border:2px solid rgba(6,182,212,0.4);font-size:0.8rem;color:#06b6d4;font-weight:600;text-align:center;">Client<br>Call</div>';
+
+    interceptors.forEach(function(ic, i) {
+      html += '<div style="color:#444;font-size:1.2rem;padding:0 4px;">→</div>';
+      var isActive = activeIdx === i;
+      var glow = isActive ? 'box-shadow:0 0 15px ' + ic.color + '66;transform:scale(1.05);' : '';
+      html += '<div style="padding:10px 14px;border-radius:10px;border:2px solid ' + ic.color + (isActive ? '' : '44') + ';background:' + ic.color + (isActive ? '25' : '10') + ';text-align:center;transition:all 0.3s;' + glow + '">';
+      html += '<div style="font-size:0.8rem;font-weight:700;color:' + ic.color + ';">' + ic.name + '</div>';
+      html += '<div style="font-size:0.65rem;color:#888;margin-top:2px;">' + ic.desc + '</div>';
+      html += '</div>';
+    });
+
+    html += '<div style="color:#444;font-size:1.2rem;padding:0 4px;">→</div>';
+    var serverActive = activeIdx === interceptors.length;
+    html += '<div style="padding:10px 16px;border-radius:10px;background:' + (serverActive ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.1)') + ';border:2px solid ' + (serverActive ? '#10b981' : 'rgba(16,185,129,0.4)') + ';font-size:0.8rem;color:#10b981;font-weight:600;text-align:center;' + (serverActive ? 'box-shadow:0 0 15px rgba(16,185,129,0.4);' : '') + '">Server<br>Handler</div>';
+
+    chain.innerHTML = html;
+  }
+
+  document.getElementById('fireInterceptorBtn').addEventListener('click', function() {
+    var idx = -1;
+    var total = interceptors.length + 1;
+    function step() {
+      idx++;
+      if (idx <= total) {
+        renderInterceptors(idx < total ? idx : -1);
+        setTimeout(step, 600);
+      } else {
+        // Return path
+        var retIdx = interceptors.length - 1;
+        function retStep() {
+          renderInterceptors(retIdx);
+          retIdx--;
+          if (retIdx >= -1) {
+            setTimeout(retStep, 400);
+          } else {
+            setTimeout(function() { renderInterceptors(-1); }, 400);
+          }
+        }
+        retStep();
+      }
+    }
+    step();
+  });
+
+  renderInterceptors(-1);
+
+  // ========== DEADLINES ==========
+  var deadlineMs = 500;
+  var services = [
+    { name: 'API Gateway', latency: 50 },
+    { name: 'User Service', latency: 120 },
+    { name: 'Auth Service', latency: 80 },
+    { name: 'Database', latency: 200 },
+  ];
+
+  document.getElementById('deadlineSlider').addEventListener('input', function(e) {
+    deadlineMs = parseInt(e.target.value);
+    document.getElementById('deadlineLabel').textContent = deadlineMs;
+  });
+
+  function renderDeadlineViz(states) {
+    var viz = document.getElementById('deadlineViz');
+    var html = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+    services.forEach(function(svc, i) {
+      var state = states ? states[i] : null;
+      var borderColor = !state ? 'rgba(255,255,255,0.2)' : state.status === 'ok' ? '#10b981' : state.status === 'timeout' ? '#ef4444' : '#f59e0b';
+      var bg = !state ? 'rgba(255,255,255,0.03)' : state.status === 'ok' ? 'rgba(16,185,129,0.1)' : state.status === 'timeout' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)';
+
+      html += '<div style="padding:12px 14px;border-radius:10px;border:2px solid ' + borderColor + ';background:' + bg + ';text-align:center;min-width:100px;flex:1;">';
+      html += '<div style="font-size:0.8rem;font-weight:700;color:#fff;">' + svc.name + '</div>';
+      html += '<div style="font-size:0.7rem;color:#888;margin-top:4px;">~' + svc.latency + 'ms</div>';
+      if (state) {
+        html += '<div style="font-size:0.7rem;color:' + borderColor + ';margin-top:4px;">' + state.remaining + 'ms left</div>';
+        if (state.status === 'timeout') html += '<div style="font-size:0.65rem;color:#ef4444;">DEADLINE_EXCEEDED</div>';
+        if (state.status === 'cancelled') html += '<div style="font-size:0.65rem;color:#f59e0b;">CANCELLED</div>';
+      }
+      html += '</div>';
+
+      if (i < services.length - 1) {
+        html += '<div style="color:#444;font-size:1.2rem;">→</div>';
+      }
+    });
+    html += '</div>';
+
+    // Timeline bar
+    html += '<div style="margin-top:16px;height:24px;background:rgba(255,255,255,0.05);border-radius:6px;position:relative;overflow:hidden;">';
+    var elapsed = 0;
+    if (states) {
+      services.forEach(function(svc, i) {
+        var w = (svc.latency / deadlineMs * 100);
+        var color = states[i].status === 'ok' ? '#10b981' : '#ef4444';
+        html += '<div style="position:absolute;left:' + (elapsed / deadlineMs * 100) + '%;width:' + w + '%;height:100%;background:' + color + '33;border-right:2px solid ' + color + ';"></div>';
+        elapsed += svc.latency;
+      });
+    }
+    html += '<div style="position:absolute;left:100%;top:0;height:100%;border-left:2px dashed #ef4444;"></div>';
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#888;margin-top:4px;"><span>0ms</span><span>' + deadlineMs + 'ms (deadline)</span></div>';
+
+    viz.innerHTML = html;
+  }
+
+  document.getElementById('startDeadlineBtn').addEventListener('click', function() {
+    var log = document.getElementById('deadlineLog');
+    log.innerHTML = '';
+    var remaining = deadlineMs;
+    var states = [];
+
+    function addDLog(text, color) {
+      var el = document.createElement('div');
+      el.style.cssText = 'padding:3px 0;color:' + (color || '#aaa') + ';animation:fadeIn 0.3s ease-out;';
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    var i = 0;
+    function processService() {
+      if (i >= services.length) {
+        addDLog('✅ All services responded within deadline!', '#10b981');
+        renderDeadlineViz(states);
+        return;
+      }
+      var svc = services[i];
+      var state = { remaining: remaining, status: 'ok' };
+
+      if (remaining <= 0) {
+        state.status = 'cancelled';
+        state.remaining = 0;
+        states.push(state);
+        addDLog('⚠️ ' + svc.name + ': CANCELLED (no time remaining)', '#f59e0b');
+        i++;
+        renderDeadlineViz(states);
+        processService();
+        return;
+      }
+
+      if (svc.latency > remaining) {
+        state.status = 'timeout';
+        state.remaining = remaining;
+        states.push(state);
+        addDLog('❌ ' + svc.name + ': DEADLINE_EXCEEDED (' + svc.latency + 'ms needed, only ' + remaining + 'ms left)', '#ef4444');
+        // Cancel remaining
+        i++;
+        for (var j = i; j < services.length; j++) {
+          states.push({ remaining: 0, status: 'cancelled' });
+          addDLog('⚠️ ' + services[j].name + ': CANCELLED (upstream timeout)', '#f59e0b');
+        }
+        renderDeadlineViz(states);
+        return;
+      }
+
+      remaining -= svc.latency;
+      state.remaining = remaining;
+      states.push(state);
+      addDLog('✅ ' + svc.name + ': OK (' + svc.latency + 'ms, ' + remaining + 'ms remaining)', '#10b981');
+      renderDeadlineViz(states);
+      i++;
+      setTimeout(processService, 500);
+    }
+
+    addDLog('📤 Sending request with ' + deadlineMs + 'ms deadline...', '#06b6d4');
+    setTimeout(processService, 300);
+  });
+
+  document.getElementById('resetDeadlineBtn').addEventListener('click', function() {
+    renderDeadlineViz(null);
+    document.getElementById('deadlineLog').innerHTML = '';
+  });
+
+  renderDeadlineViz(null);
+
+  // ========== LATENCY COMPARISON ==========
+  document.getElementById('payloadFieldsSlider').addEventListener('input', function(e) {
+    document.getElementById('payloadFieldsLabel').textContent = e.target.value;
+  });
+  document.getElementById('requestCountSlider').addEventListener('input', function(e) {
+    document.getElementById('requestCountLabel').textContent = e.target.value;
+  });
+
+  document.getElementById('runBenchBtn').addEventListener('click', function() {
+    var fields = parseInt(document.getElementById('payloadFieldsSlider').value);
+    var requests = parseInt(document.getElementById('requestCountSlider').value);
+
+    // Simulate sizes
+    var protoFieldAvg = 5; // ~5 bytes per field average
+    var jsonFieldAvg = 22; // "fieldName": "value", average
+    var protoSize = fields * protoFieldAvg;
+    var jsonSize = 2 + fields * jsonFieldAvg; // {} wrapper
+
+    // Simulate parse times (microseconds)
+    var protoParseUs = fields * 0.3;
+    var jsonParseUs = fields * 2.5;
+
+    // Total times for all requests
+    var protoTotalMs = (protoParseUs * requests / 1000).toFixed(1);
+    var jsonTotalMs = (jsonParseUs * requests / 1000).toFixed(1);
+
+    var protoBandwidth = (protoSize * requests / 1024).toFixed(1);
+    var jsonBandwidth = (jsonSize * requests / 1024).toFixed(1);
+
+    var results = document.getElementById('latencyResults');
+    results.innerHTML = '';
+
+    function makeCard(title, color, items) {
+      var html = '<div style="background:rgba(0,0,0,0.2);border-radius:14px;padding:20px;border:2px solid ' + color + '33;">';
+      html += '<h4 style="color:' + color + ';font-size:1rem;margin-bottom:14px;">' + title + '</h4>';
+      items.forEach(function(item) {
+        html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">';
+        html += '<span style="color:#888;font-size:0.85rem;">' + item.label + '</span>';
+        html += '<span style="color:#fff;font-weight:600;font-size:0.85rem;">' + item.value + '</span>';
+        html += '</div>';
+      });
+      // Bar
+      var pct = title.indexOf('Protobuf') >= 0 ? 30 : 100;
+      html += '<div style="margin-top:12px;height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:4px;transition:width 0.5s;"></div></div>';
+      html += '</div>';
+      return html;
+    }
+
+    results.innerHTML = makeCard('⚡ gRPC + Protobuf', '#06b6d4', [
+      { label: 'Message size', value: protoSize + ' bytes' },
+      { label: 'Parse time (per msg)', value: protoParseUs.toFixed(1) + ' μs' },
+      { label: 'Total parse (' + requests + ' reqs)', value: protoTotalMs + ' ms' },
+      { label: 'Bandwidth', value: protoBandwidth + ' KB' },
+      { label: 'HTTP overhead', value: 'Multiplexed (shared conn)' },
+    ]) + makeCard('🐌 REST + JSON', '#f59e0b', [
+      { label: 'Message size', value: jsonSize + ' bytes' },
+      { label: 'Parse time (per msg)', value: jsonParseUs.toFixed(1) + ' μs' },
+      { label: 'Total parse (' + requests + ' reqs)', value: jsonTotalMs + ' ms' },
+      { label: 'Bandwidth', value: jsonBandwidth + ' KB' },
+      { label: 'HTTP overhead', value: 'Per-request headers + TCP' },
+    ]);
+  });
+</script>

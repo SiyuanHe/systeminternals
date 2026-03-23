@@ -1,0 +1,1839 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="DynamoDB Partitioning & Adaptive Capacity"
+  description="Interactive visualization of DynamoDB hash partitioning, auto-splits, adaptive capacity, burst capacity, and throughput allocation"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "DynamoDB", href: "/dynamodb/" },
+    { label: "Partitioning", href: "/dynamodb/partitioning/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>⚡ Partitioning &amp; Adaptive Capacity</h1>
+    <p class="subtitle">How DynamoDB Distributes Data and Eliminates Hot Partitions</p>
+  </header>
+
+  <!-- Overview -->
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        DynamoDB uses <strong>hash partitioning</strong> to distribute items across storage nodes. Each item's
+        <em>partition key</em> is hashed to determine which partition stores it. When a partition grows too large
+        (&gt;10 GB) or too hot (exceeds throughput), DynamoDB <strong>automatically splits</strong> it. Since 2018,
+        <em>adaptive capacity</em> ensures hot partitions borrow unused throughput from cold ones — eliminating the
+        classic hot partition problem. Unused throughput is <strong>banked for 5 minutes</strong> as burst capacity.
+      </p>
+    </div>
+  </section>
+
+  <!-- Partition Key Hashing -->
+  <section class="flow-section">
+    <h2>🔑 Partition Key Hashing</h2>
+    <p class="section-desc">Type a partition key to see which partition it maps to. Items with the same partition key always land in the same partition.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <input type="text" id="keyInput" placeholder="Type a partition key (e.g. user-1001, order-5522)" class="key-input" autocomplete="off">
+        <button id="hashBtn" class="action-btn primary-btn">Hash</button>
+      </div>
+      <div class="calc-result" id="calcResult"></div>
+      <div class="calc-formula" id="calcFormula"></div>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="partitionCanvas" width="820" height="340"></canvas>
+    </div>
+    <div class="partition-legend" id="partitionLegend"></div>
+  </section>
+
+  <!-- Partition Map: Insert & Split -->
+  <section class="flow-section">
+    <h2>📦 Partition Map &amp; Auto-Split</h2>
+    <p class="section-desc">Insert items and watch partitions fill up. When a partition exceeds its capacity, DynamoDB automatically splits it into two.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Initial Partitions: <strong id="partCountLabel">4</strong></label>
+        <input type="range" id="partSlider" min="2" max="8" value="4" class="slot-slider">
+      </div>
+      <button id="insertRandomBtn" class="action-btn primary-btn">➕ Insert 10 Items</button>
+      <button id="insertHotBtn" class="action-btn kill-btn">🔥 Insert Hot Key (x50)</button>
+      <button id="resetPartBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="splitStatus">
+      <span class="status-badge idle" id="splitBadge">Ready</span>
+      <span class="status-text" id="splitStatusText">Insert items to see partitions fill and auto-split</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="splitCanvas" width="820" height="400"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="splitTimeline"></div>
+  </section>
+
+  <!-- Explain: Partition Splits -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📏 Size-Based Splits</h3>
+        <p>
+          Each partition can hold up to <strong>10 GB</strong> of data. When a partition approaches this limit,
+          DynamoDB splits it into two new partitions, redistributing the hash range. The split happens
+          <em>transparently</em> — your application never sees it. The old partition's token range is divided
+          at the midpoint.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔥 Throughput-Based Splits</h3>
+        <p>
+          If a partition consistently receives more than <strong>3,000 RCU or 1,000 WCU</strong>, DynamoDB
+          may split it to spread the load. After adaptive capacity (2018), this is less aggressive —
+          the system first tries to <em>borrow throughput</em> from underutilized partitions before splitting.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Adaptive Capacity -->
+  <section class="flow-section">
+    <h2>🧠 Adaptive Capacity</h2>
+    <p class="section-desc">Hot partitions automatically borrow unused throughput from cold ones. No more throttling from uneven access patterns.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Table WCU: <strong id="wcuLabel">400</strong></label>
+        <input type="range" id="wcuSlider" min="100" max="1000" step="100" value="400" class="slot-slider">
+      </div>
+      <button id="startAdaptiveBtn" class="action-btn primary-btn">▶ Simulate</button>
+      <button id="resetAdaptiveBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="adaptiveCanvas" width="820" height="380"></canvas>
+    </div>
+
+    <div class="adaptive-info" id="adaptiveInfo">
+      Click "Simulate" to watch adaptive capacity reallocate throughput in real-time
+    </div>
+  </section>
+
+  <!-- Explain: Adaptive Capacity -->
+  <section class="explain-section">
+    <div class="explain-card highlight-card">
+      <h3>💡 The End of Hot Partitions</h3>
+      <p>
+        Before 2018, DynamoDB divided table throughput <strong>evenly</strong> across partitions. A table with
+        400 WCU and 4 partitions gave each partition exactly 100 WCU. If one partition got 200 writes/sec, it was
+        <em>throttled</em> — even though the table had 200 WCU sitting idle on cold partitions. <strong>Adaptive
+        capacity</strong> fixed this: hot partitions can now use up to the <em>entire table throughput</em>,
+        borrowing from cold partitions instantly. Combined with <strong>burst capacity</strong> (5 minutes of
+        banked unused throughput), throttling from uneven access is essentially eliminated.
+      </p>
+    </div>
+  </section>
+
+  <!-- Burst Capacity -->
+  <section class="flow-section">
+    <h2>⏱ Burst Capacity</h2>
+    <p class="section-desc">Unused throughput is banked for up to 5 minutes. Watch the burst bucket fill and drain during traffic spikes.</p>
+
+    <div class="flow-controls">
+      <button id="startBurstBtn" class="action-btn primary-btn">▶ Simulate</button>
+      <button id="resetBurstBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="burstCanvas" width="820" height="300"></canvas>
+    </div>
+
+    <div class="burst-info" id="burstInfo">
+      Click "Simulate" to watch burst capacity bank and spend unused throughput
+    </div>
+  </section>
+
+  <!-- RCU/WCU Allocation -->
+  <section class="flow-section">
+    <h2>📊 Provisioned vs On-Demand</h2>
+    <p class="section-desc">Compare how throughput is allocated under provisioned mode (with auto-scaling) vs on-demand mode.</p>
+
+    <div class="flow-controls">
+      <label class="toggle-label">
+        <input type="checkbox" id="modeToggle">
+        <span class="toggle-switch"></span>
+        <span>On-Demand Mode</span>
+      </label>
+      <button id="startModeBtn" class="action-btn primary-btn">▶ Simulate Traffic</button>
+      <button id="resetModeBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="modeCanvas" width="820" height="320"></canvas>
+    </div>
+
+    <div class="mode-info" id="modeInfo">
+      Choose a mode and simulate a realistic traffic pattern with spikes
+    </div>
+  </section>
+
+  <!-- Explain: On-Demand vs Provisioned -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📋 Provisioned Mode</h3>
+        <p>
+          You specify <strong>RCU and WCU</strong> per table. Auto-scaling watches CloudWatch metrics and adjusts
+          capacity with a <em>2-minute cooldown</em>. Good for <strong>predictable workloads</strong> — cheaper
+          than on-demand when you can estimate traffic. Downside: sudden spikes hit before auto-scaling reacts.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>⚡ On-Demand Mode</h3>
+        <p>
+          DynamoDB <strong>instantly</strong> accommodates up to <em>2x the previous peak</em> traffic. No capacity
+          planning needed. You pay per request (~5x more expensive per unit than provisioned). Ideal for
+          <strong>unpredictable workloads</strong>, new tables, or when you'd rather pay more than get throttled.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- GSI & LSI -->
+  <section class="flow-section">
+    <h2>🗂 GSI &amp; LSI Partitioning</h2>
+    <p class="section-desc">Global Secondary Indexes are separate tables with their own partitions. Local Secondary Indexes share the base table's partition.</p>
+
+    <div class="flow-controls">
+      <button id="showGsiBtn" class="action-btn primary-btn">Show GSI</button>
+      <button id="showLsiBtn" class="action-btn step-btn">Show LSI</button>
+      <button id="resetIndexBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="indexCanvas" width="820" height="420"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="indexTimeline"></div>
+  </section>
+
+  <!-- Explain: GSI vs LSI -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>🌐 Global Secondary Index</h3>
+        <p>
+          A GSI is essentially a <strong>separate DynamoDB table</strong> maintained by the system. It has its own
+          partition key (and optional sort key), its own partitions, and its own throughput. Writes to the base
+          table are <em>asynchronously replicated</em> to the GSI. This means GSIs are <strong>eventually
+          consistent</strong> — you cannot do strongly consistent reads on a GSI.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📌 Local Secondary Index</h3>
+        <p>
+          An LSI shares the <strong>same partition key</strong> as the base table but allows a different sort key.
+          Data lives in the <em>same partition</em> as the base table item. LSIs support <strong>strongly consistent
+          reads</strong> but count against the partition's 10 GB limit. You must create LSIs at table creation
+          time — they cannot be added later.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.Partitions.html" target="_blank">AWS DynamoDB Documentation</a> and <a href="https://www.amazon.science/publications/amazon-dynamodb-a-scalable-predictably-performant-and-fully-managed-nosql-database-service" target="_blank">Amazon DynamoDB: A Scalable, Predictably Performant, and Fully Managed NoSQL Database Service (2022)</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20DynamoDB%20partitioning%20and%20adaptive%20capacity&url=https://systeminternals.dev/dynamodb/partitioning/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/dynamodb/partitioning/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/dynamodb/partitioning/&t=Interactive%20DynamoDB%20Partitioning%20%26%20Adaptive%20Capacity%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f97316, #eab308, #22c55e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(234, 179, 8, 0.05));
+    border: 1px solid rgba(249, 115, 22, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(249, 115, 22, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .kill-btn {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+    color: white;
+  }
+
+  .kill-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.5);
+  }
+
+  .reset-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  .flow-section {
+    margin-bottom: 50px;
+  }
+
+  .flow-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .flow-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.split { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+  .status-badge.hot { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .status-badge.done { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+  .status-badge.ok { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  .calculator-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 20px;
+  }
+
+  .calc-input-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .key-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 1rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .key-input:focus {
+    border-color: #f97316;
+  }
+
+  .key-input::placeholder {
+    color: #555;
+  }
+
+  .calc-result {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .calc-formula {
+    font-size: 0.9rem;
+    color: #888;
+    font-family: 'Monaco', 'Menlo', monospace;
+    margin-top: 8px;
+    min-height: 24px;
+  }
+
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .slider-group label {
+    color: #ccc;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .slider-group strong {
+    color: #f97316;
+  }
+
+  .slot-slider {
+    width: 160px;
+    height: 8px;
+    -webkit-appearance: none;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .slot-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #f97316;
+    cursor: pointer;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ccc;
+    font-size: 0.95rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .toggle-label input[type="checkbox"] {
+    display: none;
+  }
+
+  .toggle-switch {
+    width: 40px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 11px;
+    position: relative;
+    transition: background 0.3s;
+  }
+
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #888;
+    transition: all 0.3s;
+  }
+
+  .toggle-label input:checked + .toggle-switch {
+    background: rgba(249, 115, 22, 0.4);
+  }
+
+  .toggle-label input:checked + .toggle-switch::after {
+    transform: translateX(18px);
+    background: #f97316;
+  }
+
+  .partition-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  :global(.legend-item) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #ccc;
+  }
+
+  :global(.legend-swatch) {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+  }
+
+  .topology-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+
+  .failover-timeline {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 60px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+  }
+
+  :global(.failover-step) {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: eventAppear 0.4s ease-out;
+  }
+
+  :global(.failover-step.insert-step) { background: rgba(34, 197, 94, 0.1); color: #86efac; border-left: 3px solid #22c55e; }
+  :global(.failover-step.split-step) { background: rgba(249, 115, 22, 0.1); color: #fed7aa; border-left: 3px solid #f97316; }
+  :global(.failover-step.hot-step) { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.failover-step.info-step) { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.failover-step.adapt-step) { background: rgba(168, 85, 247, 0.1); color: #d8b4fe; border-left: 3px solid #a855f7; }
+  :global(.failover-step.gsi-step) { background: rgba(234, 179, 8, 0.1); color: #fde68a; border-left: 3px solid #eab308; }
+
+  @keyframes eventAppear {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #00d4ff; }
+  .explain-card em { color: #f97316; }
+  .explain-card code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.08), rgba(234, 179, 8, 0.08));
+    border-color: rgba(249, 115, 22, 0.3);
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .adaptive-info, .burst-info, .mode-info {
+    font-size: 0.9rem;
+    color: #aaa;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 40px;
+  }
+
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .calc-input-row { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ========== CONSTANTS ==========
+  var PART_COLORS = [
+    '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6',
+    '#ef4444', '#6366f1', '#84cc16', '#06b6d4', '#e11d48', '#f43f5e',
+    '#a855f7', '#eab308', '#0ea5e9', '#d946ef'
+  ];
+
+  // Simple hash function for partition key
+  function djb2Hash(str) {
+    var hash = 5381;
+    for (var i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash + str.charCodeAt(i)) & 0xFFFFFFFF;
+    }
+    return hash >>> 0;
+  }
+
+  // ========== PARTITION KEY HASHING ==========
+  var NUM_PARTITIONS = 4;
+  var keyInputEl = document.getElementById('keyInput');
+  var calcResultEl = document.getElementById('calcResult');
+  var calcFormulaEl = document.getElementById('calcFormula');
+  var partitionCanvas = document.getElementById('partitionCanvas');
+  var partCtx = partitionCanvas.getContext('2d');
+  var highlightedPartition = -1;
+
+  function getPartition(key, numParts) {
+    return djb2Hash(key) % numParts;
+  }
+
+  function drawPartitionBar(ctx, canvas, numParts, highlighted, items) {
+    var w = canvas.width;
+    var h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var barY = 80;
+    var barH = 60;
+    var pad = 40;
+    var barW = w - pad * 2;
+    var partW = barW / numParts;
+
+    // Title
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Hash Space: 0 to 2^32 (' + numParts + ' partitions)', w / 2, 30);
+
+    // Draw partition segments
+    for (var i = 0; i < numParts; i++) {
+      var x = pad + i * partW;
+      var isHighlighted = i === highlighted;
+
+      ctx.fillStyle = PART_COLORS[i % PART_COLORS.length] + (isHighlighted ? '60' : '25');
+      ctx.fillRect(x, barY, partW - 2, barH);
+
+      ctx.strokeStyle = PART_COLORS[i % PART_COLORS.length] + (isHighlighted ? 'ff' : '80');
+      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.strokeRect(x, barY, partW - 2, barH);
+
+      if (isHighlighted) {
+        ctx.shadowColor = PART_COLORS[i % PART_COLORS.length];
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = PART_COLORS[i % PART_COLORS.length] + '40';
+        ctx.fillRect(x, barY, partW - 2, barH);
+        ctx.shadowBlur = 0;
+      }
+
+      // Partition label
+      ctx.fillStyle = isHighlighted ? '#fff' : '#aaa';
+      ctx.font = (isHighlighted ? 'bold ' : '') + '12px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('P' + i, x + partW / 2, barY + barH / 2 + 4);
+
+      // Range
+      var rangeStart = Math.floor((0xFFFFFFFF / numParts) * i);
+      var rangeEnd = i < numParts - 1 ? Math.floor((0xFFFFFFFF / numParts) * (i + 1)) - 1 : 0xFFFFFFFF;
+      ctx.fillStyle = '#555';
+      ctx.font = '9px Monaco, monospace';
+      ctx.fillText('0x' + rangeStart.toString(16).toUpperCase().slice(0, 4) + '..', x + partW / 2, barY + barH + 20);
+    }
+
+    // Draw hash arrow if highlighted
+    if (highlighted >= 0) {
+      var arrowX = pad + highlighted * partW + partW / 2;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(arrowX, 50);
+      ctx.lineTo(arrowX, barY - 5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrow head
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(arrowX - 6, barY - 8);
+      ctx.lineTo(arrowX + 6, barY - 8);
+      ctx.lineTo(arrowX, barY - 2);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('hash(key) → Partition ' + highlighted, arrowX, 46);
+    }
+
+    // Draw items if provided
+    if (items && items.length > 0) {
+      var itemsByPart = {};
+      for (var j = 0; j < items.length; j++) {
+        var p = items[j].partition;
+        if (!itemsByPart[p]) itemsByPart[p] = [];
+        itemsByPart[p].push(items[j]);
+      }
+
+      var itemY = barY + barH + 40;
+      ctx.fillStyle = '#888';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Items stored in each partition:', w / 2, itemY);
+
+      for (var pi = 0; pi < numParts; pi++) {
+        var px = pad + pi * partW;
+        var pitems = itemsByPart[pi] || [];
+        for (var k = 0; k < Math.min(pitems.length, 8); k++) {
+          var iy = itemY + 16 + k * 18;
+          ctx.fillStyle = PART_COLORS[pi % PART_COLORS.length] + '80';
+          ctx.font = '9px Monaco, monospace';
+          ctx.textAlign = 'center';
+          var label = pitems[k].key;
+          if (label.length > 10) label = label.slice(0, 9) + '…';
+          ctx.fillText(label, px + partW / 2, iy);
+        }
+        if (pitems.length > 8) {
+          ctx.fillStyle = '#666';
+          ctx.fillText('+' + (pitems.length - 8) + ' more', px + partW / 2, itemY + 16 + 8 * 18);
+        }
+      }
+    }
+  }
+
+  function calculateHash() {
+    var key = keyInputEl.value.trim();
+    if (!key) {
+      calcResultEl.innerHTML = '';
+      calcFormulaEl.innerHTML = '';
+      highlightedPartition = -1;
+      drawPartitionBar(partCtx, partitionCanvas, NUM_PARTITIONS, -1);
+      return;
+    }
+    var hash = djb2Hash(key);
+    var partition = hash % NUM_PARTITIONS;
+    highlightedPartition = partition;
+
+    calcResultEl.innerHTML =
+      '<span style="color:' + PART_COLORS[partition] + ';">●</span> ' +
+      'Hash <span style="color:#f97316;font-family:monospace;">0x' + hash.toString(16).toUpperCase() + '</span> → ' +
+      '<span style="color:' + PART_COLORS[partition] + ';font-weight:700;">Partition ' + partition + '</span>';
+    calcFormulaEl.textContent = 'hash("' + key + '") = ' + hash + ' → ' + hash + ' mod ' + NUM_PARTITIONS + ' = P' + partition;
+    drawPartitionBar(partCtx, partitionCanvas, NUM_PARTITIONS, partition);
+  }
+
+  document.getElementById('hashBtn').addEventListener('click', calculateHash);
+  keyInputEl.addEventListener('keydown', function(e) { if (e.key === 'Enter') calculateHash(); });
+  keyInputEl.addEventListener('input', calculateHash);
+
+  // Legend
+  function renderPartLegend() {
+    var legend = document.getElementById('partitionLegend');
+    legend.innerHTML = '';
+    for (var i = 0; i < NUM_PARTITIONS; i++) {
+      var item = document.createElement('span');
+      item.className = 'legend-item';
+      item.innerHTML = '<span class="legend-swatch" style="background:' + PART_COLORS[i] + ';"></span>Partition ' + i;
+      legend.appendChild(item);
+    }
+  }
+
+  // ========== PARTITION MAP & AUTO-SPLIT ==========
+  var splitCanvas = document.getElementById('splitCanvas');
+  var splitCtx = splitCanvas.getContext('2d');
+  var splitTimeline = document.getElementById('splitTimeline');
+  var splitBadge = document.getElementById('splitBadge');
+  var splitStatusText = document.getElementById('splitStatusText');
+  var partSlider = document.getElementById('partSlider');
+  var partCountLabel = document.getElementById('partCountLabel');
+
+  var partitions = [];
+  var allItems = [];
+  var SPLIT_THRESHOLD = 30; // items per partition before split (for demo)
+
+  partSlider.addEventListener('input', function() {
+    partCountLabel.textContent = partSlider.value;
+  });
+
+  function initPartitions() {
+    var count = parseInt(partSlider.value);
+    partitions = [];
+    allItems = [];
+    for (var i = 0; i < count; i++) {
+      partitions.push({
+        id: i,
+        color: PART_COLORS[i % PART_COLORS.length],
+        items: 0,
+        wcu: 0,
+        rangeStart: Math.floor((0xFFFFFFFF / count) * i),
+        rangeEnd: i < count - 1 ? Math.floor((0xFFFFFFFF / count) * (i + 1)) - 1 : 0xFFFFFFFF
+      });
+    }
+  }
+
+  function findPartitionForHash(hash) {
+    for (var i = 0; i < partitions.length; i++) {
+      if (hash >= partitions[i].rangeStart && hash <= partitions[i].rangeEnd) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  function splitPartition(idx) {
+    var p = partitions[idx];
+    var mid = Math.floor((p.rangeStart + p.rangeEnd) / 2);
+    var newColor = PART_COLORS[partitions.length % PART_COLORS.length];
+
+    var newPart = {
+      id: partitions.length,
+      color: newColor,
+      items: Math.floor(p.items / 2),
+      wcu: 0,
+      rangeStart: mid + 1,
+      rangeEnd: p.rangeEnd
+    };
+
+    p.rangeEnd = mid;
+    p.items = p.items - newPart.items;
+
+    partitions.splice(idx + 1, 0, newPart);
+    // Reassign IDs
+    for (var i = 0; i < partitions.length; i++) {
+      partitions[i].id = i;
+      partitions[i].color = PART_COLORS[i % PART_COLORS.length];
+    }
+  }
+
+  function drawSplitViz() {
+    var ctx = splitCtx;
+    var w = splitCanvas.width;
+    var h = splitCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var n = partitions.length;
+    var pad = 30;
+    var gap = 12;
+    var maxBarW = Math.min(100, (w - pad * 2 - gap * (n - 1)) / n);
+    var totalW = n * maxBarW + (n - 1) * gap;
+    var startX = (w - totalW) / 2;
+    var barMaxH = 260;
+    var barY = h - 60;
+
+    // Title
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(partitions.length + ' partitions • Split threshold: ' + SPLIT_THRESHOLD + ' items', w / 2, 25);
+
+    // Threshold line
+    var threshH = (SPLIT_THRESHOLD / (SPLIT_THRESHOLD * 1.5)) * barMaxH;
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(startX - 10, barY - threshH);
+    ctx.lineTo(startX + totalW + 10, barY - threshH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ef4444';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('Split threshold', startX - 14, barY - threshH + 3);
+
+    for (var i = 0; i < n; i++) {
+      var p = partitions[i];
+      var x = startX + i * (maxBarW + gap);
+      var fillRatio = Math.min(p.items / (SPLIT_THRESHOLD * 1.5), 1);
+      var barH = fillRatio * barMaxH;
+
+      // Background bar
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      ctx.fillRect(x, barY - barMaxH, maxBarW, barMaxH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, barY - barMaxH, maxBarW, barMaxH);
+
+      // Fill bar
+      var isHot = p.items >= SPLIT_THRESHOLD;
+      var color = isHot ? '#ef4444' : p.color;
+      ctx.fillStyle = color + '50';
+      ctx.fillRect(x, barY - barH, maxBarW, barH);
+
+      if (isHot) {
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#ef444430';
+        ctx.fillRect(x, barY - barH, maxBarW, barH);
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, barY - barH, maxBarW, barH);
+
+      // Item count
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.items, x + maxBarW / 2, barY - barH - 10);
+
+      // Partition label
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText('P' + p.id, x + maxBarW / 2, barY + 18);
+
+      if (isHot) {
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.fillText('🔥 HOT', x + maxBarW / 2, barY + 34);
+      }
+    }
+  }
+
+  function addEntry(timeline, text, cls) {
+    var el = document.createElement('div');
+    el.className = 'failover-step ' + cls;
+    el.textContent = text;
+    timeline.appendChild(el);
+    timeline.scrollTop = timeline.scrollHeight;
+  }
+
+  var SAMPLE_KEYS = [
+    'user-1001', 'user-2002', 'user-3003', 'order-A1', 'order-B2', 'order-C3',
+    'product-X1', 'product-Y2', 'session-abc', 'session-def', 'session-ghi',
+    'device-m01', 'device-m02', 'invoice-001', 'invoice-002', 'cart-u100',
+    'cart-u200', 'log-20240101', 'log-20240102', 'event-click-1'
+  ];
+
+  document.getElementById('insertRandomBtn').addEventListener('click', function() {
+    for (var i = 0; i < 10; i++) {
+      var key = SAMPLE_KEYS[Math.floor(Math.random() * SAMPLE_KEYS.length)] + '-' + Math.floor(Math.random() * 10000);
+      var hash = djb2Hash(key);
+      var pIdx = findPartitionForHash(hash);
+      partitions[pIdx].items++;
+      allItems.push({ key: key, partition: pIdx });
+    }
+
+    addEntry(splitTimeline, '➕ Inserted 10 random items across partitions', 'insert-step');
+    splitBadge.className = 'status-badge ok';
+    splitBadge.textContent = 'INSERTED';
+    splitStatusText.textContent = allItems.length + ' total items across ' + partitions.length + ' partitions';
+
+    // Check for splits
+    var didSplit = false;
+    for (var j = 0; j < partitions.length; j++) {
+      if (partitions[j].items >= SPLIT_THRESHOLD) {
+        var oldId = partitions[j].id;
+        splitPartition(j);
+        didSplit = true;
+        addEntry(splitTimeline, '🔀 Partition P' + oldId + ' exceeded ' + SPLIT_THRESHOLD + ' items → auto-split into 2 partitions!', 'split-step');
+        splitBadge.className = 'status-badge split';
+        splitBadge.textContent = 'SPLIT';
+        splitStatusText.textContent = 'Partition split! Now ' + partitions.length + ' partitions';
+        break;
+      }
+    }
+
+    drawSplitViz();
+  });
+
+  document.getElementById('insertHotBtn').addEventListener('click', function() {
+    var hotKey = 'hot-key-' + Math.floor(Math.random() * 3);
+    var hash = djb2Hash(hotKey);
+    var pIdx = findPartitionForHash(hash);
+
+    for (var i = 0; i < 50; i++) {
+      partitions[pIdx].items++;
+      allItems.push({ key: hotKey, partition: pIdx });
+    }
+
+    addEntry(splitTimeline, '🔥 Inserted 50 items with hot key "' + hotKey + '" → all hit Partition P' + pIdx, 'hot-step');
+    splitBadge.className = 'status-badge hot';
+    splitBadge.textContent = 'HOT KEY';
+    splitStatusText.textContent = 'Hot key detected! P' + pIdx + ' has ' + partitions[pIdx].items + ' items';
+
+    // Check for splits
+    for (var j = 0; j < partitions.length; j++) {
+      if (partitions[j].items >= SPLIT_THRESHOLD) {
+        var oldId = partitions[j].id;
+        splitPartition(j);
+        addEntry(splitTimeline, '🔀 Auto-split triggered on P' + oldId + ' (' + (partitions[j].items + partitions[j + 1].items) + ' items) → now ' + partitions.length + ' partitions', 'split-step');
+        splitBadge.className = 'status-badge split';
+        splitBadge.textContent = 'SPLIT';
+        splitStatusText.textContent = 'Hot partition split! Now ' + partitions.length + ' partitions';
+        // Check again in case the split half is still over threshold
+        j--;
+      }
+    }
+
+    drawSplitViz();
+  });
+
+  document.getElementById('resetPartBtn').addEventListener('click', function() {
+    initPartitions();
+    splitTimeline.innerHTML = '';
+    splitBadge.className = 'status-badge idle';
+    splitBadge.textContent = 'Ready';
+    splitStatusText.textContent = 'Insert items to see partitions fill and auto-split';
+    drawSplitViz();
+  });
+
+  // ========== ADAPTIVE CAPACITY ==========
+  var adaptiveCanvas = document.getElementById('adaptiveCanvas');
+  var adaptiveCtx = adaptiveCanvas.getContext('2d');
+  var adaptiveInfo = document.getElementById('adaptiveInfo');
+  var wcuSlider = document.getElementById('wcuSlider');
+  var wcuLabel = document.getElementById('wcuLabel');
+  var adaptiveAnimating = false;
+
+  wcuSlider.addEventListener('input', function() {
+    wcuLabel.textContent = wcuSlider.value;
+  });
+
+  function drawAdaptiveChart(data) {
+    var ctx = adaptiveCtx;
+    var w = adaptiveCanvas.width;
+    var h = adaptiveCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var pad = { top: 40, right: 30, bottom: 50, left: 70 };
+    var chartW = w - pad.left - pad.right;
+    var chartH = h - pad.top - pad.bottom;
+    var numParts = 4;
+
+    if (!data || data.length === 0) {
+      ctx.fillStyle = '#555';
+      ctx.font = '13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Adaptive capacity simulation — 4 partitions, one gets hot', w / 2, h / 2);
+      return;
+    }
+
+    var totalWCU = parseInt(wcuSlider.value);
+    var maxWCU = totalWCU * 1.2;
+
+    // Y axis
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (var y = 0; y <= maxWCU; y += 100) {
+      var yPos = pad.top + chartH - (y / maxWCU) * chartH;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, yPos);
+      ctx.lineTo(pad.left + chartW, yPos);
+      ctx.stroke();
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Monaco, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(y + ' WCU', pad.left - 8, yPos + 3);
+    }
+
+    // Even split line
+    var evenWCU = totalWCU / numParts;
+    var evenY = pad.top + chartH - (evenWCU / maxWCU) * chartH;
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, evenY);
+    ctx.lineTo(pad.left + chartW, evenY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#888';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Even split: ' + evenWCU + ' WCU/partition', pad.left + chartW - 160, evenY - 6);
+
+    // Draw lines for each partition
+    var colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b'];
+    var labels = ['P0 (hot)', 'P1', 'P2', 'P3'];
+
+    for (var p = 0; p < numParts; p++) {
+      ctx.strokeStyle = colors[p];
+      ctx.lineWidth = p === 0 ? 3 : 1.5;
+      ctx.beginPath();
+      for (var i = 0; i < data.length; i++) {
+        var xPos = pad.left + (i / (data.length - 1)) * chartW;
+        var val = data[i][p];
+        var yp = pad.top + chartH - (val / maxWCU) * chartH;
+        if (i === 0) ctx.moveTo(xPos, yp);
+        else ctx.lineTo(xPos, yp);
+      }
+      ctx.stroke();
+
+      // Label at end
+      if (data.length > 0) {
+        var lastVal = data[data.length - 1][p];
+        var ly = pad.top + chartH - (lastVal / maxWCU) * chartH;
+        ctx.fillStyle = colors[p];
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(labels[p] + ': ' + Math.round(lastVal), pad.left + chartW + 4, ly + 3);
+      }
+    }
+
+    // X axis label
+    ctx.fillStyle = '#888';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time (adaptive capacity rebalances throughput)', w / 2, h - 8);
+
+    // Title
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('WCU Allocation Per Partition (Total: ' + totalWCU + ')', pad.left, pad.top - 15);
+  }
+
+  document.getElementById('startAdaptiveBtn').addEventListener('click', function() {
+    if (adaptiveAnimating) return;
+    adaptiveAnimating = true;
+    document.getElementById('startAdaptiveBtn').disabled = true;
+
+    var totalWCU = parseInt(wcuSlider.value);
+    var even = totalWCU / 4;
+    var data = [];
+    var step = 0;
+    var totalSteps = 60;
+
+    function tick() {
+      if (step > totalSteps || !adaptiveAnimating) {
+        adaptiveAnimating = false;
+        document.getElementById('startAdaptiveBtn').disabled = false;
+        return;
+      }
+
+      var t = step / totalSteps;
+      var hotDemand;
+      var frame;
+
+      if (t < 0.3) {
+        // Phase 1: even distribution
+        frame = [even, even, even, even];
+        adaptiveInfo.innerHTML = '📊 Phase 1: Even distribution — each partition gets <strong>' + Math.round(even) + ' WCU</strong>';
+      } else if (t < 0.5) {
+        // Phase 2: P0 gets hot, old system would throttle
+        var hotPct = (t - 0.3) / 0.2;
+        hotDemand = even + hotPct * even * 2;
+        frame = [Math.min(hotDemand, even), even, even, even];
+        adaptiveInfo.innerHTML = '🔥 Phase 2 (Pre-2018): P0 needs <strong>' + Math.round(hotDemand) + ' WCU</strong> but capped at ' + Math.round(even) + '. <span style="color:#ef4444;">THROTTLED!</span>';
+      } else {
+        // Phase 3: adaptive capacity kicks in
+        var adaptPct = Math.min((t - 0.5) / 0.3, 1);
+        hotDemand = even * 3;
+        var hotAlloc = even + adaptPct * (hotDemand - even);
+        var coldAlloc = (totalWCU - hotAlloc) / 3;
+        frame = [hotAlloc, coldAlloc, coldAlloc, coldAlloc];
+        adaptiveInfo.innerHTML = '🧠 Phase 3 (Adaptive): P0 borrows from cold partitions → <strong style="color:#22c55e;">' + Math.round(hotAlloc) + ' WCU</strong>. Cold partitions: ' + Math.round(coldAlloc) + ' WCU each. <span style="color:#22c55e;">No throttling!</span>';
+      }
+
+      data.push(frame);
+      drawAdaptiveChart(data);
+      step++;
+      setTimeout(tick, 80);
+    }
+
+    tick();
+  });
+
+  document.getElementById('resetAdaptiveBtn').addEventListener('click', function() {
+    adaptiveAnimating = false;
+    drawAdaptiveChart([]);
+    adaptiveInfo.textContent = 'Click "Simulate" to watch adaptive capacity reallocate throughput in real-time';
+    document.getElementById('startAdaptiveBtn').disabled = false;
+  });
+
+  // ========== BURST CAPACITY ==========
+  var burstCanvas = document.getElementById('burstCanvas');
+  var burstCtx = burstCanvas.getContext('2d');
+  var burstInfo = document.getElementById('burstInfo');
+  var burstAnimating = false;
+
+  function drawBurstChart(data) {
+    var ctx = burstCtx;
+    var w = burstCanvas.width;
+    var h = burstCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var pad = { top: 35, right: 120, bottom: 45, left: 70 };
+    var chartW = w - pad.left - pad.right;
+    var chartH = h - pad.top - pad.bottom;
+
+    if (!data || data.length === 0) {
+      ctx.fillStyle = '#555';
+      ctx.font = '13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Burst capacity: unused WCU banked for 5 minutes', w / 2, h / 2);
+      return;
+    }
+
+    var maxVal = 250;
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (var v = 0; v <= maxVal; v += 50) {
+      var yPos = pad.top + chartH - (v / maxVal) * chartH;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, yPos);
+      ctx.lineTo(pad.left + chartW, yPos);
+      ctx.stroke();
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Monaco, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(v, pad.left - 8, yPos + 3);
+    }
+
+    // Provisioned line
+    var provY = pad.top + chartH - (100 / maxVal) * chartH;
+    ctx.strokeStyle = 'rgba(96, 165, 250, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, provY);
+    ctx.lineTo(pad.left + chartW, provY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#60a5fa';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Provisioned: 100 WCU', pad.left + 4, provY - 6);
+
+    // Traffic line
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < data.length; i++) {
+      var xPos = pad.left + (i / (data.length - 1 || 1)) * chartW;
+      var y1 = pad.top + chartH - (data[i].traffic / maxVal) * chartH;
+      if (i === 0) ctx.moveTo(xPos, y1);
+      else ctx.lineTo(xPos, y1);
+    }
+    ctx.stroke();
+
+    // Burst bucket fill
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var j = 0; j < data.length; j++) {
+      var x2 = pad.left + (j / (data.length - 1 || 1)) * chartW;
+      var y2 = pad.top + chartH - (data[j].bucket / maxVal) * chartH;
+      if (j === 0) ctx.moveTo(x2, y2);
+      else ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+
+    // Throttle markers
+    for (var k = 0; k < data.length; k++) {
+      if (data[k].throttled) {
+        var tx = pad.left + (k / (data.length - 1 || 1)) * chartW;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+        ctx.fillRect(tx - 2, pad.top, 4, chartH);
+      }
+    }
+
+    // Legend
+    var lx = pad.left + chartW + 12;
+    ctx.fillStyle = '#f97316';
+    ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('— Traffic', lx, pad.top + 20);
+    ctx.fillStyle = '#22c55e';
+    ctx.fillText('— Burst Bucket', lx, pad.top + 38);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillText('■ Throttled', lx, pad.top + 56);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time (seconds)', w / 2, h - 5);
+  }
+
+  document.getElementById('startBurstBtn').addEventListener('click', function() {
+    if (burstAnimating) return;
+    burstAnimating = true;
+    document.getElementById('startBurstBtn').disabled = true;
+
+    var provisioned = 100;
+    var bucket = 0;
+    var maxBucket = provisioned * 300; // 5 minutes worth
+    var data = [];
+    var step = 0;
+    var totalSteps = 80;
+
+    function tick() {
+      if (step > totalSteps || !burstAnimating) {
+        burstAnimating = false;
+        document.getElementById('startBurstBtn').disabled = false;
+        return;
+      }
+
+      var t = step / totalSteps;
+      var traffic;
+
+      if (t < 0.4) {
+        traffic = 40 + Math.random() * 20; // Low traffic → banking
+      } else if (t < 0.6) {
+        traffic = 180 + Math.random() * 40; // Spike!
+      } else {
+        traffic = 50 + Math.random() * 30; // Back to normal
+      }
+
+      var unused = Math.max(0, provisioned - traffic);
+      var needed = Math.max(0, traffic - provisioned);
+      var throttled = false;
+
+      // Bank unused
+      bucket = Math.min(bucket + unused, maxBucket);
+
+      // Spend from bucket
+      if (needed > 0) {
+        if (bucket >= needed) {
+          bucket -= needed;
+        } else {
+          throttled = true;
+          bucket = 0;
+        }
+      }
+
+      var bucketDisplay = bucket / maxBucket * 200; // Scale for display
+      data.push({ traffic: traffic, bucket: bucketDisplay, throttled: throttled });
+      drawBurstChart(data);
+
+      if (t < 0.4) {
+        burstInfo.innerHTML = '💰 Low traffic (' + Math.round(traffic) + ' WCU). Banking <strong style="color:#22c55e;">' + Math.round(unused) + ' unused WCU</strong> → bucket: ' + Math.round(bucket) + '/' + maxBucket;
+      } else if (t < 0.6) {
+        if (throttled) {
+          burstInfo.innerHTML = '🚫 Spike! Traffic <strong>' + Math.round(traffic) + ' WCU</strong> > provisioned + burst. <span style="color:#ef4444;">THROTTLED</span>';
+        } else {
+          burstInfo.innerHTML = '⚡ Spike! Traffic <strong>' + Math.round(traffic) + ' WCU</strong>. Spending burst capacity → bucket: ' + Math.round(bucket) + '/' + maxBucket;
+        }
+      } else {
+        burstInfo.innerHTML = '📊 Traffic normalized (' + Math.round(traffic) + ' WCU). Re-banking unused capacity → bucket: ' + Math.round(bucket) + '/' + maxBucket;
+      }
+
+      step++;
+      setTimeout(tick, 80);
+    }
+
+    tick();
+  });
+
+  document.getElementById('resetBurstBtn').addEventListener('click', function() {
+    burstAnimating = false;
+    drawBurstChart([]);
+    burstInfo.textContent = 'Click "Simulate" to watch burst capacity bank and spend unused throughput';
+    document.getElementById('startBurstBtn').disabled = false;
+  });
+
+  // ========== PROVISIONED VS ON-DEMAND ==========
+  var modeCanvas = document.getElementById('modeCanvas');
+  var modeCtx = modeCanvas.getContext('2d');
+  var modeInfo = document.getElementById('modeInfo');
+  var modeToggle = document.getElementById('modeToggle');
+  var modeAnimating = false;
+
+  function drawModeChart(data, isOnDemand) {
+    var ctx = modeCtx;
+    var w = modeCanvas.width;
+    var h = modeCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var pad = { top: 35, right: 120, bottom: 45, left: 70 };
+    var chartW = w - pad.left - pad.right;
+    var chartH = h - pad.top - pad.bottom;
+
+    if (!data || data.length === 0) {
+      ctx.fillStyle = '#555';
+      ctx.font = '13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(isOnDemand ? 'On-demand: instant scaling, pay per request' : 'Provisioned: set capacity, auto-scaling with delay', w / 2, h / 2);
+      return;
+    }
+
+    var maxVal = 500;
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (var v = 0; v <= maxVal; v += 100) {
+      var yPos = pad.top + chartH - (v / maxVal) * chartH;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, yPos);
+      ctx.lineTo(pad.left + chartW, yPos);
+      ctx.stroke();
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Monaco, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(v + ' WCU', pad.left - 8, yPos + 3);
+    }
+
+    // Traffic line
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < data.length; i++) {
+      var xPos = pad.left + (i / (data.length - 1 || 1)) * chartW;
+      var y1 = pad.top + chartH - (data[i].traffic / maxVal) * chartH;
+      if (i === 0) ctx.moveTo(xPos, y1);
+      else ctx.lineTo(xPos, y1);
+    }
+    ctx.stroke();
+
+    // Capacity line
+    ctx.strokeStyle = isOnDemand ? '#22c55e' : '#60a5fa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var j = 0; j < data.length; j++) {
+      var x2 = pad.left + (j / (data.length - 1 || 1)) * chartW;
+      var y2 = pad.top + chartH - (data[j].capacity / maxVal) * chartH;
+      if (j === 0) ctx.moveTo(x2, y2);
+      else ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+
+    // Fill gap where throttled
+    for (var k = 0; k < data.length; k++) {
+      if (data[k].throttled) {
+        var tx = pad.left + (k / (data.length - 1 || 1)) * chartW;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+        ctx.fillRect(tx - 2, pad.top, 4, chartH);
+      }
+    }
+
+    // Legend
+    var lx = pad.left + chartW + 12;
+    ctx.fillStyle = '#f97316';
+    ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('— Traffic', lx, pad.top + 20);
+    ctx.fillStyle = isOnDemand ? '#22c55e' : '#60a5fa';
+    ctx.fillText('— Capacity', lx, pad.top + 38);
+    if (!isOnDemand) {
+      ctx.fillStyle = '#ef4444';
+      ctx.fillText('■ Throttled', lx, pad.top + 56);
+    }
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(isOnDemand ? '⚡ On-Demand Mode' : '📋 Provisioned + Auto-Scaling', pad.left, pad.top - 12);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time', w / 2, h - 5);
+  }
+
+  document.getElementById('startModeBtn').addEventListener('click', function() {
+    if (modeAnimating) return;
+    modeAnimating = true;
+    document.getElementById('startModeBtn').disabled = true;
+
+    var isOnDemand = modeToggle.checked;
+    var data = [];
+    var step = 0;
+    var totalSteps = 80;
+    var capacity = isOnDemand ? 100 : 200;
+    var prevPeak = 100;
+
+    function tick() {
+      if (step > totalSteps || !modeAnimating) {
+        modeAnimating = false;
+        document.getElementById('startModeBtn').disabled = false;
+        return;
+      }
+
+      var t = step / totalSteps;
+      var traffic;
+
+      // Traffic pattern: normal → spike → normal → bigger spike → normal
+      if (t < 0.2) {
+        traffic = 100 + Math.random() * 40;
+      } else if (t < 0.35) {
+        traffic = 300 + Math.random() * 50;
+      } else if (t < 0.55) {
+        traffic = 80 + Math.random() * 30;
+      } else if (t < 0.7) {
+        traffic = 400 + Math.random() * 60;
+      } else {
+        traffic = 120 + Math.random() * 30;
+      }
+
+      var throttled = false;
+
+      if (isOnDemand) {
+        // On-demand: instantly 2x previous peak
+        if (traffic > prevPeak) prevPeak = traffic;
+        capacity = prevPeak * 2;
+        // On-demand never throttles (within 2x)
+      } else {
+        // Provisioned: auto-scaling with 2-minute delay (simulated as lag)
+        var target = traffic * 1.2;
+        var diff = target - capacity;
+        capacity += diff * 0.05; // Slow catch-up
+        if (capacity < 100) capacity = 100;
+        throttled = traffic > capacity;
+      }
+
+      data.push({ traffic: traffic, capacity: Math.min(capacity, 500), throttled: throttled });
+      drawModeChart(data, isOnDemand);
+
+      if (isOnDemand) {
+        modeInfo.innerHTML = '⚡ On-Demand: traffic <strong>' + Math.round(traffic) + '</strong> WCU, capacity <strong style="color:#22c55e;">' + Math.round(capacity) + '</strong> WCU (2x peak). <span style="color:#22c55e;">No throttling, pay per request.</span>';
+      } else {
+        if (throttled) {
+          modeInfo.innerHTML = '📋 Provisioned: traffic <strong>' + Math.round(traffic) + '</strong> WCU > capacity <strong>' + Math.round(capacity) + '</strong> WCU. <span style="color:#ef4444;">THROTTLED</span> — auto-scaling catching up...';
+        } else {
+          modeInfo.innerHTML = '📋 Provisioned: traffic <strong>' + Math.round(traffic) + '</strong> WCU, capacity <strong style="color:#60a5fa;">' + Math.round(capacity) + '</strong> WCU. OK.';
+        }
+      }
+
+      step++;
+      setTimeout(tick, 80);
+    }
+
+    tick();
+  });
+
+  document.getElementById('resetModeBtn').addEventListener('click', function() {
+    modeAnimating = false;
+    drawModeChart([], modeToggle.checked);
+    modeInfo.textContent = 'Choose a mode and simulate a realistic traffic pattern with spikes';
+    document.getElementById('startModeBtn').disabled = false;
+  });
+
+  // ========== GSI & LSI ==========
+  var indexCanvas = document.getElementById('indexCanvas');
+  var indexCtx = indexCanvas.getContext('2d');
+  var indexTimeline = document.getElementById('indexTimeline');
+
+  function drawIndexViz(mode) {
+    var ctx = indexCtx;
+    var w = indexCanvas.width;
+    var h = indexCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!mode) {
+      ctx.fillStyle = '#555';
+      ctx.font = '13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Click "Show GSI" or "Show LSI" to see how secondary indexes are partitioned', w / 2, h / 2);
+      return;
+    }
+
+    var baseX = 60;
+    var baseY = 60;
+    var tableW = 300;
+    var tableH = 220;
+
+    // Base table
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(baseX, baseY, tableW, tableH, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#3b82f6';
+    ctx.font = 'bold 14px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Base Table', baseX + tableW / 2, baseY + 25);
+
+    // Base table partitions
+    var partColors = ['#3b82f6', '#22c55e', '#f59e0b'];
+    for (var i = 0; i < 3; i++) {
+      var py = baseY + 45 + i * 55;
+      ctx.fillStyle = partColors[i] + '20';
+      ctx.strokeStyle = partColors[i] + '60';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(baseX + 15, py, tableW - 30, 45, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = partColors[i];
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Partition ' + i + ' (PK: user-' + (i + 1) + '00x)', baseX + 25, py + 20);
+      ctx.fillStyle = '#888';
+      ctx.font = '10px Monaco, monospace';
+      ctx.fillText('SK: order#001, order#002...', baseX + 25, py + 36);
+    }
+
+    if (mode === 'gsi') {
+      var gsiX = 460;
+
+      // Arrow
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(baseX + tableW + 10, baseY + tableH / 2);
+      ctx.lineTo(gsiX - 10, baseY + tableH / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrow label
+      ctx.fillStyle = '#eab308';
+      ctx.font = 'bold 10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Async', (baseX + tableW + gsiX) / 2, baseY + tableH / 2 - 10);
+      ctx.fillText('Replication', (baseX + tableW + gsiX) / 2, baseY + tableH / 2 + 4);
+
+      // GSI table
+      ctx.fillStyle = 'rgba(234, 179, 8, 0.1)';
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(gsiX, baseY, tableW, tableH, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#eab308';
+      ctx.font = 'bold 14px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('GSI (Separate Table)', gsiX + tableW / 2, baseY + 25);
+
+      // GSI partitions (different PK)
+      var gsiColors = ['#eab308', '#ec4899', '#14b8a6'];
+      var gsiPKs = ['status=shipped', 'status=pending', 'status=cancelled'];
+      for (var g = 0; g < 3; g++) {
+        var gy = baseY + 45 + g * 55;
+        ctx.fillStyle = gsiColors[g] + '20';
+        ctx.strokeStyle = gsiColors[g] + '60';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(gsiX + 15, gy, tableW - 30, 45, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = gsiColors[g];
+        ctx.font = '11px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Partition ' + g + ' (PK: ' + gsiPKs[g] + ')', gsiX + 25, gy + 20);
+        ctx.fillStyle = '#888';
+        ctx.font = '10px Monaco, monospace';
+        ctx.fillText('SK: user-1001, user-2005...', gsiX + 25, gy + 36);
+      }
+
+      // Notes
+      ctx.fillStyle = '#aaa';
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('GSI has its own partition key, sort key, and throughput', w / 2, baseY + tableH + 40);
+      ctx.fillStyle = '#888';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.fillText('Eventually consistent reads only • Own RCU/WCU • Can be added anytime', w / 2, baseY + tableH + 60);
+
+    } else if (mode === 'lsi') {
+      // LSI shares partitions
+      var lsiX = baseX + tableW + 80;
+
+      for (var l = 0; l < 3; l++) {
+        var ly = baseY + 45 + l * 55;
+
+        // Arrow from partition to LSI
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(baseX + tableW - 15, ly + 22);
+        ctx.lineTo(lsiX, ly + 22);
+        ctx.stroke();
+
+        // LSI entry
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.1)';
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(lsiX, ly, 280, 45, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('LSI (same PK: user-' + (l + 1) + '00x)', lsiX + 12, ly + 20);
+        ctx.fillStyle = '#888';
+        ctx.font = '10px Monaco, monospace';
+        ctx.fillText('Alt SK: created_date, amount...', lsiX + 12, ly + 36);
+      }
+
+      ctx.fillStyle = '#a855f7';
+      ctx.font = 'bold 14px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Local Secondary Index', lsiX + 140, baseY + 25);
+
+      // Notes
+      ctx.fillStyle = '#aaa';
+      ctx.font = '11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('LSI shares the same partition key — data lives in the SAME partition', w / 2, baseY + tableH + 40);
+      ctx.fillStyle = '#888';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.fillText('Strongly consistent reads OK • Shares 10GB limit • Must create at table creation', w / 2, baseY + tableH + 60);
+    }
+  }
+
+  document.getElementById('showGsiBtn').addEventListener('click', function() {
+    drawIndexViz('gsi');
+    indexTimeline.innerHTML = '';
+    addEntry(indexTimeline, '🌐 GSI: A completely separate table with its own partition key and throughput', 'gsi-step');
+    addEntry(indexTimeline, '📤 Writes to base table are asynchronously replicated to the GSI', 'info-step');
+    addEntry(indexTimeline, '⚠️ GSI can throttle the base table if GSI throughput is too low (back-pressure)', 'hot-step');
+    addEntry(indexTimeline, '📖 Only eventually consistent reads — no strongly consistent queries on GSI', 'adapt-step');
+  });
+
+  document.getElementById('showLsiBtn').addEventListener('click', function() {
+    drawIndexViz('lsi');
+    indexTimeline.innerHTML = '';
+    addEntry(indexTimeline, '📌 LSI: Same partition key, different sort key — data stays in the same partition', 'adapt-step');
+    addEntry(indexTimeline, '✅ Supports strongly consistent reads (data is co-located)', 'insert-step');
+    addEntry(indexTimeline, '📏 Counts against the 10 GB partition size limit', 'hot-step');
+    addEntry(indexTimeline, '🔒 Must be defined at table creation time — cannot add LSI later', 'info-step');
+  });
+
+  document.getElementById('resetIndexBtn').addEventListener('click', function() {
+    drawIndexViz(null);
+    indexTimeline.innerHTML = '';
+  });
+
+  // ========== INITIAL RENDER ==========
+  initPartitions();
+  drawPartitionBar(partCtx, partitionCanvas, NUM_PARTITIONS, -1);
+  renderPartLegend();
+  drawSplitViz();
+  drawAdaptiveChart([]);
+  drawBurstChart([]);
+  drawModeChart([], false);
+  drawIndexViz(null);
+</script>
+</BaseLayout>

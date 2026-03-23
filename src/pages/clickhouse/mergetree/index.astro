@@ -1,0 +1,1443 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="MergeTree Engine: Column Storage, Parts & Merges" 
+  description="Interactive visualization of ClickHouse MergeTree engine internals: column-oriented storage, parts, background merges, sparse indexes, and data skipping"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "ClickHouse", href: "/clickhouse/" },
+    { label: "MergeTree Engine", href: "/clickhouse/mergetree/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌲 MergeTree Engine</h1>
+      <p class="subtitle">Column Storage, Parts & Background Merges — The Heart of ClickHouse</p>
+    </header>
+
+    <!-- ===== Section 1: Column vs Row Storage ===== -->
+    <section class="demo-section">
+      <h2>📊 Column vs Row Storage</h2>
+      <p class="section-desc">Click a column header to see how column-oriented storage reads only what it needs.</p>
+      <div class="storage-compare">
+        <div class="storage-panel">
+          <h3>Row-Oriented (PostgreSQL-style)</h3>
+          <div class="row-table" id="rowTable"></div>
+          <div class="read-indicator" id="rowReadInfo">Click a column above to compare</div>
+        </div>
+        <div class="storage-panel">
+          <h3>Column-Oriented (ClickHouse)</h3>
+          <div class="col-table" id="colTable"></div>
+          <div class="read-indicator" id="colReadInfo">Click a column above to compare</div>
+        </div>
+      </div>
+      <div class="storage-stats" id="storageStats"></div>
+    </section>
+
+    <!-- ===== Section 2: Insert → Parts → Merge ===== -->
+    <section class="demo-section">
+      <h2>📦 Parts &amp; Background Merges</h2>
+      <p class="section-desc">Each INSERT creates a new "part" on disk. Background merges combine parts for efficiency.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="insertBtn" class="action-btn insert-btn">✏️ INSERT Batch</button>
+          <button id="insert5Btn" class="action-btn insert-btn-secondary">⚡ INSERT ×5</button>
+          <button id="mergeBtn" class="action-btn merge-action-btn">🔄 Force Merge</button>
+          <button id="resetPartsBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+        <div class="stats-row">
+          <div class="stat">
+            <span class="stat-label">Parts</span>
+            <span class="stat-value" id="partCount">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Total Rows</span>
+            <span class="stat-value" id="totalRows">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Merges</span>
+            <span class="stat-value" id="mergeCount">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Inserts</span>
+            <span class="stat-value" id="insertCount">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="parts-viz" id="partsViz">
+        <div class="parts-container" id="partsContainer"></div>
+      </div>
+
+      <div class="log-section">
+        <h3>📜 Activity Log</h3>
+        <div class="log-container" id="partsLog">
+          <div class="log-entry">System ready. Click "INSERT Batch" to create parts.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 3: Sparse Index Lookup ===== -->
+    <section class="demo-section">
+      <h2>🔍 Sparse Index (Primary Key) Lookup</h2>
+      <p class="section-desc">ClickHouse doesn't index every row — it indexes every <strong>granule</strong> (8192 rows). Enter a value to see how it skips granules.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <input type="number" id="searchValue" min="1" max="100000" value="42000" class="search-input" placeholder="Search value..." />
+          <button id="searchBtn" class="action-btn search-btn">🔍 Lookup</button>
+        </div>
+      </div>
+      <div class="sparse-viz" id="sparseViz">
+        <div class="granule-row" id="granuleRow"></div>
+        <div class="mark-row" id="markRow"></div>
+        <div class="search-result" id="searchResult"></div>
+      </div>
+    </section>
+
+    <!-- ===== Section 4: Compression Demo ===== -->
+    <section class="demo-section">
+      <h2>🗜️ Compression Codecs</h2>
+      <p class="section-desc">Column storage enables massive compression. Different codecs suit different data patterns.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <select id="dataType" class="codec-select">
+            <option value="timestamps">Timestamps (monotonic)</option>
+            <option value="ids">User IDs (random integers)</option>
+            <option value="status">HTTP Status Codes (low cardinality)</option>
+            <option value="metrics">Float Metrics (slowly changing)</option>
+          </select>
+          <button id="compressBtn" class="action-btn compress-btn">🗜️ Compress</button>
+        </div>
+      </div>
+      <div class="compression-results" id="compressionResults"></div>
+    </section>
+
+    <!-- ===== Section 5: Data Skipping Indexes ===== -->
+    <section class="demo-section">
+      <h2>⚡ Data Skipping Indexes</h2>
+      <p class="section-desc">Beyond the primary index, MergeTree can skip granules using minmax, set, bloom_filter, and ngrambf indexes.</p>
+      <div class="skip-index-viz">
+        <div class="skip-index-card">
+          <h4>minmax</h4>
+          <p>Stores min/max per granule block. Best for: range queries on nearly-sorted data.</p>
+          <div class="skip-example">
+            <code>WHERE temperature BETWEEN 20 AND 25</code>
+            <div class="skip-demo" id="skipMinmax"></div>
+          </div>
+        </div>
+        <div class="skip-index-card">
+          <h4>set(N)</h4>
+          <p>Stores unique values (up to N) per block. Best for: equality on low-cardinality columns.</p>
+          <div class="skip-example">
+            <code>WHERE status = 404</code>
+            <div class="skip-demo" id="skipSet"></div>
+          </div>
+        </div>
+        <div class="skip-index-card">
+          <h4>bloom_filter</h4>
+          <p>Probabilistic membership test. Best for: equality checks on high-cardinality columns.</p>
+          <div class="skip-example">
+            <code>WHERE user_id = 'abc123'</code>
+            <div class="skip-demo" id="skipBloom"></div>
+          </div>
+        </div>
+        <div class="skip-index-card">
+          <h4>ngrambf_v1</h4>
+          <p>N-gram bloom filter for substring search. Best for: LIKE '%pattern%' queries.</p>
+          <div class="skip-example">
+            <code>WHERE url LIKE '%/api/v2%'</code>
+            <div class="skip-demo" id="skipNgram"></div>
+          </div>
+        </div>
+      </div>
+      <button id="runSkipDemo" class="action-btn search-btn" style="margin-top: 16px;">▶️ Run Skip Demo</button>
+    </section>
+
+    <!-- ===== Section 6: MergeTree Family ===== -->
+    <section class="demo-section">
+      <h2>🌳 The MergeTree Family</h2>
+      <div class="family-grid">
+        <div class="family-card">
+          <h4>MergeTree</h4>
+          <p>Base engine. Stores all inserted rows. Use for append-only analytics and event logs.</p>
+          <code>ENGINE = MergeTree()</code>
+        </div>
+        <div class="family-card accent-blue">
+          <h4>ReplacingMergeTree</h4>
+          <p>Deduplicates rows by sorting key during merges. Last version wins. Use for mutable dimension tables.</p>
+          <code>ENGINE = ReplacingMergeTree(version)</code>
+        </div>
+        <div class="family-card accent-green">
+          <h4>SummingMergeTree</h4>
+          <p>Automatically sums numeric columns for rows with same sorting key during merges. Use for pre-aggregated counters.</p>
+          <code>ENGINE = SummingMergeTree(columns)</code>
+        </div>
+        <div class="family-card accent-purple">
+          <h4>AggregatingMergeTree</h4>
+          <p>Stores partial aggregation states (AggregateFunction types). Use with materialized views for real-time rollups.</p>
+          <code>ENGINE = AggregatingMergeTree()</code>
+        </div>
+        <div class="family-card accent-orange">
+          <h4>CollapsingMergeTree</h4>
+          <p>Uses a sign column (+1 / -1) to logically delete/update rows during merges. Use for mutable event streams.</p>
+          <code>ENGINE = CollapsingMergeTree(sign)</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 7: Partitioning ===== -->
+    <section class="demo-section">
+      <h2>📅 Partitioning</h2>
+      <p class="section-desc">Partitions organize data into independent directories. Queries that filter on partition keys skip entire partitions.</p>
+      <div class="partition-viz" id="partitionViz">
+        <div class="partition-controls">
+          <button id="queryAllBtn" class="action-btn query-btn">SELECT * (all partitions)</button>
+          <button id="queryMonthBtn" class="action-btn query-btn">WHERE month = '2024-03'</button>
+          <button id="queryRangeBtn" class="action-btn query-btn">WHERE month BETWEEN '2024-01' AND '2024-02'</button>
+        </div>
+        <div class="partitions-row" id="partitionsRow"></div>
+        <div class="partition-result" id="partitionResult"></div>
+      </div>
+    </section>
+
+    <!-- Tuning Section -->
+    <section class="tuning-section">
+      <h2>🎛️ Key MergeTree Settings</h2>
+      <div class="tuning-grid">
+        <div class="tuning-card">
+          <h4>index_granularity</h4>
+          <p>Rows per granule. Smaller = more precise skipping, larger index.</p>
+          <code>index_granularity = 8192</code>
+        </div>
+        <div class="tuning-card">
+          <h4>min_bytes_for_wide_part</h4>
+          <p>Parts below this use compact format (single file). Above = wide format (file per column).</p>
+          <code>min_bytes_for_wide_part = 10485760</code>
+        </div>
+        <div class="tuning-card">
+          <h4>merge_with_ttl_timeout</h4>
+          <p>Minimum delay between TTL-triggered merges</p>
+          <code>merge_with_ttl_timeout = 14400</code>
+        </div>
+        <div class="tuning-card">
+          <h4>max_parts_in_total</h4>
+          <p>Too many parts = "too many parts" error. Keep under this limit.</p>
+          <code>max_parts_in_total = 100000</code>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree" target="_blank">ClickHouse MergeTree documentation</a> and source code analysis</p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20ClickHouse%20MergeTree%20visualization%20-%20see%20how%20parts%2C%20merges%2C%20and%20sparse%20indexes%20work&url=https://systeminternals.dev/clickhouse/mergetree/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/clickhouse/mergetree/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #facc15, #f97316, #ef4444);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  /* Sections */
+  .demo-section {
+    background: rgba(255,255,255,0.02);
+    border-radius: 20px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .demo-section h2 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .section-desc {
+    color: #888;
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+
+  .section-desc strong {
+    color: #facc15;
+  }
+
+  /* Controls */
+  .controls-section {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .control-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+
+  .action-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .insert-btn {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+  }
+
+  .insert-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249, 115, 22, 0.4); }
+
+  .insert-btn-secondary {
+    background: linear-gradient(135deg, #ea580c, #c2410c);
+    color: white;
+  }
+
+  .merge-action-btn {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+  }
+
+  .merge-action-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(139, 92, 246, 0.4); }
+
+  .search-btn {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+
+  .search-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+
+  .compress-btn {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+  }
+
+  .compress-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4); }
+
+  .query-btn {
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    color: white;
+    font-size: 0.85rem;
+    padding: 10px 16px;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .search-input {
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.3);
+    color: #fff;
+    font-size: 1rem;
+    width: 180px;
+  }
+
+  .codec-select {
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 0.95rem;
+  }
+
+  .stats-row {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+
+  .stat { text-align: center; }
+
+  .stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* Column vs Row Storage */
+  .storage-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+
+  .storage-panel {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .storage-panel h3 {
+    font-size: 0.95rem;
+    color: #aaa;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  :global(.storage-row) {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 2px;
+  }
+
+  :global(.storage-cell) {
+    padding: 6px 8px;
+    font-size: 0.7rem;
+    border-radius: 4px;
+    flex: 1;
+    text-align: center;
+    transition: all 0.3s;
+    background: rgba(255,255,255,0.05);
+    color: #888;
+    cursor: pointer;
+  }
+
+  :global(.storage-cell.header) {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  :global(.storage-cell.highlight) {
+    background: rgba(59, 130, 246, 0.4);
+    color: #fff;
+  }
+
+  :global(.storage-cell.dimmed) {
+    opacity: 0.2;
+  }
+
+  .read-indicator {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #666;
+    margin-top: 10px;
+    min-height: 24px;
+  }
+
+  .storage-stats {
+    text-align: center;
+    font-size: 0.9rem;
+    color: #888;
+    min-height: 24px;
+  }
+
+  /* Parts viz */
+  .parts-viz {
+    margin-bottom: 20px;
+    min-height: 100px;
+  }
+
+  .parts-container {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-height: 80px;
+    align-items: flex-start;
+  }
+
+  :global(.part-block) {
+    background: rgba(249, 115, 22, 0.15);
+    border: 1px solid rgba(249, 115, 22, 0.4);
+    border-radius: 10px;
+    padding: 12px;
+    min-width: 100px;
+    animation: partAppear 0.4s ease-out;
+    transition: all 0.3s;
+  }
+
+  :global(.part-block.merging) {
+    animation: mergePulse 0.6s ease-in-out infinite;
+    border-color: rgba(139, 92, 246, 0.6);
+    background: rgba(139, 92, 246, 0.15);
+  }
+
+  :global(.part-block.merged) {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.4);
+  }
+
+  @keyframes partAppear {
+    from { transform: scale(0.7) translateY(-10px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+  }
+
+  @keyframes mergePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.97); }
+  }
+
+  :global(.part-name) {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #f97316;
+    margin-bottom: 4px;
+  }
+
+  :global(.part-block.merged .part-name) {
+    color: #22c55e;
+  }
+
+  :global(.part-info) {
+    font-size: 0.7rem;
+    color: #888;
+  }
+
+  :global(.part-columns) {
+    display: flex;
+    gap: 3px;
+    margin-top: 6px;
+  }
+
+  :global(.col-file) {
+    width: 8px;
+    height: 20px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.2);
+  }
+
+  :global(.col-file.id-col) { background: rgba(59, 130, 246, 0.5); }
+  :global(.col-file.name-col) { background: rgba(34, 197, 94, 0.5); }
+  :global(.col-file.val-col) { background: rgba(249, 115, 22, 0.5); }
+  :global(.col-file.ts-col) { background: rgba(168, 85, 247, 0.5); }
+
+  /* Sparse index */
+  .sparse-viz {
+    margin-top: 16px;
+  }
+
+  .granule-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  :global(.granule) {
+    width: 48px;
+    height: 36px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: #888;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+  }
+
+  :global(.granule.scanned) {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.6);
+    color: #fff;
+  }
+
+  :global(.granule.skipped) {
+    opacity: 0.2;
+  }
+
+  :global(.granule.found) {
+    background: rgba(34, 197, 94, 0.4);
+    border-color: rgba(34, 197, 94, 0.7);
+    color: #fff;
+  }
+
+  .mark-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  :global(.mark) {
+    width: 48px;
+    text-align: center;
+    font-size: 0.55rem;
+    color: #555;
+  }
+
+  :global(.mark.active) {
+    color: #facc15;
+    font-weight: 600;
+  }
+
+  .search-result {
+    font-size: 0.9rem;
+    color: #888;
+    min-height: 24px;
+  }
+
+  /* Compression */
+  .compression-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    min-height: 80px;
+  }
+
+  :global(.codec-card) {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+    animation: partAppear 0.3s ease-out;
+  }
+
+  :global(.codec-name) {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  :global(.codec-bar-bg) {
+    height: 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  :global(.codec-bar-fill) {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.6s ease-out;
+  }
+
+  :global(.codec-ratio) {
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  :global(.codec-ratio strong) {
+    color: #22c55e;
+  }
+
+  /* Skip indexes */
+  .skip-index-viz {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .skip-index-card {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .skip-index-card h4 {
+    font-size: 1rem;
+    color: #facc15;
+    margin-bottom: 8px;
+  }
+
+  .skip-index-card p {
+    font-size: 0.85rem;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 10px;
+  }
+
+  .skip-example code {
+    display: block;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #22c55e;
+    margin-bottom: 10px;
+  }
+
+  .skip-demo {
+    display: flex;
+    gap: 3px;
+    min-height: 24px;
+    flex-wrap: wrap;
+  }
+
+  :global(.skip-block) {
+    width: 24px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    transition: all 0.3s;
+  }
+
+  :global(.skip-block.read) {
+    background: rgba(59, 130, 246, 0.5);
+  }
+
+  :global(.skip-block.skipped) {
+    background: rgba(255,255,255,0.03);
+    opacity: 0.3;
+  }
+
+  /* Partitioning */
+  .partition-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .partitions-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  :global(.partition-block) {
+    flex: 1;
+    min-width: 120px;
+    background: rgba(6, 182, 212, 0.1);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  :global(.partition-block.active) {
+    background: rgba(6, 182, 212, 0.25);
+    border-color: rgba(6, 182, 212, 0.6);
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+  }
+
+  :global(.partition-block.pruned) {
+    opacity: 0.2;
+  }
+
+  :global(.partition-label) {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #06b6d4;
+    margin-bottom: 4px;
+  }
+
+  :global(.partition-parts) {
+    font-size: 0.75rem;
+    color: #888;
+  }
+
+  .partition-result {
+    font-size: 0.9rem;
+    color: #888;
+    min-height: 24px;
+  }
+
+  /* Family */
+  .family-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+  }
+
+  .family-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(249, 115, 22, 0.3);
+  }
+
+  .family-card.accent-blue { border-color: rgba(59, 130, 246, 0.3); }
+  .family-card.accent-green { border-color: rgba(34, 197, 94, 0.3); }
+  .family-card.accent-purple { border-color: rgba(168, 85, 247, 0.3); }
+  .family-card.accent-orange { border-color: rgba(251, 146, 60, 0.3); }
+
+  .family-card h4 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .family-card p {
+    font-size: 0.85rem;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 12px;
+  }
+
+  .family-card code {
+    display: block;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #f97316;
+  }
+
+  /* Tuning */
+  .tuning-section {
+    margin-bottom: 40px;
+  }
+
+  .tuning-section h2 {
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+    color: #fff;
+  }
+
+  .tuning-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .tuning-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .tuning-card h4 {
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .tuning-card p {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+
+  .tuning-card code {
+    display: block;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #22c55e;
+    overflow-x: auto;
+  }
+
+  /* Log */
+  .log-section {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .log-section h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+    color: #888;
+  }
+
+  .log-container {
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+  }
+
+  :global(.log-entry) {
+    padding: 4px 0;
+    color: #888;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  :global(.log-entry.insert) { color: #f97316; }
+  :global(.log-entry.merge) { color: #8b5cf6; }
+  :global(.log-entry.info) { color: #3b82f6; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #facc15; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .storage-compare { grid-template-columns: 1fr; }
+    .stats-row { gap: 20px; }
+    .stat-value { font-size: 1.2rem; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // Section 1: Column vs Row Storage
+  // ============================================================
+  (function() {
+    var columns = ['id', 'name', 'city', 'revenue'];
+    var data = [
+      [1, 'Alice', 'NYC', 4500],
+      [2, 'Bob', 'SF', 3200],
+      [3, 'Carol', 'NYC', 7800],
+      [4, 'Dave', 'LA', 2100],
+      [5, 'Eve', 'SF', 5600],
+      [6, 'Frank', 'NYC', 9100]
+    ];
+
+    var rowTable = document.getElementById('rowTable');
+    var colTable = document.getElementById('colTable');
+    var rowReadInfo = document.getElementById('rowReadInfo');
+    var colReadInfo = document.getElementById('colReadInfo');
+    var storageStats = document.getElementById('storageStats');
+
+    // Build row-oriented table
+    function buildRowTable() {
+      var html = '<div class="storage-row">';
+      for (var c = 0; c < columns.length; c++) {
+        html += '<div class="storage-cell header" data-col="' + c + '">' + columns[c] + '</div>';
+      }
+      html += '</div>';
+      for (var r = 0; r < data.length; r++) {
+        html += '<div class="storage-row">';
+        for (var c = 0; c < columns.length; c++) {
+          html += '<div class="storage-cell" data-col="' + c + '" data-row="' + r + '">' + data[r][c] + '</div>';
+        }
+        html += '</div>';
+      }
+      rowTable.innerHTML = html;
+    }
+
+    // Build column-oriented table (transposed)
+    function buildColTable() {
+      var html = '';
+      for (var c = 0; c < columns.length; c++) {
+        html += '<div class="storage-row">';
+        html += '<div class="storage-cell header" data-col="' + c + '">' + columns[c] + '</div>';
+        for (var r = 0; r < data.length; r++) {
+          html += '<div class="storage-cell" data-col="' + c + '" data-row="' + r + '">' + data[r][c] + '</div>';
+        }
+        html += '</div>';
+      }
+      colTable.innerHTML = html;
+    }
+
+    function highlightColumn(colIdx) {
+      // Row table: highlight entire rows (must read all columns)
+      var rowCells = rowTable.querySelectorAll('.storage-cell');
+      for (var i = 0; i < rowCells.length; i++) {
+        rowCells[i].classList.add('highlight');
+      }
+      rowReadInfo.textContent = 'Must read ALL ' + (data.length * columns.length) + ' cells (entire rows)';
+      rowReadInfo.style.color = '#ef4444';
+
+      // Col table: highlight only selected column
+      var colCells = colTable.querySelectorAll('.storage-cell');
+      for (var i = 0; i < colCells.length; i++) {
+        var cellCol = parseInt(colCells[i].getAttribute('data-col'));
+        if (cellCol === colIdx) {
+          colCells[i].classList.add('highlight');
+          colCells[i].classList.remove('dimmed');
+        } else {
+          colCells[i].classList.add('dimmed');
+          colCells[i].classList.remove('highlight');
+        }
+      }
+      colReadInfo.textContent = 'Read only ' + (data.length + 1) + ' cells (column "' + columns[colIdx] + '")';
+      colReadInfo.style.color = '#22c55e';
+
+      var savings = Math.round((1 - (data.length + 1) / (data.length * columns.length)) * 100);
+      storageStats.innerHTML = '<strong style="color:#22c55e">' + savings + '% less data read</strong> — this is why column stores dominate analytics';
+    }
+
+    buildRowTable();
+    buildColTable();
+
+    // Attach click handlers to headers
+    var allHeaders = document.querySelectorAll('.storage-cell.header');
+    for (var i = 0; i < allHeaders.length; i++) {
+      allHeaders[i].addEventListener('click', function() {
+        var colIdx = parseInt(this.getAttribute('data-col'));
+        highlightColumn(colIdx);
+      });
+    }
+  })();
+
+  // ============================================================
+  // Section 2: Parts & Merges
+  // ============================================================
+  (function() {
+    var parts = [];
+    var partCounter = 0;
+    var insertCounter = 0;
+    var mergeCounter = 0;
+    var totalRows = 0;
+    var MERGE_TRIGGER = 4;
+
+    var partsContainer = document.getElementById('partsContainer');
+    var partsLog = document.getElementById('partsLog');
+    var partCountEl = document.getElementById('partCount');
+    var totalRowsEl = document.getElementById('totalRows');
+    var mergeCountEl = document.getElementById('mergeCount');
+    var insertCountEl = document.getElementById('insertCount');
+
+    function pLog(msg, type) {
+      var entry = document.createElement('div');
+      entry.className = 'log-entry ' + (type || '');
+      var now = new Date();
+      entry.textContent = '[' + now.toLocaleTimeString() + '] ' + msg;
+      partsLog.insertBefore(entry, partsLog.firstChild);
+      if (partsLog.children.length > 20) {
+        partsLog.removeChild(partsLog.lastChild);
+      }
+    }
+
+    function renderParts() {
+      partsContainer.innerHTML = '';
+      for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        var div = document.createElement('div');
+        div.className = 'part-block' + (p.merged ? ' merged' : '');
+        div.innerHTML = '<div class="part-name">' + p.name + '</div>' +
+          '<div class="part-info">' + p.rows + ' rows</div>' +
+          '<div class="part-columns">' +
+            '<div class="col-file id-col" title="id.bin"></div>' +
+            '<div class="col-file name-col" title="name.bin"></div>' +
+            '<div class="col-file val-col" title="value.bin"></div>' +
+            '<div class="col-file ts-col" title="timestamp.bin"></div>' +
+          '</div>';
+        partsContainer.appendChild(div);
+      }
+      partCountEl.textContent = parts.length;
+      totalRowsEl.textContent = totalRows;
+      mergeCountEl.textContent = mergeCounter;
+      insertCountEl.textContent = insertCounter;
+    }
+
+    function insertBatch() {
+      var rows = Math.floor(Math.random() * 900) + 100;
+      partCounter++;
+      insertCounter++;
+      totalRows += rows;
+      var name = 'part_' + partCounter;
+      parts.push({ name: name, rows: rows, merged: false });
+      pLog('INSERT ' + rows + ' rows → created ' + name, 'insert');
+      renderParts();
+
+      if (parts.length >= MERGE_TRIGGER) {
+        setTimeout(function() { autoMerge(); }, 600);
+      }
+    }
+
+    function autoMerge() {
+      if (parts.length < 2) return;
+      // Merge smallest parts
+      parts.sort(function(a, b) { return a.rows - b.rows; });
+      var p1 = parts.shift();
+      var p2 = parts.shift();
+      mergeCounter++;
+      partCounter++;
+      var merged = {
+        name: 'part_' + partCounter,
+        rows: p1.rows + p2.rows,
+        merged: true
+      };
+      parts.push(merged);
+      pLog('MERGE ' + p1.name + ' + ' + p2.name + ' → ' + merged.name + ' (' + merged.rows + ' rows)', 'merge');
+      renderParts();
+    }
+
+    function forceMerge() {
+      if (parts.length < 2) {
+        pLog('Need at least 2 parts to merge', 'info');
+        return;
+      }
+      autoMerge();
+    }
+
+    function resetParts() {
+      parts = [];
+      partCounter = 0;
+      insertCounter = 0;
+      mergeCounter = 0;
+      totalRows = 0;
+      renderParts();
+      partsLog.innerHTML = '<div class="log-entry">System reset. Ready.</div>';
+    }
+
+    document.getElementById('insertBtn').addEventListener('click', insertBatch);
+    document.getElementById('insert5Btn').addEventListener('click', function() {
+      var i = 0;
+      function next() {
+        if (i < 5) { insertBatch(); i++; setTimeout(next, 300); }
+      }
+      next();
+    });
+    document.getElementById('mergeBtn').addEventListener('click', forceMerge);
+    document.getElementById('resetPartsBtn').addEventListener('click', resetParts);
+
+    renderParts();
+  })();
+
+  // ============================================================
+  // Section 3: Sparse Index Lookup
+  // ============================================================
+  (function() {
+    var GRANULE_SIZE = 8192;
+    var TOTAL_ROWS = 100000;
+    var NUM_GRANULES = Math.ceil(TOTAL_ROWS / GRANULE_SIZE);
+    var granuleRow = document.getElementById('granuleRow');
+    var markRow = document.getElementById('markRow');
+    var searchResult = document.getElementById('searchResult');
+
+    function buildGranules() {
+      granuleRow.innerHTML = '';
+      markRow.innerHTML = '';
+      for (var i = 0; i < NUM_GRANULES; i++) {
+        var g = document.createElement('div');
+        g.className = 'granule';
+        g.setAttribute('data-idx', i);
+        g.textContent = 'G' + i;
+        granuleRow.appendChild(g);
+
+        var m = document.createElement('div');
+        m.className = 'mark';
+        m.textContent = (i * GRANULE_SIZE).toLocaleString();
+        markRow.appendChild(m);
+      }
+    }
+
+    function lookup() {
+      var val = parseInt(document.getElementById('searchValue').value);
+      if (isNaN(val) || val < 1 || val > TOTAL_ROWS) {
+        searchResult.textContent = 'Enter a value between 1 and ' + TOTAL_ROWS;
+        return;
+      }
+
+      var targetGranule = Math.floor((val - 1) / GRANULE_SIZE);
+      var granules = granuleRow.querySelectorAll('.granule');
+      var marks = markRow.querySelectorAll('.mark');
+
+      for (var i = 0; i < granules.length; i++) {
+        granules[i].className = 'granule';
+        marks[i].className = 'mark';
+      }
+
+      // Animate: binary search simulation
+      var left = 0;
+      var right = NUM_GRANULES - 1;
+      var steps = [];
+
+      while (left <= right) {
+        var mid = Math.floor((left + right) / 2);
+        var midStart = mid * GRANULE_SIZE + 1;
+        var midEnd = Math.min((mid + 1) * GRANULE_SIZE, TOTAL_ROWS);
+        steps.push({ idx: mid, type: 'scan' });
+        if (val >= midStart && val <= midEnd) {
+          steps.push({ idx: mid, type: 'found' });
+          break;
+        } else if (val < midStart) {
+          right = mid - 1;
+        } else {
+          left = mid + 1;
+        }
+      }
+
+      var step = 0;
+      function animateStep() {
+        if (step >= steps.length) {
+          // Mark skipped
+          for (var i = 0; i < granules.length; i++) {
+            if (granules[i].className === 'granule') {
+              granules[i].classList.add('skipped');
+            }
+          }
+          searchResult.innerHTML = 'Found in <strong style="color:#22c55e">granule ' + targetGranule + '</strong> (rows ' +
+            (targetGranule * GRANULE_SIZE + 1).toLocaleString() + '–' +
+            Math.min((targetGranule + 1) * GRANULE_SIZE, TOTAL_ROWS).toLocaleString() + '). ' +
+            'Checked <strong style="color:#facc15">' + steps.length + '</strong> marks out of ' + NUM_GRANULES + ' — <strong style="color:#22c55e">' +
+            Math.round((1 - steps.length / NUM_GRANULES) * 100) + '% skipped</strong>';
+          return;
+        }
+        var s = steps[step];
+        if (s.type === 'found') {
+          granules[s.idx].className = 'granule found';
+          marks[s.idx].className = 'mark active';
+        } else {
+          granules[s.idx].className = 'granule scanned';
+          marks[s.idx].className = 'mark active';
+        }
+        step++;
+        setTimeout(animateStep, 250);
+      }
+
+      searchResult.textContent = 'Searching...';
+      animateStep();
+    }
+
+    buildGranules();
+    document.getElementById('searchBtn').addEventListener('click', lookup);
+  })();
+
+  // ============================================================
+  // Section 4: Compression Demo
+  // ============================================================
+  (function() {
+    var compressionData = {
+      timestamps: {
+        label: 'Timestamps',
+        raw: 80000,
+        codecs: [
+          { name: 'LZ4', ratio: 3.2, color: '#3b82f6' },
+          { name: 'ZSTD', ratio: 5.1, color: '#8b5cf6' },
+          { name: 'Delta + LZ4', ratio: 12.5, color: '#22c55e' },
+          { name: 'DoubleDelta + ZSTD', ratio: 28.0, color: '#facc15' }
+        ]
+      },
+      ids: {
+        label: 'Random User IDs',
+        raw: 80000,
+        codecs: [
+          { name: 'LZ4', ratio: 1.8, color: '#3b82f6' },
+          { name: 'ZSTD', ratio: 2.5, color: '#8b5cf6' },
+          { name: 'Delta + LZ4', ratio: 1.9, color: '#22c55e' },
+          { name: 'DoubleDelta + ZSTD', ratio: 2.2, color: '#facc15' }
+        ]
+      },
+      status: {
+        label: 'HTTP Status Codes',
+        raw: 80000,
+        codecs: [
+          { name: 'LZ4', ratio: 15.0, color: '#3b82f6' },
+          { name: 'ZSTD', ratio: 42.0, color: '#8b5cf6' },
+          { name: 'LowCardinality + LZ4', ratio: 85.0, color: '#22c55e' },
+          { name: 'LowCardinality + ZSTD', ratio: 120.0, color: '#facc15' }
+        ]
+      },
+      metrics: {
+        label: 'Float Metrics',
+        raw: 80000,
+        codecs: [
+          { name: 'LZ4', ratio: 2.1, color: '#3b82f6' },
+          { name: 'ZSTD', ratio: 3.8, color: '#8b5cf6' },
+          { name: 'Gorilla + LZ4', ratio: 8.5, color: '#22c55e' },
+          { name: 'Gorilla + ZSTD', ratio: 11.2, color: '#facc15' }
+        ]
+      }
+    };
+
+    var container = document.getElementById('compressionResults');
+
+    function showCompression() {
+      var type = document.getElementById('dataType').value;
+      var d = compressionData[type];
+      var maxRatio = 0;
+      for (var i = 0; i < d.codecs.length; i++) {
+        if (d.codecs[i].ratio > maxRatio) maxRatio = d.codecs[i].ratio;
+      }
+
+      container.innerHTML = '';
+      for (var i = 0; i < d.codecs.length; i++) {
+        var c = d.codecs[i];
+        var pct = Math.round((c.ratio / maxRatio) * 100);
+        var compressed = Math.round(d.raw / c.ratio);
+        var card = document.createElement('div');
+        card.className = 'codec-card';
+        card.innerHTML = '<div class="codec-name">' + c.name + '</div>' +
+          '<div class="codec-bar-bg"><div class="codec-bar-fill" style="width:0%;background:' + c.color + '"></div></div>' +
+          '<div class="codec-ratio">' + (d.raw / 1000).toFixed(0) + 'KB → <strong>' + (compressed / 1000).toFixed(1) + 'KB</strong> (' + c.ratio + 'x)</div>';
+        container.appendChild(card);
+        // Animate bar
+        (function(el, w) {
+          setTimeout(function() { el.querySelector('.codec-bar-fill').style.width = w + '%'; }, 50);
+        })(card, pct);
+      }
+    }
+
+    document.getElementById('compressBtn').addEventListener('click', showCompression);
+    showCompression();
+  })();
+
+  // ============================================================
+  // Section 5: Data Skipping Indexes Demo
+  // ============================================================
+  (function() {
+    var NUM_BLOCKS = 12;
+    var containers = {
+      minmax: document.getElementById('skipMinmax'),
+      set: document.getElementById('skipSet'),
+      bloom: document.getElementById('skipBloom'),
+      ngram: document.getElementById('skipNgram')
+    };
+
+    function initBlocks() {
+      var ids = ['skipMinmax', 'skipSet', 'skipBloom', 'skipNgram'];
+      for (var k = 0; k < ids.length; k++) {
+        var el = document.getElementById(ids[k]);
+        el.innerHTML = '';
+        for (var i = 0; i < NUM_BLOCKS; i++) {
+          var b = document.createElement('div');
+          b.className = 'skip-block';
+          el.appendChild(b);
+        }
+      }
+    }
+
+    function animateSkip(containerId, readIndexes) {
+      var el = document.getElementById(containerId);
+      var blocks = el.querySelectorAll('.skip-block');
+      var i = 0;
+      function next() {
+        if (i >= blocks.length) return;
+        var isRead = readIndexes.indexOf(i) !== -1;
+        blocks[i].className = 'skip-block ' + (isRead ? 'read' : 'skipped');
+        i++;
+        setTimeout(next, 80);
+      }
+      // Reset first
+      for (var j = 0; j < blocks.length; j++) blocks[j].className = 'skip-block';
+      next();
+    }
+
+    document.getElementById('runSkipDemo').addEventListener('click', function() {
+      animateSkip('skipMinmax', [2, 3, 7]);
+      setTimeout(function() { animateSkip('skipSet', [4]); }, 200);
+      setTimeout(function() { animateSkip('skipBloom', [1, 9]); }, 400);
+      setTimeout(function() { animateSkip('skipNgram', [0, 5, 6]); }, 600);
+    });
+
+    initBlocks();
+  })();
+
+  // ============================================================
+  // Section 7: Partitioning
+  // ============================================================
+  (function() {
+    var months = ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06'];
+    var partsPerMonth = [3, 2, 4, 2, 3, 1];
+    var partitionsRow = document.getElementById('partitionsRow');
+    var partitionResult = document.getElementById('partitionResult');
+
+    function buildPartitions() {
+      partitionsRow.innerHTML = '';
+      for (var i = 0; i < months.length; i++) {
+        var div = document.createElement('div');
+        div.className = 'partition-block';
+        div.setAttribute('data-month', months[i]);
+        div.innerHTML = '<div class="partition-label">' + months[i] + '</div>' +
+          '<div class="partition-parts">' + partsPerMonth[i] + ' parts</div>';
+        partitionsRow.appendChild(div);
+      }
+    }
+
+    function highlightPartitions(activeMonths, label) {
+      var blocks = partitionsRow.querySelectorAll('.partition-block');
+      var scanned = 0;
+      var total = 0;
+      for (var i = 0; i < blocks.length; i++) {
+        total += partsPerMonth[i];
+        var month = blocks[i].getAttribute('data-month');
+        if (activeMonths.indexOf(month) !== -1) {
+          blocks[i].className = 'partition-block active';
+          scanned += partsPerMonth[i];
+        } else {
+          blocks[i].className = 'partition-block pruned';
+        }
+      }
+      var pruned = months.length - activeMonths.length;
+      partitionResult.innerHTML = label + ' — Scanned <strong style="color:#06b6d4">' + scanned +
+        ' parts</strong> in ' + activeMonths.length + ' partitions, <strong style="color:#22c55e">pruned ' +
+        pruned + ' partitions</strong>';
+    }
+
+    document.getElementById('queryAllBtn').addEventListener('click', function() {
+      var blocks = partitionsRow.querySelectorAll('.partition-block');
+      for (var i = 0; i < blocks.length; i++) blocks[i].className = 'partition-block active';
+      partitionResult.innerHTML = 'Full scan — all ' + months.length + ' partitions read (no pruning)';
+    });
+
+    document.getElementById('queryMonthBtn').addEventListener('click', function() {
+      highlightPartitions(['2024-03'], 'WHERE month = \'2024-03\'');
+    });
+
+    document.getElementById('queryRangeBtn').addEventListener('click', function() {
+      highlightPartitions(['2024-01', '2024-02'], 'WHERE month BETWEEN \'2024-01\' AND \'2024-02\'');
+    });
+
+    buildPartitions();
+  })();
+</script>

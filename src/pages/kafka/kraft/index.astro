@@ -1,0 +1,1123 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kafka KRaft — Replacing ZooKeeper" 
+  description="Interactive visualization of Kafka KRaft mode: controller quorum, Raft-based leader election, metadata event log, and migration from ZooKeeper"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kafka", href: "/kafka/" },
+    { label: "KRaft", href: "/kafka/kraft/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ KRaft — Kafka Without ZooKeeper</h1>
+      <p class="subtitle">How Kafka replaced an external dependency with a built-in Raft-based consensus layer</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          For years, Apache Kafka relied on <strong>ZooKeeper</strong> for metadata management — tracking brokers,
+          topics, partitions, and leader elections. KRaft (Kafka Raft) replaces ZooKeeper with an
+          <em>internal consensus protocol</em> built on Raft. A dedicated <strong>controller quorum</strong>
+          manages cluster metadata as an <em>event log</em>, eliminating the operational burden of running
+          a separate ZooKeeper ensemble. ZooKeeper support was removed in Kafka 4.0.
+        </p>
+      </div>
+    </section>
+
+    <!-- Why Replace ZooKeeper -->
+    <section class="problems-section">
+      <h2>🚨 Why Replace ZooKeeper?</h2>
+      <p class="section-desc">Three fundamental problems with the ZooKeeper dependency.</p>
+
+      <div class="problems-grid">
+        <div class="problem-card" id="problemSpof">
+          <div class="problem-icon">🎯</div>
+          <h3>Single Point of Failure</h3>
+          <p>
+            ZooKeeper is a <strong>separate distributed system</strong> that must be deployed, monitored,
+            and maintained independently. A ZK quorum failure takes down <em>all Kafka metadata operations</em> —
+            no new topics, no leader elections, no partition reassignment.
+          </p>
+          <div class="problem-stat">2 systems to maintain instead of 1</div>
+        </div>
+        <div class="problem-card" id="problemComplex">
+          <div class="problem-icon">🔧</div>
+          <h3>Operational Complexity</h3>
+          <p>
+            Running ZooKeeper requires its own <strong>JVM tuning</strong>, separate monitoring,
+            different upgrade procedures, and careful capacity planning. ZK has different failure modes
+            and scaling characteristics than Kafka itself.
+          </p>
+          <div class="problem-stat">~50% more ops overhead</div>
+        </div>
+        <div class="problem-card" id="problemDelay">
+          <div class="problem-icon">🐌</div>
+          <h3>Metadata Propagation Delay</h3>
+          <p>
+            Metadata changes flow through ZooKeeper via <strong>watches</strong>, then get propagated
+            to the controller, which pushes updates to brokers. This indirect path creates
+            <em>delay and inconsistency windows</em> during topology changes.
+          </p>
+          <div class="problem-stat">Seconds of stale metadata after changes</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Cluster Visualization -->
+    <section class="cluster-section">
+      <h2>🏗️ KRaft Cluster Architecture</h2>
+      <p class="section-desc">Interactive cluster — click controllers and brokers to see how the system responds.</p>
+
+      <div class="cluster-controls">
+        <button id="createTopicBtn" class="action-btn primary-btn">📦 Create Topic</button>
+        <button id="killControllerBtn" class="action-btn danger-btn">💀 Kill Active Controller</button>
+        <button id="killBrokerBtn" class="action-btn warning-btn">⚠️ Kill Broker</button>
+        <button id="resetClusterBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="cluster-viz-wrapper">
+        <div class="cluster-viz" id="clusterViz">
+          <!-- Controller Quorum -->
+          <div class="quorum-area">
+            <div class="quorum-label">Controller Quorum (Raft)</div>
+            <div class="controllers" id="controllers"></div>
+          </div>
+          <!-- Arrow -->
+          <div class="cluster-arrow">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">Metadata Log</div>
+            <div class="arrow-line"></div>
+          </div>
+          <!-- Brokers -->
+          <div class="brokers-area">
+            <div class="brokers-label">Broker Pool</div>
+            <div class="brokers" id="brokers"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cluster-log" id="clusterLog">
+        <div class="log-entry info">Cluster initialized — 3 controllers, 4 brokers</div>
+      </div>
+
+      <div class="metadata-panel" id="metadataPanel">
+        <h4>📋 Metadata Log (latest entries)</h4>
+        <div class="metadata-entries" id="metadataEntries"></div>
+      </div>
+    </section>
+
+    <!-- Controller Election Deep Dive -->
+    <section class="election-section">
+      <h2>🗳️ Controller Election</h2>
+      <p class="section-desc">Step through a Raft-based leader election when the active controller fails.</p>
+
+      <div class="election-controls">
+        <button id="startElectionBtn" class="action-btn primary-btn">▶ Start Election</button>
+        <button id="stepElectionBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="resetElectionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="election-viz" id="electionViz">
+        <div class="election-node" id="electNode0" data-role="leader">
+          <div class="election-node-label">Controller 0</div>
+          <div class="election-node-role">Active Controller</div>
+          <div class="election-node-term">Term: 1</div>
+        </div>
+        <div class="election-node" id="electNode1" data-role="follower">
+          <div class="election-node-label">Controller 1</div>
+          <div class="election-node-role">Follower</div>
+          <div class="election-node-term">Term: 1</div>
+        </div>
+        <div class="election-node" id="electNode2" data-role="follower">
+          <div class="election-node-label">Controller 2</div>
+          <div class="election-node-role">Follower</div>
+          <div class="election-node-term">Term: 1</div>
+        </div>
+      </div>
+
+      <div class="election-timeline" id="electionTimeline"></div>
+    </section>
+
+    <!-- Metadata Log Section -->
+    <section class="metalog-section">
+      <h2>📜 The Metadata Log</h2>
+      <p class="section-desc">Every cluster change is an event in a replicated log — just like Kafka's own commit log.</p>
+
+      <div class="metalog-controls">
+        <button id="addTopicEvt" class="action-btn primary-btn">📦 TopicCreated</button>
+        <button id="addPartEvt" class="action-btn secondary-btn">📊 PartitionAssigned</button>
+        <button id="addIsrEvt" class="action-btn warning-btn">🔄 ISRChange</button>
+        <button id="addBrokerEvt" class="action-btn commit-btn">🖥️ BrokerRegistered</button>
+        <button id="addFenceEvt" class="action-btn danger-btn">🚫 BrokerFenced</button>
+        <button id="resetLogBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="metalog-viz" id="metalogViz">
+        <div class="metalog-header">
+          <span class="metalog-col">Offset</span>
+          <span class="metalog-col">Type</span>
+          <span class="metalog-col">Data</span>
+          <span class="metalog-col">Epoch</span>
+        </div>
+        <div class="metalog-entries" id="metalogEntries"></div>
+      </div>
+
+      <div class="metalog-info">
+        <strong>Key insight:</strong> Unlike ZooKeeper's tree-based state, KRaft stores metadata as a
+        <em>log of events</em>. Brokers consume this log to build their local metadata cache — exactly
+        like consumers reading a Kafka topic. Snapshots periodically compact the log.
+      </div>
+    </section>
+
+    <!-- Broker Registration & Heartbeats -->
+    <section class="heartbeat-section">
+      <h2>💓 Broker Registration &amp; Heartbeats</h2>
+      <p class="section-desc">Brokers register with the controller and send periodic heartbeats. Fencing tokens prevent zombie brokers.</p>
+
+      <div class="heartbeat-controls">
+        <button id="startHeartbeatBtn" class="action-btn primary-btn">▶ Start Simulation</button>
+        <button id="fenceBrokerBtn" class="action-btn danger-btn">🚫 Fence Broker 2</button>
+        <button id="resetHeartbeatBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="heartbeat-viz" id="heartbeatViz"></div>
+      <div class="heartbeat-log" id="heartbeatLog"></div>
+
+      <div class="fencing-explainer">
+        <h4>🔑 Fencing Tokens</h4>
+        <p>
+          Each broker gets a <strong>monotonically increasing fencing token</strong> (broker epoch) upon registration.
+          If a broker loses connectivity and re-registers, it gets a <em>new, higher epoch</em>.
+          The old instance's writes are rejected because its epoch is stale — this prevents
+          <strong>split-brain</strong> scenarios where two instances of the same broker could corrupt data.
+        </p>
+      </div>
+    </section>
+
+    <!-- ZK vs KRaft Comparison -->
+    <section class="compare-section">
+      <h2>⚔️ ZooKeeper vs KRaft — Side by Side</h2>
+      <p class="section-desc">Toggle between architectures to see the structural differences.</p>
+
+      <div class="compare-toggle">
+        <button class="compare-btn active" data-mode="zk" id="zkBtn">ZooKeeper Mode</button>
+        <button class="compare-btn" data-mode="kraft" id="kraftBtn">KRaft Mode</button>
+        <button class="compare-btn" data-mode="split" id="splitBtn">Split View</button>
+      </div>
+
+      <div class="compare-viz" id="compareViz">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="compare-table">
+        <div class="ct-row ct-header">
+          <div class="ct-cell">Aspect</div>
+          <div class="ct-cell zk-cell">ZooKeeper</div>
+          <div class="ct-cell kraft-cell">KRaft</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Metadata Store</div>
+          <div class="ct-cell zk-cell">External ZK ensemble (znodes)</div>
+          <div class="ct-cell kraft-cell">Internal event log (Raft)</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Controller Election</div>
+          <div class="ct-cell zk-cell">Ephemeral znode race</div>
+          <div class="ct-cell kraft-cell">Raft leader election</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Metadata Propagation</div>
+          <div class="ct-cell zk-cell">ZK watches → controller → brokers</div>
+          <div class="ct-cell kraft-cell">Direct log replication</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Failover Time</div>
+          <div class="ct-cell zk-cell">Seconds (ZK session timeout)</div>
+          <div class="ct-cell kraft-cell">Milliseconds (Raft heartbeat)</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Max Partitions</div>
+          <div class="ct-cell zk-cell">~200K (ZK bottleneck)</div>
+          <div class="ct-cell kraft-cell">Millions (log-based)</div>
+        </div>
+        <div class="ct-row">
+          <div class="ct-cell">Ops Complexity</div>
+          <div class="ct-cell zk-cell">2 distributed systems</div>
+          <div class="ct-cell kraft-cell">1 system</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Migration Path -->
+    <section class="migration-section">
+      <h2>🛤️ Migration Path: ZK → KRaft</h2>
+      <p class="section-desc">Step through the migration process from ZooKeeper mode to KRaft mode.</p>
+
+      <div class="migration-steps" id="migrationSteps">
+        <div class="mig-step" data-step="1">
+          <div class="mig-step-num">1</div>
+          <div class="mig-step-content">
+            <h4>Upgrade to Bridge Release</h4>
+            <p>Upgrade all brokers to a Kafka version that supports both ZK and KRaft (3.3+). The cluster continues running in ZK mode.</p>
+          </div>
+        </div>
+        <div class="mig-step" data-step="2">
+          <div class="mig-step-num">2</div>
+          <div class="mig-step-content">
+            <h4>Deploy Controller Quorum</h4>
+            <p>Start KRaft controller nodes alongside existing ZK brokers. Controllers form a Raft quorum but don't manage metadata yet.</p>
+          </div>
+        </div>
+        <div class="mig-step" data-step="3">
+          <div class="mig-step-num">3</div>
+          <div class="mig-step-content">
+            <h4>Migrate Metadata</h4>
+            <p>Run the migration tool to copy all metadata from ZooKeeper into the KRaft metadata log. Dual-write mode ensures consistency.</p>
+          </div>
+        </div>
+        <div class="mig-step" data-step="4">
+          <div class="mig-step-num">4</div>
+          <div class="mig-step-content">
+            <h4>Switch to KRaft</h4>
+            <p>Flip the cluster to KRaft mode. Brokers now fetch metadata from the controller quorum. ZooKeeper is no longer the source of truth.</p>
+          </div>
+        </div>
+        <div class="mig-step" data-step="5">
+          <div class="mig-step-num">5</div>
+          <div class="mig-step-content">
+            <h4>Decommission ZooKeeper</h4>
+            <p>Once stable, shut down the ZooKeeper ensemble. The cluster is fully KRaft-native. No going back!</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="migration-controls">
+        <button id="migAnimateBtn" class="action-btn primary-btn">▶ Animate Migration</button>
+        <button id="migResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="migration-progress" id="migProgress">
+        <div class="mig-progress-bar" id="migProgressBar"></div>
+      </div>
+      <div class="migration-status" id="migStatus">Click "Animate Migration" to walk through the process</div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Raft?</h3>
+          <p>
+            Raft was chosen over ZooKeeper's ZAB protocol because it's <strong>simpler to reason about</strong>,
+            well-studied, and fits naturally with Kafka's log-based architecture. The metadata log
+            <em>is</em> a Raft log — same abstraction Kafka already uses for data.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Performance Gains</h3>
+          <p>
+            KRaft enables <strong>millions of partitions</strong> per cluster (vs ~200K with ZK),
+            <em>faster controller failover</em> (ms vs seconds), and eliminates the metadata
+            propagation delay from ZK watches. Startup time is also dramatically reduced.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Metadata Snapshots</h3>
+          <p>
+            Like Kafka's log compaction, the metadata log periodically creates <strong>snapshots</strong>.
+            New brokers or restarting controllers load the latest snapshot and replay only recent events —
+            no need to replay the entire log from the beginning.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🏗️ Combined vs Isolated Mode</h3>
+          <p>
+            Controllers can run on <strong>dedicated nodes</strong> (isolated, recommended for production)
+            or <strong>co-located with brokers</strong> (combined, simpler for dev/small clusters).
+            Use <code>process.roles=controller</code> or <code>process.roles=broker,controller</code>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-500%3A+Replace+ZooKeeper+with+a+Self-Managed+Metadata+Quorum" target="_blank">KIP-500: Replace ZooKeeper with a Self-Managed Metadata Quorum</a> and <a href="https://kafka.apache.org/documentation/#kraft" target="_blank">Apache Kafka KRaft Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20KRaft%20Visualizer%20—%20Replacing%20ZooKeeper&url=https://systeminternals.dev/kafka/kraft/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/kraft/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/kraft/&t=Interactive%20Kafka%20KRaft%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f59e0b, #ef4444, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(239,68,68,0.05)); border: 1px solid rgba(245,158,11,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f59e0b; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #f59e0b; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(245,158,11,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .warning-btn { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #1a1a2e; }
+  .warning-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(251,191,36,0.4); }
+  .step-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .commit-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Problems Section */
+  .problems-section { margin-bottom: 50px; }
+  .problems-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .problem-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; transition: all 0.3s; }
+  .problem-card:hover { border-color: rgba(239,68,68,0.4); transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .problem-icon { font-size: 2rem; margin-bottom: 12px; }
+  .problem-card h3 { font-size: 1.05rem; color: #fff; margin-bottom: 10px; }
+  .problem-card p { color: #aaa; font-size: 0.9rem; line-height: 1.6; margin-bottom: 12px; }
+  .problem-card strong { color: #f87171; }
+  .problem-card em { color: #fbbf24; font-style: normal; }
+  .problem-stat { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; color: #fca5a5; text-align: center; font-weight: 600; }
+
+  /* Cluster Section */
+  .cluster-section { margin-bottom: 50px; }
+  .cluster-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .cluster-viz-wrapper { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 30px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; }
+  .cluster-viz { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .quorum-area, .brokers-area { width: 100%; }
+  .quorum-label, .brokers-label { font-size: 0.85rem; font-weight: 700; color: #f59e0b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; text-align: center; }
+  .brokers-label { color: #60a5fa; }
+  .controllers, .brokers { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+
+  .cluster-arrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 0 20px; }
+  .arrow-line { flex: 1; height: 2px; background: linear-gradient(90deg, transparent, rgba(245,158,11,0.4), transparent); }
+  .arrow-label { font-size: 0.8rem; color: #f59e0b; font-weight: 600; white-space: nowrap; }
+
+  :global(.ctrl-node) { width: 120px; padding: 16px; border-radius: 12px; text-align: center; border: 2px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); transition: all 0.3s; cursor: default; }
+  :global(.ctrl-node.leader) { border-color: #f59e0b; background: rgba(245,158,11,0.15); box-shadow: 0 0 20px rgba(245,158,11,0.2); }
+  :global(.ctrl-node.dead) { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); opacity: 0.5; }
+  :global(.ctrl-name) { font-weight: 700; font-size: 0.85rem; color: #fff; margin-bottom: 4px; }
+  :global(.ctrl-role) { font-size: 0.75rem; color: #f59e0b; margin-bottom: 2px; }
+  :global(.ctrl-epoch) { font-size: 0.7rem; color: #888; }
+
+  :global(.broker-node) { width: 100px; padding: 14px; border-radius: 12px; text-align: center; border: 2px solid rgba(96,165,250,0.3); background: rgba(96,165,250,0.08); transition: all 0.3s; }
+  :global(.broker-node.dead) { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); opacity: 0.5; }
+  :global(.broker-node.registering) { animation: brokerPulse 1s ease-in-out infinite; }
+  @keyframes brokerPulse { 0%,100% { box-shadow: 0 0 0 rgba(96,165,250,0); } 50% { box-shadow: 0 0 15px rgba(96,165,250,0.3); } }
+  :global(.broker-name) { font-weight: 700; font-size: 0.85rem; color: #fff; margin-bottom: 4px; }
+  :global(.broker-parts) { font-size: 0.7rem; color: #60a5fa; }
+
+  .cluster-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.log-entry) { padding: 4px 0; animation: fadeIn 0.3s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.log-entry.info) { color: #93c5fd; }
+  :global(.log-entry.success) { color: #6ee7b7; }
+  :global(.log-entry.error) { color: #fca5a5; }
+  :global(.log-entry.warn) { color: #fde68a; }
+
+  .metadata-panel { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); }
+  .metadata-panel h4 { font-size: 0.9rem; color: #fff; margin-bottom: 10px; }
+  .metadata-entries { max-height: 150px; overflow-y: auto; }
+  :global(.meta-entry) { display: flex; gap: 12px; padding: 4px 0; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; animation: fadeIn 0.3s ease-out; }
+  :global(.meta-offset) { color: #888; width: 40px; }
+  :global(.meta-type) { color: #f59e0b; width: 140px; }
+  :global(.meta-data) { color: #aaa; flex: 1; }
+
+  /* Election Section */
+  .election-section { margin-bottom: 50px; }
+  .election-controls { display: flex; gap: 12px; margin-bottom: 20px; }
+  .election-viz { display: flex; justify-content: center; gap: 30px; margin-bottom: 20px; flex-wrap: wrap; }
+  .election-node { padding: 20px 24px; border-radius: 14px; text-align: center; border: 2px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); min-width: 140px; transition: all 0.4s; }
+  .election-node[data-role="leader"] { border-color: #f59e0b; background: rgba(245,158,11,0.12); box-shadow: 0 0 25px rgba(245,158,11,0.15); }
+  .election-node[data-role="candidate"] { border-color: #a78bfa; background: rgba(167,139,250,0.12); animation: candidatePulse 0.8s ease-in-out infinite; }
+  @keyframes candidatePulse { 0%,100% { box-shadow: 0 0 0 rgba(167,139,250,0); } 50% { box-shadow: 0 0 20px rgba(167,139,250,0.3); } }
+  .election-node[data-role="follower"] { border-color: rgba(255,255,255,0.2); }
+  .election-node[data-role="dead"] { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); opacity: 0.5; }
+  .election-node-label { font-weight: 700; font-size: 0.95rem; color: #fff; margin-bottom: 6px; }
+  .election-node-role { font-size: 0.8rem; color: #f59e0b; margin-bottom: 4px; }
+  .election-node-term { font-size: 0.75rem; color: #888; }
+  .election-timeline { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; min-height: 80px; border: 1px solid rgba(255,255,255,0.1); max-height: 300px; overflow-y: auto; }
+  :global(.elect-step) { padding: 8px 12px; margin-bottom: 8px; border-radius: 8px; font-size: 0.9rem; animation: fadeIn 0.4s ease-out; }
+  :global(.elect-step.info) { background: rgba(96,165,250,0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.elect-step.error) { background: rgba(239,68,68,0.1); color: #fca5a5; border-left: 3px solid #ef4444; }
+  :global(.elect-step.vote) { background: rgba(167,139,250,0.1); color: #c4b5fd; border-left: 3px solid #a78bfa; }
+  :global(.elect-step.success) { background: rgba(52,211,153,0.1); color: #6ee7b7; border-left: 3px solid #34d399; }
+
+  /* Metadata Log Section */
+  .metalog-section { margin-bottom: 50px; }
+  .metalog-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .metalog-viz { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; }
+  .metalog-header { display: flex; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px; }
+  .metalog-col { font-size: 0.8rem; font-weight: 700; color: #f59e0b; text-transform: uppercase; }
+  .metalog-col:nth-child(1) { width: 60px; }
+  .metalog-col:nth-child(2) { width: 160px; }
+  .metalog-col:nth-child(3) { flex: 1; }
+  .metalog-col:nth-child(4) { width: 60px; }
+  .metalog-entries { max-height: 250px; overflow-y: auto; }
+  :global(.mlog-row) { display: flex; gap: 12px; padding: 6px 12px; border-radius: 6px; animation: fadeIn 0.3s ease-out; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.mlog-row:nth-child(even)) { background: rgba(255,255,255,0.02); }
+  :global(.mlog-offset) { width: 60px; color: #888; }
+  :global(.mlog-type) { width: 160px; font-weight: 600; }
+  :global(.mlog-type.topic) { color: #34d399; }
+  :global(.mlog-type.partition) { color: #60a5fa; }
+  :global(.mlog-type.isr) { color: #fbbf24; }
+  :global(.mlog-type.broker) { color: #a78bfa; }
+  :global(.mlog-type.fence) { color: #f87171; }
+  :global(.mlog-data) { flex: 1; color: #aaa; }
+  :global(.mlog-epoch) { width: 60px; color: #888; }
+  .metalog-info { padding: 14px 18px; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .metalog-info strong { color: #f59e0b; }
+  .metalog-info em { color: #60a5fa; font-style: normal; }
+
+  /* Heartbeat Section */
+  .heartbeat-section { margin-bottom: 50px; }
+  .heartbeat-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .heartbeat-viz { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; min-height: 100px; }
+  :global(.hb-broker) { width: 140px; padding: 16px; border-radius: 12px; text-align: center; border: 2px solid rgba(96,165,250,0.3); background: rgba(96,165,250,0.08); transition: all 0.3s; }
+  :global(.hb-broker.active) { border-color: #34d399; background: rgba(52,211,153,0.08); }
+  :global(.hb-broker.fenced) { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); opacity: 0.6; }
+  :global(.hb-broker.heartbeat) { animation: hbPulse 0.5s ease-out; }
+  @keyframes hbPulse { 0% { box-shadow: 0 0 0 rgba(52,211,153,0); } 50% { box-shadow: 0 0 20px rgba(52,211,153,0.4); } 100% { box-shadow: 0 0 0 rgba(52,211,153,0); } }
+  :global(.hb-name) { font-weight: 700; font-size: 0.9rem; color: #fff; margin-bottom: 4px; }
+  :global(.hb-token) { font-size: 0.75rem; color: #f59e0b; margin-bottom: 4px; }
+  :global(.hb-status) { font-size: 0.75rem; color: #888; }
+
+  .heartbeat-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  .fencing-explainer { padding: 20px 24px; background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(167,139,250,0.08)); border: 1px solid rgba(245,158,11,0.3); border-radius: 14px; }
+  .fencing-explainer h4 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .fencing-explainer p { color: #aaa; font-size: 0.9rem; line-height: 1.7; }
+  .fencing-explainer strong { color: #f59e0b; }
+  .fencing-explainer em { color: #a78bfa; font-style: normal; }
+
+  /* Compare Section */
+  .compare-section { margin-bottom: 50px; }
+  .compare-toggle { display: flex; gap: 10px; margin-bottom: 20px; }
+  .compare-btn { padding: 10px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+  .compare-btn.active { border-color: #f59e0b; background: rgba(245,158,11,0.15); color: #f59e0b; }
+  .compare-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 30px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 24px; min-height: 200px; }
+
+  :global(.arch-diagram) { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  :global(.arch-row) { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  :global(.arch-box) { padding: 12px 20px; border-radius: 10px; text-align: center; font-size: 0.85rem; font-weight: 600; min-width: 100px; }
+  :global(.arch-box.zk) { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+  :global(.arch-box.ctrl) { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: #fde68a; }
+  :global(.arch-box.broker-box) { background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; }
+  :global(.arch-box.producer-box) { background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+  :global(.arch-connector) { color: #666; font-size: 1.2rem; }
+  :global(.arch-label) { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+  :global(.split-view) { display: flex; gap: 30px; }
+  :global(.split-col) { flex: 1; }
+  :global(.split-title) { font-size: 0.9rem; font-weight: 700; text-align: center; margin-bottom: 16px; padding: 8px; border-radius: 8px; }
+  :global(.split-title.zk-title) { color: #fca5a5; background: rgba(239,68,68,0.1); }
+  :global(.split-title.kraft-title) { color: #fde68a; background: rgba(245,158,11,0.1); }
+
+  .compare-table { border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+  .ct-row { display: flex; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .ct-row:last-child { border-bottom: none; }
+  .ct-header { background: rgba(255,255,255,0.05); }
+  .ct-header .ct-cell { font-weight: 700; color: #fff; font-size: 0.9rem; }
+  .ct-cell { flex: 1; padding: 12px 16px; font-size: 0.85rem; color: #aaa; }
+  .ct-cell:first-child { color: #ccc; font-weight: 600; }
+  .zk-cell { background: rgba(239,68,68,0.03); }
+  .kraft-cell { background: rgba(245,158,11,0.03); }
+
+  /* Migration Section */
+  .migration-section { margin-bottom: 50px; }
+  .migration-steps { position: relative; padding-left: 40px; margin-bottom: 24px; }
+  .migration-steps::before { content: ''; position: absolute; left: 18px; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.1); }
+  .mig-step { display: flex; gap: 16px; margin-bottom: 24px; position: relative; opacity: 0.4; transition: all 0.5s; }
+  .mig-step.active { opacity: 1; }
+  .mig-step.done { opacity: 0.7; }
+  .mig-step-num { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; color: #888; flex-shrink: 0; position: absolute; left: -40px; transition: all 0.5s; z-index: 1; }
+  .mig-step.active .mig-step-num { background: rgba(245,158,11,0.2); border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 15px rgba(245,158,11,0.3); }
+  .mig-step.done .mig-step-num { background: rgba(52,211,153,0.2); border-color: #34d399; color: #34d399; }
+  .mig-step-content h4 { font-size: 1rem; color: #fff; margin-bottom: 6px; }
+  .mig-step-content p { font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .migration-controls { display: flex; gap: 12px; margin-bottom: 16px; }
+  .migration-progress { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .mig-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #f59e0b, #34d399); border-radius: 4px; transition: width 0.5s; }
+  .migration-status { font-size: 0.9rem; color: #888; text-align: center; }
+
+  /* Explain Section */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #f59e0b; }
+  .explain-card em { color: #60a5fa; font-style: normal; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #f59e0b; }
+  .highlight-card { background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(167,139,250,0.08)); border-color: rgba(245,158,11,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #f59e0b; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; text-decoration: none; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .problems-grid { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .election-viz { flex-direction: column; align-items: center; }
+    :global(.split-view) { flex-direction: column; }
+    .compare-table { font-size: 0.8rem; }
+    .ct-cell { padding: 8px 10px; }
+  }
+</style>
+
+<script is:inline>
+  // ========== CLUSTER STATE ==========
+  var clusterState = {
+    controllers: [
+      { id: 0, role: 'leader', alive: true, epoch: 1 },
+      { id: 1, role: 'follower', alive: true, epoch: 1 },
+      { id: 2, role: 'follower', alive: true, epoch: 1 }
+    ],
+    brokers: [
+      { id: 0, alive: true, partitions: 4, epoch: 1 },
+      { id: 1, alive: true, partitions: 3, epoch: 1 },
+      { id: 2, alive: true, partitions: 3, epoch: 1 },
+      { id: 3, alive: true, partitions: 2, epoch: 1 }
+    ],
+    metadataOffset: 0,
+    topicCount: 0
+  };
+
+  function addClusterLog(text, cls) {
+    var log = document.getElementById('clusterLog');
+    if (!log) return;
+    var el = document.createElement('div');
+    el.className = 'log-entry ' + cls;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function addMetadataEntry(type, data) {
+    clusterState.metadataOffset++;
+    var entries = document.getElementById('metadataEntries');
+    if (!entries) return;
+    var el = document.createElement('div');
+    el.className = 'meta-entry';
+    var typeCls = type.indexOf('Topic') >= 0 ? 'topic' : type.indexOf('Partition') >= 0 ? 'partition' : type.indexOf('ISR') >= 0 ? 'isr' : type.indexOf('Broker') >= 0 ? 'broker' : 'fence';
+    el.innerHTML = '<span class="meta-offset">' + clusterState.metadataOffset + '</span>' +
+      '<span class="meta-type">' + type + '</span>' +
+      '<span class="meta-data">' + data + '</span>';
+    entries.appendChild(el);
+    entries.scrollTop = entries.scrollHeight;
+  }
+
+  function renderCluster() {
+    var ctrlContainer = document.getElementById('controllers');
+    var brokerContainer = document.getElementById('brokers');
+    if (!ctrlContainer || !brokerContainer) return;
+
+    ctrlContainer.innerHTML = '';
+    clusterState.controllers.forEach(function(c) {
+      var el = document.createElement('div');
+      var classes = 'ctrl-node';
+      if (c.role === 'leader' && c.alive) classes += ' leader';
+      if (!c.alive) classes += ' dead';
+      el.className = classes;
+      el.innerHTML = '<div class="ctrl-name">Controller ' + c.id + '</div>' +
+        '<div class="ctrl-role">' + (c.alive ? (c.role === 'leader' ? '⭐ Active' : '👥 Follower') : '💀 Dead') + '</div>' +
+        '<div class="ctrl-epoch">Epoch: ' + c.epoch + '</div>';
+      ctrlContainer.appendChild(el);
+    });
+
+    brokerContainer.innerHTML = '';
+    clusterState.brokers.forEach(function(b) {
+      var el = document.createElement('div');
+      el.className = 'broker-node' + (b.alive ? '' : ' dead');
+      el.innerHTML = '<div class="broker-name">Broker ' + b.id + '</div>' +
+        '<div class="broker-parts">' + (b.alive ? b.partitions + ' partitions' : '💀 Dead') + '</div>';
+      brokerContainer.appendChild(el);
+    });
+  }
+
+  // Create Topic
+  var createTopicBtn = document.getElementById('createTopicBtn');
+  if (createTopicBtn) {
+    createTopicBtn.addEventListener('click', function() {
+      clusterState.topicCount++;
+      var topicName = 'topic-' + String.fromCharCode(96 + clusterState.topicCount);
+      addClusterLog('📦 Creating topic "' + topicName + '" with 3 partitions...', 'info');
+
+      setTimeout(function() {
+        addMetadataEntry('TopicCreated', topicName + ' (3 partitions, RF=3)');
+        addClusterLog('✅ Topic "' + topicName + '" created — metadata propagated to all brokers', 'success');
+
+        // distribute partitions
+        var alive = clusterState.brokers.filter(function(b) { return b.alive; });
+        alive.forEach(function(b) { b.partitions += 1; });
+        renderCluster();
+
+        setTimeout(function() {
+          addMetadataEntry('PartitionAssigned', topicName + '-0 → Broker ' + (alive[0] ? alive[0].id : 0));
+          addMetadataEntry('PartitionAssigned', topicName + '-1 → Broker ' + (alive[1] ? alive[1].id : 0));
+          addMetadataEntry('PartitionAssigned', topicName + '-2 → Broker ' + (alive[2] ? alive[2].id : 0));
+        }, 300);
+      }, 500);
+    });
+  }
+
+  // Kill Active Controller
+  var killControllerBtn = document.getElementById('killControllerBtn');
+  if (killControllerBtn) {
+    killControllerBtn.addEventListener('click', function() {
+      var leader = null;
+      clusterState.controllers.forEach(function(c) {
+        if (c.role === 'leader' && c.alive) leader = c;
+      });
+      if (!leader) {
+        addClusterLog('⚠️ No active controller to kill', 'warn');
+        return;
+      }
+
+      leader.alive = false;
+      leader.role = 'dead';
+      renderCluster();
+      addClusterLog('💀 Controller ' + leader.id + ' killed! Leader is gone...', 'error');
+
+      setTimeout(function() {
+        addClusterLog('🗳️ Raft election triggered — followers increment term...', 'warn');
+        var followers = clusterState.controllers.filter(function(c) { return c.alive && c.role === 'follower'; });
+
+        setTimeout(function() {
+          if (followers.length > 0) {
+            var newLeader = followers[0];
+            newLeader.role = 'leader';
+            newLeader.epoch++;
+            clusterState.controllers.forEach(function(c) { if (c.alive) c.epoch = newLeader.epoch; });
+            renderCluster();
+            addClusterLog('⭐ Controller ' + newLeader.id + ' elected as new active controller (epoch ' + newLeader.epoch + ')', 'success');
+            addMetadataEntry('LeaderChange', 'Controller ' + newLeader.id + ' (epoch ' + newLeader.epoch + ')');
+          }
+        }, 800);
+      }, 600);
+    });
+  }
+
+  // Kill Broker
+  var killBrokerBtn = document.getElementById('killBrokerBtn');
+  if (killBrokerBtn) {
+    killBrokerBtn.addEventListener('click', function() {
+      var aliveBrokers = clusterState.brokers.filter(function(b) { return b.alive; });
+      if (aliveBrokers.length === 0) {
+        addClusterLog('⚠️ No alive brokers to kill', 'warn');
+        return;
+      }
+      var victim = aliveBrokers[aliveBrokers.length - 1];
+      victim.alive = false;
+      var lostParts = victim.partitions;
+      victim.partitions = 0;
+      renderCluster();
+      addClusterLog('💀 Broker ' + victim.id + ' killed! ' + lostParts + ' partitions need reassignment', 'error');
+      addMetadataEntry('BrokerFenced', 'Broker ' + victim.id + ' (epoch ' + victim.epoch + ')');
+
+      setTimeout(function() {
+        var remaining = clusterState.brokers.filter(function(b) { return b.alive; });
+        if (remaining.length > 0) {
+          var perBroker = Math.ceil(lostParts / remaining.length);
+          remaining.forEach(function(b) { b.partitions += perBroker; });
+          renderCluster();
+          addClusterLog('🔄 Partitions redistributed to remaining brokers', 'success');
+          addMetadataEntry('PartitionReassign', lostParts + ' partitions moved from Broker ' + victim.id);
+        }
+      }, 800);
+    });
+  }
+
+  // Reset Cluster
+  var resetClusterBtn = document.getElementById('resetClusterBtn');
+  if (resetClusterBtn) {
+    resetClusterBtn.addEventListener('click', function() {
+      clusterState.controllers = [
+        { id: 0, role: 'leader', alive: true, epoch: 1 },
+        { id: 1, role: 'follower', alive: true, epoch: 1 },
+        { id: 2, role: 'follower', alive: true, epoch: 1 }
+      ];
+      clusterState.brokers = [
+        { id: 0, alive: true, partitions: 4, epoch: 1 },
+        { id: 1, alive: true, partitions: 3, epoch: 1 },
+        { id: 2, alive: true, partitions: 3, epoch: 1 },
+        { id: 3, alive: true, partitions: 2, epoch: 1 }
+      ];
+      clusterState.metadataOffset = 0;
+      clusterState.topicCount = 0;
+      renderCluster();
+      document.getElementById('clusterLog').innerHTML = '<div class="log-entry info">Cluster reset — 3 controllers, 4 brokers</div>';
+      document.getElementById('metadataEntries').innerHTML = '';
+    });
+  }
+
+  // ========== ELECTION ANIMATION ==========
+  var electionSteps = [];
+  var electionStepIdx = 0;
+
+  function buildElectionSteps() {
+    electionSteps = [
+      { cls: 'error', text: '💀 Controller 0 (active) crashes — no heartbeats received', nodes: [{id:0,role:'dead',term:1},{id:1,role:'follower',term:1},{id:2,role:'follower',term:1}] },
+      { cls: 'info', text: '⏱️ Election timeout expires on Controller 1 — no leader heartbeat received', nodes: [{id:0,role:'dead',term:1},{id:1,role:'follower',term:1},{id:2,role:'follower',term:1}] },
+      { cls: 'vote', text: '🗳️ Controller 1 increments term to 2, transitions to Candidate, votes for itself', nodes: [{id:0,role:'dead',term:1},{id:1,role:'candidate',term:2},{id:2,role:'follower',term:1}] },
+      { cls: 'vote', text: '📨 Controller 1 sends RequestVote(term=2) to Controller 2', nodes: [{id:0,role:'dead',term:1},{id:1,role:'candidate',term:2},{id:2,role:'follower',term:2}] },
+      { cls: 'vote', text: '✅ Controller 2 grants vote — Controller 1 has majority (2/3)', nodes: [{id:0,role:'dead',term:1},{id:1,role:'candidate',term:2},{id:2,role:'follower',term:2}] },
+      { cls: 'success', text: '⭐ Controller 1 becomes Active Controller (term 2) — sends first AppendEntries', nodes: [{id:0,role:'dead',term:2},{id:1,role:'leader',term:2},{id:2,role:'follower',term:2}] },
+      { cls: 'success', text: '📋 New leader loads metadata snapshot + replays uncommitted log entries', nodes: [{id:0,role:'dead',term:2},{id:1,role:'leader',term:2},{id:2,role:'follower',term:2}] },
+      { cls: 'info', text: '🔔 Brokers notified of new active controller — metadata operations resume', nodes: [{id:0,role:'dead',term:2},{id:1,role:'leader',term:2},{id:2,role:'follower',term:2}] }
+    ];
+  }
+
+  function renderElectionStep() {
+    var step = electionSteps[electionStepIdx];
+    // Update nodes
+    step.nodes.forEach(function(n) {
+      var node = document.getElementById('electNode' + n.id);
+      if (!node) return;
+      node.setAttribute('data-role', n.role);
+      var roleText = n.role === 'leader' ? '⭐ Active Controller' :
+                     n.role === 'candidate' ? '🗳️ Candidate' :
+                     n.role === 'dead' ? '💀 Dead' : '👥 Follower';
+      node.querySelector('.election-node-role').textContent = roleText;
+      node.querySelector('.election-node-term').textContent = 'Term: ' + n.term;
+    });
+    // Add timeline entry
+    var timeline = document.getElementById('electionTimeline');
+    var el = document.createElement('div');
+    el.className = 'elect-step ' + step.cls;
+    el.textContent = step.text;
+    timeline.appendChild(el);
+    timeline.scrollTop = timeline.scrollHeight;
+  }
+
+  var startElectionBtn = document.getElementById('startElectionBtn');
+  if (startElectionBtn) {
+    startElectionBtn.addEventListener('click', function() {
+      document.getElementById('electionTimeline').innerHTML = '';
+      buildElectionSteps();
+      electionStepIdx = 0;
+      renderElectionStep();
+      document.getElementById('stepElectionBtn').disabled = false;
+    });
+  }
+
+  var stepElectionBtn = document.getElementById('stepElectionBtn');
+  if (stepElectionBtn) {
+    stepElectionBtn.addEventListener('click', function() {
+      if (electionStepIdx < electionSteps.length - 1) {
+        electionStepIdx++;
+        renderElectionStep();
+        if (electionStepIdx >= electionSteps.length - 1) {
+          document.getElementById('stepElectionBtn').disabled = true;
+        }
+      }
+    });
+  }
+
+  var resetElectionBtn = document.getElementById('resetElectionBtn');
+  if (resetElectionBtn) {
+    resetElectionBtn.addEventListener('click', function() {
+      document.getElementById('electionTimeline').innerHTML = '';
+      document.getElementById('stepElectionBtn').disabled = true;
+      [{id:0,role:'leader',term:1},{id:1,role:'follower',term:1},{id:2,role:'follower',term:1}].forEach(function(n) {
+        var node = document.getElementById('electNode' + n.id);
+        if (!node) return;
+        node.setAttribute('data-role', n.role);
+        var roleText = n.role === 'leader' ? '⭐ Active Controller' : '👥 Follower';
+        node.querySelector('.election-node-role').textContent = roleText;
+        node.querySelector('.election-node-term').textContent = 'Term: 1';
+      });
+    });
+  }
+
+  // ========== METADATA LOG INTERACTIVE ==========
+  var metalogOffset = 0;
+  var metalogEpoch = 1;
+  var topicNames = ['orders', 'payments', 'users', 'events', 'metrics', 'logs', 'clicks', 'sessions'];
+  var topicIdx = 0;
+
+  function addMetalogEntry(type, data, typeCls) {
+    metalogOffset++;
+    var entries = document.getElementById('metalogEntries');
+    if (!entries) return;
+    var el = document.createElement('div');
+    el.className = 'mlog-row';
+    el.innerHTML = '<span class="mlog-offset">' + metalogOffset + '</span>' +
+      '<span class="mlog-type ' + typeCls + '">' + type + '</span>' +
+      '<span class="mlog-data">' + data + '</span>' +
+      '<span class="mlog-epoch">' + metalogEpoch + '</span>';
+    entries.appendChild(el);
+    entries.scrollTop = entries.scrollHeight;
+  }
+
+  var addTopicEvt = document.getElementById('addTopicEvt');
+  if (addTopicEvt) {
+    addTopicEvt.addEventListener('click', function() {
+      var name = topicNames[topicIdx % topicNames.length];
+      topicIdx++;
+      addMetalogEntry('TopicRecord', 'name=' + name + ', id=t' + topicIdx + ', partitions=6', 'topic');
+    });
+  }
+  var addPartEvt = document.getElementById('addPartEvt');
+  if (addPartEvt) {
+    addPartEvt.addEventListener('click', function() {
+      var p = Math.floor(Math.random() * 6);
+      var b = Math.floor(Math.random() * 4);
+      addMetalogEntry('PartitionRecord', 'topic=orders, partition=' + p + ', leader=Broker ' + b + ', replicas=[' + b + ',' + ((b+1)%4) + ',' + ((b+2)%4) + ']', 'partition');
+    });
+  }
+  var addIsrEvt = document.getElementById('addIsrEvt');
+  if (addIsrEvt) {
+    addIsrEvt.addEventListener('click', function() {
+      var p = Math.floor(Math.random() * 6);
+      var b = Math.floor(Math.random() * 4);
+      addMetalogEntry('ISRChangeRecord', 'topic=orders, partition=' + p + ', isr=[' + b + ',' + ((b+1)%4) + '] (removed Broker ' + ((b+2)%4) + ')', 'isr');
+    });
+  }
+  var addBrokerEvt = document.getElementById('addBrokerEvt');
+  if (addBrokerEvt) {
+    addBrokerEvt.addEventListener('click', function() {
+      var b = Math.floor(Math.random() * 4);
+      addMetalogEntry('RegisterBrokerRecord', 'broker=' + b + ', host=kafka-' + b + ':9092, epoch=' + metalogEpoch, 'broker');
+    });
+  }
+  var addFenceEvt = document.getElementById('addFenceEvt');
+  if (addFenceEvt) {
+    addFenceEvt.addEventListener('click', function() {
+      var b = Math.floor(Math.random() * 4);
+      addMetalogEntry('FenceBrokerRecord', 'broker=' + b + ', epoch=' + metalogEpoch + ' → FENCED', 'fence');
+    });
+  }
+  var resetLogBtn = document.getElementById('resetLogBtn');
+  if (resetLogBtn) {
+    resetLogBtn.addEventListener('click', function() {
+      metalogOffset = 0;
+      topicIdx = 0;
+      var entries = document.getElementById('metalogEntries');
+      if (entries) entries.innerHTML = '';
+    });
+  }
+
+  // ========== HEARTBEAT SIMULATION ==========
+  var hbInterval = null;
+  var hbBrokers = [
+    { id: 0, epoch: 1, status: 'active', missedHb: 0 },
+    { id: 1, epoch: 1, status: 'active', missedHb: 0 },
+    { id: 2, epoch: 1, status: 'active', missedHb: 0 },
+    { id: 3, epoch: 1, status: 'active', missedHb: 0 }
+  ];
+
+  function renderHeartbeats() {
+    var viz = document.getElementById('heartbeatViz');
+    if (!viz) return;
+    viz.innerHTML = '';
+    hbBrokers.forEach(function(b) {
+      var el = document.createElement('div');
+      el.className = 'hb-broker ' + b.status;
+      el.innerHTML = '<div class="hb-name">Broker ' + b.id + '</div>' +
+        '<div class="hb-token">epoch: ' + b.epoch + '</div>' +
+        '<div class="hb-status">' +
+        (b.status === 'active' ? '💚 Active' : b.status === 'fenced' ? '🚫 Fenced' : '💓 Heartbeat') +
+        '</div>';
+      viz.appendChild(el);
+    });
+  }
+
+  function addHbLog(text, cls) {
+    var log = document.getElementById('heartbeatLog');
+    if (!log) return;
+    var el = document.createElement('div');
+    el.className = 'log-entry ' + cls;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  var startHeartbeatBtn = document.getElementById('startHeartbeatBtn');
+  if (startHeartbeatBtn) {
+    startHeartbeatBtn.addEventListener('click', function() {
+      if (hbInterval) return;
+      addHbLog('Starting heartbeat simulation...', 'info');
+      var tick = 0;
+      hbInterval = setInterval(function() {
+        tick++;
+        hbBrokers.forEach(function(b) {
+          if (b.status === 'fenced') return;
+          // briefly show heartbeat animation
+          b.status = 'heartbeat';
+          renderHeartbeats();
+          setTimeout(function() {
+            if (b.status !== 'fenced') b.status = 'active';
+            renderHeartbeats();
+          }, 300);
+        });
+        var activeBrokers = hbBrokers.filter(function(b) { return b.status !== 'fenced'; });
+        if (activeBrokers.length > 0) {
+          addHbLog('💓 Heartbeat #' + tick + ' — ' + activeBrokers.length + ' brokers responded', 'success');
+        }
+      }, 2000);
+    });
+  }
+
+  var fenceBrokerBtn = document.getElementById('fenceBrokerBtn');
+  if (fenceBrokerBtn) {
+    fenceBrokerBtn.addEventListener('click', function() {
+      var b = hbBrokers[2];
+      if (b.status === 'fenced') {
+        // Re-register with new epoch
+        b.epoch++;
+        b.status = 'active';
+        addHbLog('🔄 Broker 2 re-registered with new epoch ' + b.epoch + ' — old instance fenced by epoch check', 'warn');
+      } else {
+        b.status = 'fenced';
+        addHbLog('🚫 Broker 2 fenced! Epoch ' + b.epoch + ' is now invalid. Must re-register with new epoch.', 'error');
+      }
+      renderHeartbeats();
+    });
+  }
+
+  var resetHeartbeatBtn = document.getElementById('resetHeartbeatBtn');
+  if (resetHeartbeatBtn) {
+    resetHeartbeatBtn.addEventListener('click', function() {
+      if (hbInterval) { clearInterval(hbInterval); hbInterval = null; }
+      hbBrokers = [
+        { id: 0, epoch: 1, status: 'active', missedHb: 0 },
+        { id: 1, epoch: 1, status: 'active', missedHb: 0 },
+        { id: 2, epoch: 1, status: 'active', missedHb: 0 },
+        { id: 3, epoch: 1, status: 'active', missedHb: 0 }
+      ];
+      renderHeartbeats();
+      var log = document.getElementById('heartbeatLog');
+      if (log) log.innerHTML = '';
+    });
+  }
+
+  // ========== ZK vs KRAFT COMPARISON ==========
+  var compareMode = 'zk';
+
+  function renderZKArch() {
+    return '<div class="arch-diagram">' +
+      '<div class="arch-row"><div class="arch-box producer-box">Producers</div><div class="arch-box producer-box">Consumers</div></div>' +
+      '<div class="arch-connector">↕</div>' +
+      '<div class="arch-row"><div class="arch-box broker-box">Broker 0</div><div class="arch-box broker-box">Broker 1</div><div class="arch-box broker-box">Broker 2</div></div>' +
+      '<div class="arch-connector">↕ ZK Watches</div>' +
+      '<div class="arch-row"><div class="arch-box zk">ZK Node 1</div><div class="arch-box zk">ZK Node 2</div><div class="arch-box zk">ZK Node 3</div></div>' +
+      '<div class="arch-label">External ZooKeeper Ensemble — separate JVMs, separate monitoring</div>' +
+      '</div>';
+  }
+
+  function renderKRaftArch() {
+    return '<div class="arch-diagram">' +
+      '<div class="arch-row"><div class="arch-box producer-box">Producers</div><div class="arch-box producer-box">Consumers</div></div>' +
+      '<div class="arch-connector">↕</div>' +
+      '<div class="arch-row"><div class="arch-box broker-box">Broker 0</div><div class="arch-box broker-box">Broker 1</div><div class="arch-box broker-box">Broker 2</div></div>' +
+      '<div class="arch-connector">↕ Metadata Log (Raft)</div>' +
+      '<div class="arch-row"><div class="arch-box ctrl">Controller 0 ⭐</div><div class="arch-box ctrl">Controller 1</div><div class="arch-box ctrl">Controller 2</div></div>' +
+      '<div class="arch-label">Internal Controller Quorum — same Kafka process, unified ops</div>' +
+      '</div>';
+  }
+
+  function renderCompare() {
+    var viz = document.getElementById('compareViz');
+    if (!viz) return;
+    if (compareMode === 'zk') {
+      viz.innerHTML = renderZKArch();
+    } else if (compareMode === 'kraft') {
+      viz.innerHTML = renderKRaftArch();
+    } else {
+      viz.innerHTML = '<div class="split-view">' +
+        '<div class="split-col"><div class="split-title zk-title">ZooKeeper Mode</div>' + renderZKArch() + '</div>' +
+        '<div class="split-col"><div class="split-title kraft-title">KRaft Mode</div>' + renderKRaftArch() + '</div>' +
+        '</div>';
+    }
+  }
+
+  document.querySelectorAll('.compare-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.compare-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      compareMode = btn.getAttribute('data-mode');
+      renderCompare();
+    });
+  });
+
+  // ========== MIGRATION ANIMATION ==========
+  var migAnimating = false;
+
+  var migAnimateBtn = document.getElementById('migAnimateBtn');
+  if (migAnimateBtn) {
+    migAnimateBtn.addEventListener('click', function() {
+      if (migAnimating) return;
+      migAnimating = true;
+      var steps = document.querySelectorAll('.mig-step');
+      var bar = document.getElementById('migProgressBar');
+      var status = document.getElementById('migStatus');
+      var messages = [
+        'Upgrading all brokers to bridge release (3.3+)...',
+        'Deploying controller quorum alongside ZK...',
+        'Migrating metadata from ZooKeeper to KRaft log...',
+        'Switching cluster to KRaft mode...',
+        'Decommissioning ZooKeeper — migration complete! 🎉'
+      ];
+
+      steps.forEach(function(s) { s.classList.remove('active', 'done'); });
+      var idx = 0;
+
+      function nextStep() {
+        if (idx > 0) steps[idx - 1].classList.remove('active');
+        if (idx > 0) steps[idx - 1].classList.add('done');
+        if (idx >= steps.length) {
+          bar.style.width = '100%';
+          status.textContent = '✅ Migration complete — cluster is fully KRaft-native!';
+          migAnimating = false;
+          return;
+        }
+        steps[idx].classList.add('active');
+        bar.style.width = ((idx + 1) / steps.length * 100) + '%';
+        status.textContent = messages[idx];
+        idx++;
+        setTimeout(nextStep, 1800);
+      }
+      nextStep();
+    });
+  }
+
+  var migResetBtn = document.getElementById('migResetBtn');
+  if (migResetBtn) {
+    migResetBtn.addEventListener('click', function() {
+      migAnimating = false;
+      document.querySelectorAll('.mig-step').forEach(function(s) { s.classList.remove('active', 'done'); });
+      document.getElementById('migProgressBar').style.width = '0%';
+      document.getElementById('migStatus').textContent = 'Click "Animate Migration" to walk through the process';
+    });
+  }
+
+  // ========== INIT ==========
+  renderCluster();
+  renderHeartbeats();
+  renderCompare();
+</script>
+</BaseLayout>
