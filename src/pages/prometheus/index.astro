@@ -1,0 +1,119 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "TSDB Internals", description: "Head block, chunks, WAL, compaction, and the Gorilla compression engine", href: "/prometheus/tsdb/", status: "live" },
+  { title: "PromQL Evaluation", description: "How range queries scan blocks, series, and samples", href: "#", status: "coming" },
+  { title: "Service Discovery", description: "Target discovery, relabeling, and scrape lifecycle", href: "#", status: "coming" },
+  { title: "Remote Write & Read", description: "Long-term storage integration and the remote write protocol", href: "#", status: "coming" },
+  { title: "Alertmanager Pipeline", description: "Grouping, inhibition, silencing, and notification routing", href: "#", status: "coming" },
+  { title: "Federation & Scaling", description: "Hierarchical federation, Thanos, and Cortex architectures", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Prometheus Internals" 
+  description="Interactive visualizations for understanding Prometheus TSDB, PromQL evaluation, and monitoring architecture"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Prometheus", href: "/prometheus/" }]}
+>
+  <section class="section-header">
+    <h1>🔥 Prometheus Internals</h1>
+    <p>
+      Prometheus is the de facto standard for metrics monitoring. It scrapes targets, stores time series in a custom TSDB,
+      and evaluates PromQL queries. These visualizations help you understand the engine that powers modern observability.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(230, 87, 50, 0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

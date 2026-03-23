@@ -1,0 +1,1625 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kubernetes Networking & Services" 
+  description="Interactive visualization of Kubernetes networking — pod networking, CNI, Services, kube-proxy, DNS, Ingress, and Network Policies"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Networking", href: "/kubernetes/networking/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>☸️ Kubernetes Networking &amp; Services</h1>
+      <p class="subtitle">Pod IPs, Services, DNS, Ingress &amp; Network Policies — How Traffic Flows</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          In Kubernetes, every <strong>Pod gets its own IP address</strong>. Pods communicate across nodes
+          on a <em>flat network</em> — no NAT between pods. The <strong>Container Network Interface (CNI)</strong>
+          plugin allocates IPs and sets up routing. <strong>Services</strong> provide stable virtual IPs
+          and load-balance traffic to Pod backends. <strong>kube-proxy</strong> programs the data plane
+          (iptables, IPVS, or eBPF) to forward traffic. <strong>CoreDNS</strong> enables service discovery
+          via DNS names like <code>my-svc.default.svc.cluster.local</code>. For external access,
+          <strong>Ingress</strong> provides L7 routing, and <strong>Network Policies</strong> act as
+          firewall rules for pod-to-pod traffic.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pod Networking Model -->
+    <section class="explain-section">
+      <h2>🔌 Pod Networking Model</h2>
+      <p class="section-desc">The fundamental rules every Kubernetes network must satisfy.</p>
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>📦 Every Pod Gets an IP</h3>
+          <p>
+            Each Pod receives a <strong>unique, routable IP</strong> from the cluster CIDR. Containers
+            within a Pod share the same network namespace — they communicate via <code>localhost</code>.
+            Pod-to-Pod traffic uses real IPs, no port mapping needed.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🌐 Flat Network</h3>
+          <p>
+            All Pods can reach all other Pods <strong>without NAT</strong>, regardless of which node
+            they're on. This is enforced by the CNI plugin, which sets up overlay networks (VXLAN),
+            direct routing (BGP), or cloud-native VPC routing.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔧 CNI Plugins</h3>
+          <p>
+            The <strong>Container Network Interface</strong> is the standard API. Popular CNI plugins:
+            <strong>Calico</strong> (BGP routing + policy), <strong>Cilium</strong> (eBPF-based),
+            <strong>Flannel</strong> (simple overlay), <strong>Weave</strong> (mesh overlay).
+            The kubelet calls the CNI plugin when a Pod starts to assign its IP and configure routes.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Service Types -->
+    <section class="explain-section">
+      <h2>🎯 Service Types</h2>
+      <p class="section-desc">Services provide stable endpoints and load balancing for ephemeral Pods.</p>
+      <div class="service-types-row">
+        <div class="service-type-card" id="svcClusterIP">
+          <div class="svc-icon">🏠</div>
+          <h3>ClusterIP</h3>
+          <p>Internal-only virtual IP. Default type. Only reachable from within the cluster. kube-proxy programs rules to DNAT traffic from the VIP to backend Pod IPs.</p>
+          <div class="svc-example">
+            <code>10.96.0.10:80 → Pod1:8080, Pod2:8080</code>
+          </div>
+        </div>
+        <div class="service-type-card" id="svcNodePort">
+          <div class="svc-icon">🚪</div>
+          <h3>NodePort</h3>
+          <p>Exposes the service on a static port (30000–32767) on every node's IP. External clients hit <code>NodeIP:NodePort</code>. Builds on ClusterIP.</p>
+          <div class="svc-example">
+            <code>&lt;NodeIP&gt;:31234 → ClusterIP:80 → Pods</code>
+          </div>
+        </div>
+        <div class="service-type-card" id="svcLoadBalancer">
+          <div class="svc-icon">☁️</div>
+          <h3>LoadBalancer</h3>
+          <p>Provisions a cloud load balancer (AWS ELB, GCP LB) that routes external traffic to NodePort. Gets a public IP. Builds on NodePort + ClusterIP.</p>
+          <div class="svc-example">
+            <code>ELB:80 → NodePort → ClusterIP → Pods</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Cluster Visualization -->
+    <section class="cluster-section">
+      <h2>🖧 Interactive Network Cluster</h2>
+      <p class="section-desc">Send a request and watch it route through Service → kube-proxy → Pod. Compare proxy modes.</p>
+
+      <div class="sim-layout">
+        <!-- Config Panel -->
+        <div class="config-panel">
+          <h3>Request Configuration</h3>
+
+          <div class="config-group">
+            <label>Target Service</label>
+            <select id="targetSvc" class="config-select">
+              <option value="web-svc">web-svc (ClusterIP)</option>
+              <option value="api-svc">api-svc (NodePort)</option>
+              <option value="db-svc">db-svc (ClusterIP)</option>
+            </select>
+          </div>
+
+          <div class="config-group">
+            <label>kube-proxy Mode</label>
+            <select id="proxyMode" class="config-select">
+              <option value="iptables">iptables (default)</option>
+              <option value="ipvs">IPVS (hash-based)</option>
+              <option value="ebpf">eBPF (Cilium)</option>
+            </select>
+          </div>
+
+          <div class="config-group">
+            <label>Source</label>
+            <select id="requestSource" class="config-select">
+              <option value="pod">Pod (in-cluster)</option>
+              <option value="external">External client</option>
+            </select>
+          </div>
+
+          <button id="sendReqBtn" class="action-btn primary-btn">▶ Send Request</button>
+          <button id="resetClusterBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <!-- Cluster View -->
+        <div class="cluster-view">
+          <div class="net-cluster" id="netCluster">
+            <!-- Rendered by JS -->
+          </div>
+
+          <!-- Trace Log -->
+          <div class="sched-log-wrapper">
+            <h4>📋 Network Trace</h4>
+            <div class="sched-log" id="traceLog">
+              <div class="log-empty">Configure a request and click "Send Request"...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- kube-proxy Modes Comparison -->
+    <section class="explain-section">
+      <h2>⚙️ kube-proxy Modes</h2>
+      <p class="section-desc">Three ways to implement Service routing in the data plane.</p>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📋 iptables (Default)</h3>
+          <p>
+            Creates <strong>DNAT rules</strong> in iptables for each Service/endpoint pair.
+            Uses <code>random</code> probability for load balancing. Linear rule traversal:
+            <strong>O(n)</strong> with number of services. Fine for small clusters (&lt;1000 services).
+          </p>
+          <div class="mode-stat">
+            <span class="stat-label">Latency</span>
+            <div class="stat-bar"><div class="stat-fill" style="width:60%"></div></div>
+          </div>
+          <div class="mode-stat">
+            <span class="stat-label">Scalability</span>
+            <div class="stat-bar"><div class="stat-fill low" style="width:35%"></div></div>
+          </div>
+        </div>
+        <div class="explain-card highlight-card">
+          <h3>⚡ IPVS (Hash-Based)</h3>
+          <p>
+            Uses the Linux <strong>IP Virtual Server</strong> in the kernel. Hash-based lookup:
+            <strong>O(1)</strong> regardless of service count. Supports multiple algorithms:
+            round-robin, least-connections, source hashing. Better at scale (&gt;1000 services).
+          </p>
+          <div class="mode-stat">
+            <span class="stat-label">Latency</span>
+            <div class="stat-bar"><div class="stat-fill" style="width:40%"></div></div>
+          </div>
+          <div class="mode-stat">
+            <span class="stat-label">Scalability</span>
+            <div class="stat-bar"><div class="stat-fill high" style="width:85%"></div></div>
+          </div>
+        </div>
+        <div class="explain-card">
+          <h3>🐝 eBPF (Cilium)</h3>
+          <p>
+            Replaces kube-proxy entirely. Attaches <strong>BPF programs</strong> to socket and TC hooks.
+            Bypasses iptables/netfilter completely. <strong>O(1)</strong> lookups via BPF maps.
+            Lowest latency, best scalability, but requires a modern kernel (5.4+) and Cilium CNI.
+          </p>
+          <div class="mode-stat">
+            <span class="stat-label">Latency</span>
+            <div class="stat-bar"><div class="stat-fill high" style="width:20%"></div></div>
+          </div>
+          <div class="mode-stat">
+            <span class="stat-label">Scalability</span>
+            <div class="stat-bar"><div class="stat-fill high" style="width:95%"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DNS Section -->
+    <section class="dns-section">
+      <h2>🔎 DNS &amp; Service Discovery</h2>
+      <p class="section-desc">CoreDNS resolves service names to ClusterIPs. Watch a DNS query resolve.</p>
+
+      <div class="dns-demo">
+        <div class="dns-input-row">
+          <label>Query:</label>
+          <input type="text" id="dnsQuery" class="dns-input" value="web-svc.default.svc.cluster.local" readonly>
+          <button id="dnsResolveBtn" class="action-btn primary-btn">🔎 Resolve</button>
+        </div>
+        <div class="dns-presets">
+          <button class="dns-preset" data-query="web-svc.default.svc.cluster.local">web-svc.default</button>
+          <button class="dns-preset" data-query="api-svc.kube-system.svc.cluster.local">api-svc.kube-system</button>
+          <button class="dns-preset" data-query="db-svc.default.svc.cluster.local">db-svc.default</button>
+          <button class="dns-preset" data-query="web-svc.default">short name</button>
+        </div>
+        <div class="dns-viz" id="dnsViz">
+          <div class="dns-step-row" id="dnsSteps">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ingress -->
+    <section class="explain-section">
+      <h2>🚀 Ingress</h2>
+      <p class="section-desc">L7 HTTP routing — host-based, path-based, with TLS termination.</p>
+
+      <div class="ingress-demo">
+        <div class="ingress-rules" id="ingressRules">
+          <div class="ingress-rule">
+            <div class="ingress-host">app.example.com</div>
+            <div class="ingress-paths">
+              <div class="ingress-path" data-target="web-svc">
+                <span class="path-match">/</span>
+                <span class="path-arrow">→</span>
+                <span class="path-backend">web-svc:80</span>
+              </div>
+              <div class="ingress-path" data-target="api-svc">
+                <span class="path-match">/api/*</span>
+                <span class="path-arrow">→</span>
+                <span class="path-backend">api-svc:8080</span>
+              </div>
+              <div class="ingress-path" data-target="ws-svc">
+                <span class="path-match">/ws</span>
+                <span class="path-arrow">→</span>
+                <span class="path-backend">ws-svc:9090</span>
+              </div>
+            </div>
+          </div>
+          <div class="ingress-rule">
+            <div class="ingress-host">admin.example.com</div>
+            <div class="ingress-paths">
+              <div class="ingress-path" data-target="admin-svc">
+                <span class="path-match">/</span>
+                <span class="path-arrow">→</span>
+                <span class="path-backend">admin-svc:3000</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ingress-test">
+          <label>Test URL:</label>
+          <input type="text" id="ingressUrl" class="dns-input" value="https://app.example.com/api/users">
+          <button id="ingressTestBtn" class="action-btn primary-btn">🚀 Route</button>
+          <div class="ingress-result" id="ingressResult"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Network Policies -->
+    <section class="netpol-section">
+      <h2>🛡️ Network Policies</h2>
+      <p class="section-desc">Firewall rules for Pods. Control ingress and egress traffic with label selectors.</p>
+
+      <div class="netpol-demo">
+        <div class="netpol-editor">
+          <h3>Policy Editor</h3>
+          <div class="config-group">
+            <label>Target Pods</label>
+            <select id="polTarget" class="config-select">
+              <option value="web">app=web</option>
+              <option value="api">app=api</option>
+              <option value="db">app=db</option>
+            </select>
+          </div>
+          <div class="config-group">
+            <label>Ingress: Allow From</label>
+            <div class="checkbox-group">
+              <label class="cb-label"><input type="checkbox" id="polAllowWeb" checked> app=web</label>
+              <label class="cb-label"><input type="checkbox" id="polAllowApi" checked> app=api</label>
+              <label class="cb-label"><input type="checkbox" id="polAllowDb"> app=db</label>
+              <label class="cb-label"><input type="checkbox" id="polAllowExt"> external</label>
+            </div>
+          </div>
+          <div class="config-group">
+            <label>Egress: Allow To</label>
+            <div class="checkbox-group">
+              <label class="cb-label"><input type="checkbox" id="polEgressDns" checked> DNS (port 53)</label>
+              <label class="cb-label"><input type="checkbox" id="polEgressDb" checked> app=db</label>
+              <label class="cb-label"><input type="checkbox" id="polEgressExt"> internet</label>
+            </div>
+          </div>
+          <button id="polApplyBtn" class="action-btn primary-btn">🛡️ Apply Policy</button>
+          <button id="polResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <div class="netpol-viz">
+          <div class="netpol-cluster" id="netpolCluster">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="netpol-yaml" id="netpolYaml">
+            <h4>Generated YAML</h4>
+            <pre id="netpolYamlCode"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on the <a href="https://kubernetes.io/docs/concepts/services-networking/" target="_blank">Kubernetes Networking Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kubernetes%20Networking%20visualizer&url=https://systeminternals.dev/kubernetes/networking/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kubernetes/networking/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kubernetes/networking/&t=Interactive%20Kubernetes%20Networking%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #60a5fa, #34d399, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(52, 211, 153, 0.05));
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Explain sections */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+
+  .explain-card p {
+    font-size: 0.95rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #60a5fa; font-style: normal; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    border-color: rgba(96, 165, 250, 0.3);
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.08), rgba(52, 211, 153, 0.04));
+  }
+
+  /* Service Types */
+  .service-types-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+
+  .service-type-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    transition: all 0.3s;
+    cursor: default;
+  }
+
+  .service-type-card:hover {
+    border-color: rgba(96, 165, 250, 0.4);
+    background: rgba(96, 165, 250, 0.05);
+  }
+
+  .service-type-card.active-svc {
+    border-color: rgba(74, 222, 128, 0.6);
+    background: rgba(74, 222, 128, 0.08);
+    box-shadow: 0 0 30px rgba(74, 222, 128, 0.15);
+  }
+
+  .svc-icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+  .service-type-card h3 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin-bottom: 10px;
+  }
+
+  .service-type-card p {
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .service-type-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .svc-example {
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #60a5fa;
+  }
+
+  /* Sim Layout */
+  .cluster-section {
+    margin-bottom: 50px;
+  }
+
+  .sim-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 24px;
+  }
+
+  .config-panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .config-panel h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+
+  .config-group {
+    margin-bottom: 16px;
+  }
+
+  .config-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 6px;
+  }
+
+  .config-group label strong {
+    color: #60a5fa;
+  }
+
+  .config-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ddd;
+    font-size: 0.85rem;
+  }
+
+  .config-panel .action-btn {
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  /* Network Cluster Visualization */
+  .cluster-view {
+    min-width: 0;
+  }
+
+  .net-cluster {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+
+  .net-node {
+    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 14px;
+    transition: all 0.4s;
+    position: relative;
+  }
+
+  .net-node.active-node {
+    border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(96, 165, 250, 0.05);
+  }
+
+  .net-node-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .net-node-ip {
+    font-size: 0.7rem;
+    color: #888;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    margin-bottom: 8px;
+  }
+
+  .net-pods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .net-pod {
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    transition: all 0.4s;
+    border: 1px solid transparent;
+  }
+
+  .net-pod.web { background: rgba(96, 165, 250, 0.2); color: #93c5fd; border-color: rgba(96, 165, 250, 0.3); }
+  .net-pod.api { background: rgba(167, 139, 250, 0.2); color: #c4b5fd; border-color: rgba(167, 139, 250, 0.3); }
+  .net-pod.db { background: rgba(251, 191, 36, 0.2); color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); }
+
+  .net-pod.targeted {
+    box-shadow: 0 0 15px rgba(74, 222, 128, 0.4);
+    border-color: rgba(74, 222, 128, 0.7);
+    animation: podPulse 0.6s ease;
+  }
+
+  .net-svc-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    margin-top: 6px;
+    background: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+  }
+
+  .net-proxy-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.6rem;
+    color: #f472b6;
+    background: rgba(244, 114, 182, 0.15);
+    margin-top: 4px;
+  }
+
+  @keyframes podPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes packetMove {
+    0% { opacity: 0; transform: scale(0.5); }
+    50% { opacity: 1; transform: scale(1.2); }
+    100% { opacity: 0; transform: scale(0.5); }
+  }
+
+  /* Trace Log */
+  .sched-log-wrapper h4 {
+    font-size: 0.95rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .sched-log {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 250px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+
+  .log-empty { color: #555; }
+  .log-line { color: #aaa; }
+  .log-line.dns { color: #34d399; }
+  .log-line.svc { color: #60a5fa; }
+  .log-line.proxy { color: #f472b6; }
+  .log-line.pod { color: #fbbf24; }
+  .log-line.info { color: #a78bfa; }
+  .log-line.error { color: #f87171; }
+
+  /* kube-proxy mode stats */
+  .mode-stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: #888;
+    min-width: 70px;
+  }
+
+  .stat-bar {
+    flex: 1;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .stat-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #fbbf24, #f59e0b);
+    transition: width 0.5s;
+  }
+
+  .stat-fill.high {
+    background: linear-gradient(90deg, #4ade80, #22c55e);
+  }
+
+  .stat-fill.low {
+    background: linear-gradient(90deg, #f87171, #ef4444);
+  }
+
+  /* DNS Section */
+  .dns-section {
+    margin-bottom: 50px;
+  }
+
+  .dns-demo {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .dns-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .dns-input-row label {
+    color: #aaa;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .dns-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 14px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #34d399;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+  }
+
+  .dns-presets {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .dns-preset {
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #aaa;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .dns-preset:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  .dns-preset.active { border-color: rgba(52, 211, 153, 0.5); color: #34d399; }
+
+  .dns-viz {
+    min-height: 80px;
+  }
+
+  .dns-step-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .dns-step {
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    opacity: 0;
+    transition: all 0.4s;
+    border: 1px solid transparent;
+  }
+
+  .dns-step.visible { opacity: 1; }
+
+  .dns-step.query-step { background: rgba(96, 165, 250, 0.15); color: #93c5fd; border-color: rgba(96, 165, 250, 0.3); }
+  .dns-step.search-step { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; border-color: rgba(167, 139, 250, 0.3); }
+  .dns-step.resolve-step { background: rgba(52, 211, 153, 0.15); color: #34d399; border-color: rgba(52, 211, 153, 0.3); }
+
+  .dns-arrow {
+    color: #555;
+    font-weight: bold;
+    font-size: 1.2rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .dns-arrow.visible { opacity: 1; }
+
+  /* Ingress */
+  .ingress-demo {
+    margin-bottom: 50px;
+  }
+
+  .ingress-rules {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .ingress-rule {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 18px;
+    transition: all 0.3s;
+  }
+
+  .ingress-rule.matched-rule {
+    border-color: rgba(74, 222, 128, 0.5);
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .ingress-host {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .ingress-paths {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ingress-path {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.2);
+    transition: all 0.3s;
+  }
+
+  .ingress-path.matched-path {
+    background: rgba(74, 222, 128, 0.15);
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.2);
+  }
+
+  .path-match {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    color: #60a5fa;
+    font-weight: 600;
+  }
+
+  .path-arrow { color: #555; }
+
+  .path-backend {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: #34d399;
+  }
+
+  .ingress-test {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .ingress-test label {
+    color: #aaa;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .ingress-result {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    padding: 8px 16px;
+    border-radius: 8px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+  }
+
+  .ingress-result.routed {
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+  }
+
+  .ingress-result.no-match {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+  }
+
+  /* Network Policy */
+  .netpol-section {
+    margin-bottom: 50px;
+  }
+
+  .netpol-demo {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 24px;
+  }
+
+  .netpol-editor {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .netpol-editor h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+
+  .checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cb-label {
+    font-size: 0.85rem;
+    color: #aaa;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .cb-label input[type="checkbox"] {
+    accent-color: #60a5fa;
+  }
+
+  .netpol-editor .action-btn {
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .netpol-viz {
+    min-width: 0;
+  }
+
+  .netpol-cluster {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .netpol-pod {
+    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    transition: all 0.4s;
+    position: relative;
+  }
+
+  .netpol-pod.target-pod {
+    border-color: rgba(96, 165, 250, 0.6);
+    background: rgba(96, 165, 250, 0.08);
+    box-shadow: 0 0 20px rgba(96, 165, 250, 0.15);
+  }
+
+  .netpol-pod.allowed-pod {
+    border-color: rgba(74, 222, 128, 0.5);
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .netpol-pod.denied-pod {
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.05);
+    opacity: 0.5;
+  }
+
+  .netpol-pod-name {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .netpol-pod-label {
+    font-size: 0.7rem;
+    color: #888;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  .netpol-pod-status {
+    margin-top: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .netpol-pod-status.allow { color: #4ade80; }
+  .netpol-pod-status.deny { color: #f87171; }
+  .netpol-pod-status.target { color: #60a5fa; }
+
+  .netpol-yaml {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .netpol-yaml h4 {
+    font-size: 0.85rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .netpol-yaml pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: #aaa;
+    white-space: pre-wrap;
+    margin: 0;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .sim-layout { grid-template-columns: 1fr; }
+    .netpol-demo { grid-template-columns: 1fr; }
+    .net-cluster { grid-template-columns: 1fr; }
+    .netpol-cluster { grid-template-columns: repeat(2, 1fr); }
+    .service-types-row { grid-template-columns: 1fr; }
+    .ingress-rules { grid-template-columns: 1fr; }
+    .dns-step-row { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // KUBERNETES NETWORKING SIMULATION
+  // ============================================================
+
+  // --- Cluster Definition ---
+  var clusterNodes = [
+    {
+      name: "node-1", ip: "10.0.1.10",
+      pods: [
+        { name: "web-1", app: "web", ip: "10.244.1.2", port: 8080 },
+        { name: "api-1", app: "api", ip: "10.244.1.3", port: 3000 }
+      ]
+    },
+    {
+      name: "node-2", ip: "10.0.1.11",
+      pods: [
+        { name: "web-2", app: "web", ip: "10.244.2.2", port: 8080 },
+        { name: "db-1", app: "db", ip: "10.244.2.4", port: 5432 }
+      ]
+    },
+    {
+      name: "node-3", ip: "10.0.1.12",
+      pods: [
+        { name: "web-3", app: "web", ip: "10.244.3.2", port: 8080 },
+        { name: "api-2", app: "api", ip: "10.244.3.3", port: 3000 },
+        { name: "db-2", app: "db", ip: "10.244.3.5", port: 5432 }
+      ]
+    }
+  ];
+
+  var services = {
+    "web-svc": { clusterIP: "10.96.0.10", port: 80, targetPort: 8080, type: "ClusterIP", app: "web" },
+    "api-svc": { clusterIP: "10.96.0.20", port: 8080, targetPort: 3000, type: "NodePort", nodePort: 31080, app: "api" },
+    "db-svc": { clusterIP: "10.96.0.30", port: 5432, targetPort: 5432, type: "ClusterIP", app: "db" }
+  };
+
+  // --- Render Network Cluster ---
+  function renderNetCluster(activeNodeIdx, targetedPodName) {
+    var el = document.getElementById("netCluster");
+    var html = "";
+    for (var i = 0; i < clusterNodes.length; i++) {
+      var n = clusterNodes[i];
+      var nodeCls = "net-node";
+      if (activeNodeIdx === i) nodeCls += " active-node";
+
+      html += '<div class="' + nodeCls + '">';
+      html += '<div class="net-node-name">' + n.name + '</div>';
+      html += '<div class="net-node-ip">' + n.ip + '</div>';
+      html += '<div class="net-pods">';
+      for (var p = 0; p < n.pods.length; p++) {
+        var pod = n.pods[p];
+        var podCls = "net-pod " + pod.app;
+        if (targetedPodName === pod.name) podCls += " targeted";
+        html += '<div class="' + podCls + '">' + pod.name + '<br><span style="font-size:0.6rem;opacity:0.7">' + pod.ip + '</span></div>';
+      }
+      html += '</div>';
+
+      // Show services hosted here
+      var proxyMode = document.getElementById("proxyMode").value;
+      html += '<div class="net-proxy-badge">kube-proxy: ' + proxyMode + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  // --- Trace Log ---
+  var traceEl = document.getElementById("traceLog");
+
+  function clearTrace() {
+    traceEl.innerHTML = '<div class="log-empty">Configure a request and click "Send Request"...</div>';
+  }
+
+  function addTrace(msg, cls) {
+    if (traceEl.querySelector(".log-empty")) traceEl.innerHTML = "";
+    var div = document.createElement("div");
+    div.className = "log-line " + (cls || "");
+    div.textContent = msg;
+    traceEl.appendChild(div);
+    traceEl.scrollTop = traceEl.scrollHeight;
+  }
+
+  // --- Send Request ---
+  function sendRequest() {
+    var svcName = document.getElementById("targetSvc").value;
+    var proxyMode = document.getElementById("proxyMode").value;
+    var source = document.getElementById("requestSource").value;
+    var svc = services[svcName];
+    var btn = document.getElementById("sendReqBtn");
+    btn.disabled = true;
+
+    clearTrace();
+
+    // Highlight service type card
+    document.querySelectorAll(".service-type-card").forEach(function(c) { c.classList.remove("active-svc"); });
+    if (svc.type === "ClusterIP") document.getElementById("svcClusterIP").classList.add("active-svc");
+    else if (svc.type === "NodePort") document.getElementById("svcNodePort").classList.add("active-svc");
+    else document.getElementById("svcLoadBalancer").classList.add("active-svc");
+
+    var delay = 0;
+
+    // Step 1: DNS Resolution
+    setTimeout(function() {
+      addTrace("== Request to " + svcName + " (" + svc.type + ") ==", "info");
+      addTrace("1. DNS: " + svcName + ".default.svc.cluster.local", "dns");
+    }, delay);
+    delay += 500;
+
+    setTimeout(function() {
+      addTrace("   → CoreDNS resolves to ClusterIP: " + svc.clusterIP, "dns");
+    }, delay);
+    delay += 500;
+
+    // Step 2: Source routing
+    if (source === "external" && svc.type === "NodePort") {
+      setTimeout(function() {
+        addTrace("2. External → NodePort " + clusterNodes[0].ip + ":" + svc.nodePort, "svc");
+      }, delay);
+      delay += 500;
+    } else if (source === "external" && svc.type === "ClusterIP") {
+      setTimeout(function() {
+        addTrace("2. ⚠ ClusterIP is internal-only! External client cannot reach " + svc.clusterIP, "error");
+        addTrace("   → Use NodePort or LoadBalancer for external access", "error");
+        btn.disabled = false;
+      }, delay);
+      return;
+    } else {
+      setTimeout(function() {
+        addTrace("2. Pod → ClusterIP " + svc.clusterIP + ":" + svc.port, "svc");
+      }, delay);
+      delay += 500;
+    }
+
+    // Step 3: kube-proxy
+    setTimeout(function() {
+      if (proxyMode === "iptables") {
+        addTrace("3. kube-proxy (iptables): DNAT via chain KUBE-SVC-" + svcName.toUpperCase().replace(/-/g, ""), "proxy");
+        addTrace("   → iptables -t nat -A KUBE-SVC-xxx -m statistic --mode random --probability 0.33 -j KUBE-SEP-xxx", "proxy");
+      } else if (proxyMode === "ipvs") {
+        addTrace("3. kube-proxy (IPVS): hash lookup in virtual server table", "proxy");
+        addTrace("   → ipvsadm: " + svc.clusterIP + ":" + svc.port + " rr", "proxy");
+      } else {
+        addTrace("3. Cilium (eBPF): BPF map lookup at socket/TC layer", "proxy");
+        addTrace("   → bpf_map_lookup(svc=" + svc.clusterIP + ") → backend selected in O(1)", "proxy");
+      }
+    }, delay);
+    delay += 600;
+
+    // Step 4: Select backend pod
+    var backends = [];
+    for (var ni = 0; ni < clusterNodes.length; ni++) {
+      for (var pi = 0; pi < clusterNodes[ni].pods.length; pi++) {
+        var pod = clusterNodes[ni].pods[pi];
+        if (pod.app === svc.app) {
+          backends.push({ pod: pod, nodeIdx: ni });
+        }
+      }
+    }
+
+    var chosen = backends[Math.floor(Math.random() * backends.length)];
+
+    setTimeout(function() {
+      addTrace("4. Endpoints: [" + backends.map(function(b) { return b.pod.ip + ":" + b.pod.port; }).join(", ") + "]", "svc");
+    }, delay);
+    delay += 400;
+
+    setTimeout(function() {
+      addTrace("   → Selected: " + chosen.pod.name + " (" + chosen.pod.ip + ":" + chosen.pod.port + ")", "pod");
+      renderNetCluster(chosen.nodeIdx, chosen.pod.name);
+    }, delay);
+    delay += 400;
+
+    setTimeout(function() {
+      addTrace("5. ✅ Request delivered to " + chosen.pod.name + " on " + clusterNodes[chosen.nodeIdx].name, "pod");
+
+      if (proxyMode === "iptables") {
+        addTrace("   ℹ iptables: ~100μs rule traversal for small clusters, O(n) with services", "info");
+      } else if (proxyMode === "ipvs") {
+        addTrace("   ℹ IPVS: ~20μs hash lookup, O(1), supports rr/lc/sh algorithms", "info");
+      } else {
+        addTrace("   ℹ eBPF: ~5μs at socket layer, bypasses netfilter entirely", "info");
+      }
+
+      btn.disabled = false;
+    }, delay);
+  }
+
+  document.getElementById("sendReqBtn").addEventListener("click", sendRequest);
+
+  document.getElementById("resetClusterBtn").addEventListener("click", function() {
+    clearTrace();
+    document.querySelectorAll(".service-type-card").forEach(function(c) { c.classList.remove("active-svc"); });
+    renderNetCluster(-1, null);
+    document.getElementById("sendReqBtn").disabled = false;
+  });
+
+  // --- DNS Resolution Demo ---
+  var dnsRecords = {
+    "web-svc.default.svc.cluster.local": { ip: "10.96.0.10", type: "A" },
+    "api-svc.kube-system.svc.cluster.local": { ip: "10.96.0.20", type: "A" },
+    "db-svc.default.svc.cluster.local": { ip: "10.96.0.30", type: "A" },
+    "web-svc.default": { ip: "10.96.0.10", type: "A", expand: "web-svc.default.svc.cluster.local" }
+  };
+
+  document.querySelectorAll(".dns-preset").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var query = this.getAttribute("data-query");
+      document.getElementById("dnsQuery").value = query;
+      document.querySelectorAll(".dns-preset").forEach(function(b) { b.classList.remove("active"); });
+      this.classList.add("active");
+    });
+  });
+
+  document.getElementById("dnsResolveBtn").addEventListener("click", function() {
+    var query = document.getElementById("dnsQuery").value;
+    var stepsEl = document.getElementById("dnsSteps");
+    stepsEl.innerHTML = "";
+    var record = dnsRecords[query];
+    var delay = 0;
+
+    // Step 1: Query
+    var s1 = document.createElement("div");
+    s1.className = "dns-step query-step";
+    s1.textContent = "Query: " + query;
+    stepsEl.appendChild(s1);
+    setTimeout(function() { s1.classList.add("visible"); }, delay);
+    delay += 400;
+
+    // Arrow
+    var a1 = document.createElement("div");
+    a1.className = "dns-arrow";
+    a1.textContent = "→";
+    stepsEl.appendChild(a1);
+    setTimeout(function() { a1.classList.add("visible"); }, delay);
+    delay += 300;
+
+    // Step 2: Search domain expansion
+    if (record && record.expand) {
+      var s2 = document.createElement("div");
+      s2.className = "dns-step search-step";
+      s2.textContent = "Expand: " + record.expand;
+      stepsEl.appendChild(s2);
+      setTimeout(function() { s2.classList.add("visible"); }, delay);
+      delay += 400;
+
+      var a2 = document.createElement("div");
+      a2.className = "dns-arrow";
+      a2.textContent = "→";
+      stepsEl.appendChild(a2);
+      setTimeout(function() { a2.classList.add("visible"); }, delay);
+      delay += 300;
+    } else {
+      var s2b = document.createElement("div");
+      s2b.className = "dns-step search-step";
+      s2b.textContent = "CoreDNS lookup";
+      stepsEl.appendChild(s2b);
+      setTimeout(function() { s2b.classList.add("visible"); }, delay);
+      delay += 400;
+
+      var a2b = document.createElement("div");
+      a2b.className = "dns-arrow";
+      a2b.textContent = "→";
+      stepsEl.appendChild(a2b);
+      setTimeout(function() { a2b.classList.add("visible"); }, delay);
+      delay += 300;
+    }
+
+    // Step 3: Resolution
+    var s3 = document.createElement("div");
+    s3.className = "dns-step resolve-step";
+    if (record) {
+      s3.textContent = record.type + ": " + record.ip;
+    } else {
+      s3.textContent = "NXDOMAIN";
+      s3.style.color = "#f87171";
+      s3.style.borderColor = "rgba(239, 68, 68, 0.3)";
+      s3.style.background = "rgba(239, 68, 68, 0.15)";
+    }
+    stepsEl.appendChild(s3);
+    setTimeout(function() { s3.classList.add("visible"); }, delay);
+  });
+
+  // --- Ingress Routing ---
+  var ingressRules = [
+    { host: "app.example.com", paths: [
+      { path: "/api/", backend: "api-svc:8080" },
+      { path: "/ws", backend: "ws-svc:9090" },
+      { path: "/", backend: "web-svc:80" }
+    ]},
+    { host: "admin.example.com", paths: [
+      { path: "/", backend: "admin-svc:3000" }
+    ]}
+  ];
+
+  document.getElementById("ingressTestBtn").addEventListener("click", function() {
+    var urlStr = document.getElementById("ingressUrl").value;
+    var resultEl = document.getElementById("ingressResult");
+
+    // Parse URL
+    var hostMatch = urlStr.match(/\/\/([^\/]+)/);
+    var pathMatch = urlStr.match(/\/\/[^\/]+(\/[^\?#]*)/);
+    var host = hostMatch ? hostMatch[1] : "";
+    var path = pathMatch ? pathMatch[1] : "/";
+
+    // Clear highlights
+    document.querySelectorAll(".ingress-rule").forEach(function(r) { r.classList.remove("matched-rule"); });
+    document.querySelectorAll(".ingress-path").forEach(function(p) { p.classList.remove("matched-path"); });
+
+    var matched = null;
+    for (var r = 0; r < ingressRules.length; r++) {
+      var rule = ingressRules[r];
+      if (rule.host === host) {
+        var ruleEls = document.querySelectorAll(".ingress-rule");
+        ruleEls[r].classList.add("matched-rule");
+
+        for (var p = 0; p < rule.paths.length; p++) {
+          if (path.indexOf(rule.paths[p].path) === 0 || rule.paths[p].path === "/") {
+            matched = rule.paths[p];
+            var pathEls = ruleEls[r].querySelectorAll(".ingress-path");
+            pathEls[p].classList.add("matched-path");
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    if (matched) {
+      resultEl.className = "ingress-result routed";
+      resultEl.textContent = "✅ " + host + path + " → " + matched.backend;
+    } else {
+      resultEl.className = "ingress-result no-match";
+      resultEl.textContent = "❌ No matching Ingress rule for " + host + path;
+    }
+  });
+
+  // --- Network Policy Editor ---
+  var netpolPods = [
+    { name: "web-1", app: "web" },
+    { name: "web-2", app: "web" },
+    { name: "api-1", app: "api" },
+    { name: "api-2", app: "api" },
+    { name: "db-1", app: "db" },
+    { name: "db-2", app: "db" },
+    { name: "external", app: "external" },
+    { name: "dns", app: "dns" }
+  ];
+
+  function renderNetpol(target, allowFrom, denyFrom) {
+    var el = document.getElementById("netpolCluster");
+    var html = "";
+    for (var i = 0; i < netpolPods.length; i++) {
+      var pod = netpolPods[i];
+      var cls = "netpol-pod";
+      var status = "";
+      var statusCls = "";
+
+      if (pod.app === target) {
+        cls += " target-pod";
+        status = "🎯 target";
+        statusCls = "target";
+      } else if (allowFrom.indexOf(pod.app) >= 0) {
+        cls += " allowed-pod";
+        status = "✅ allowed";
+        statusCls = "allow";
+      } else {
+        cls += " denied-pod";
+        status = "🚫 denied";
+        statusCls = "deny";
+      }
+
+      html += '<div class="' + cls + '">';
+      html += '<div class="netpol-pod-name">' + pod.name + '</div>';
+      html += '<div class="netpol-pod-label">app=' + pod.app + '</div>';
+      html += '<div class="netpol-pod-status ' + statusCls + '">' + status + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function generateYaml(target, ingressAllow, egressAllow) {
+    var yaml = "apiVersion: networking.k8s.io/v1\n";
+    yaml += "kind: NetworkPolicy\n";
+    yaml += "metadata:\n";
+    yaml += "  name: " + target + "-policy\n";
+    yaml += "  namespace: default\n";
+    yaml += "spec:\n";
+    yaml += "  podSelector:\n";
+    yaml += "    matchLabels:\n";
+    yaml += "      app: " + target + "\n";
+    yaml += "  policyTypes:\n";
+    yaml += "    - Ingress\n";
+    yaml += "    - Egress\n";
+    yaml += "  ingress:\n";
+
+    if (ingressAllow.length > 0) {
+      yaml += "    - from:\n";
+      for (var i = 0; i < ingressAllow.length; i++) {
+        if (ingressAllow[i] === "external") {
+          yaml += "        - ipBlock:\n";
+          yaml += "            cidr: 0.0.0.0/0\n";
+        } else {
+          yaml += "        - podSelector:\n";
+          yaml += "            matchLabels:\n";
+          yaml += "              app: " + ingressAllow[i] + "\n";
+        }
+      }
+    } else {
+      yaml += "    [] # deny all ingress\n";
+    }
+
+    yaml += "  egress:\n";
+    if (egressAllow.length > 0) {
+      for (var e = 0; e < egressAllow.length; e++) {
+        if (egressAllow[e] === "dns") {
+          yaml += "    - to: []\n";
+          yaml += "      ports:\n";
+          yaml += "        - port: 53\n";
+          yaml += "          protocol: UDP\n";
+          yaml += "        - port: 53\n";
+          yaml += "          protocol: TCP\n";
+        } else if (egressAllow[e] === "internet") {
+          yaml += "    - to:\n";
+          yaml += "        - ipBlock:\n";
+          yaml += "            cidr: 0.0.0.0/0\n";
+          yaml += "            except:\n";
+          yaml += "              - 10.0.0.0/8\n";
+        } else {
+          yaml += "    - to:\n";
+          yaml += "        - podSelector:\n";
+          yaml += "            matchLabels:\n";
+          yaml += "              app: " + egressAllow[e] + "\n";
+        }
+      }
+    } else {
+      yaml += "    [] # deny all egress\n";
+    }
+
+    return yaml;
+  }
+
+  function applyNetpol() {
+    var target = document.getElementById("polTarget").value;
+    var allowFrom = [];
+    if (document.getElementById("polAllowWeb").checked) allowFrom.push("web");
+    if (document.getElementById("polAllowApi").checked) allowFrom.push("api");
+    if (document.getElementById("polAllowDb").checked) allowFrom.push("db");
+    if (document.getElementById("polAllowExt").checked) allowFrom.push("external");
+
+    var egressAllow = [];
+    if (document.getElementById("polEgressDns").checked) egressAllow.push("dns");
+    if (document.getElementById("polEgressDb").checked) egressAllow.push("db");
+    if (document.getElementById("polEgressExt").checked) egressAllow.push("internet");
+
+    renderNetpol(target, allowFrom);
+    document.getElementById("netpolYamlCode").textContent = generateYaml(target, allowFrom, egressAllow);
+  }
+
+  document.getElementById("polApplyBtn").addEventListener("click", applyNetpol);
+
+  document.getElementById("polResetBtn").addEventListener("click", function() {
+    document.getElementById("polAllowWeb").checked = true;
+    document.getElementById("polAllowApi").checked = true;
+    document.getElementById("polAllowDb").checked = false;
+    document.getElementById("polAllowExt").checked = false;
+    document.getElementById("polEgressDns").checked = true;
+    document.getElementById("polEgressDb").checked = true;
+    document.getElementById("polEgressExt").checked = false;
+    document.getElementById("polTarget").value = "web";
+    applyNetpol();
+  });
+
+  // --- Init ---
+  renderNetCluster(-1, null);
+  applyNetpol();
+</script>
+</BaseLayout>

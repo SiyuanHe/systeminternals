@@ -1,0 +1,124 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Distributed SQL Architecture", description: "SQL → Distribution → Replication → Storage: how queries flow through layers", href: "/cockroachdb/architecture/", status: "live" },
+  { title: "Range Splits & Merges", description: "How 512MB ranges split, merge, and rebalance across nodes", href: "#", status: "coming" },
+  { title: "Distributed Transactions", description: "Parallel commits, write pipelining, and transaction records", href: "#", status: "coming" },
+  { title: "Multi-Region Patterns", description: "Zone configs, regional tables, global tables, and locality-aware placement", href: "#", status: "coming" },
+  { title: "Follower Reads", description: "Serve reads from followers at historical timestamps", href: "#", status: "coming" },
+  { title: "Raft in CockroachDB", description: "Consensus, lease transfers, and joint consensus changes", href: "#", status: "coming" },
+  { title: "Pebble Storage Engine", description: "LSM-tree storage, compaction, and MVCC encoding", href: "#", status: "coming" },
+  { title: "SQL Execution & Optimization", description: "Cost-based optimizer, DistSQL, and vectorized execution", href: "#", status: "coming" },
+  { title: "Backup & Changefeeds", description: "Incremental backups, CDC, and point-in-time recovery", href: "#", status: "coming" },
+  { title: "Admission Control", description: "CPU and IO overload protection with multi-tenant fairness", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="CockroachDB Internals" 
+  description="Interactive visualizations for understanding CockroachDB architecture, distributed SQL, and operational best practices"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "CockroachDB", href: "/cockroachdb/" }]}
+>
+  <section class="section-header">
+    <h1>🪳 CockroachDB Internals</h1>
+    <p>
+      CockroachDB is a distributed SQL database built for global scale. It layers SQL on top of a 
+      transactional key-value store, using Raft consensus and range-based sharding to survive 
+      node, zone, and region failures. These visualizations explore the internals.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(100, 255, 150, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

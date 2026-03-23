@@ -1,0 +1,1468 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="CockroachDB Distributed SQL Architecture" 
+  description="Interactive visualization of CockroachDB's layered architecture — SQL, Distribution, Replication, and Storage"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "CockroachDB", href: "/cockroachdb/" },
+    { label: "Architecture", href: "/cockroachdb/architecture/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🏗️ Distributed SQL Architecture</h1>
+      <p class="subtitle">How CockroachDB routes a query through four layers across a cluster</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          CockroachDB is a <strong>distributed SQL database</strong> where every node is symmetric — 
+          any node can serve any query. Data is divided into <em>ranges</em> (512MB sorted key chunks), 
+          each replicated via <strong>Raft consensus</strong>. The <em>leaseholder</em> of each range 
+          serves reads without consensus (fast!), while writes go through Raft. This creates a system 
+          that survives node, rack, and even region failures — all while speaking PostgreSQL wire protocol.
+        </p>
+      </div>
+    </section>
+
+    <!-- Layer Stack -->
+    <section class="layer-section">
+      <h2>📐 The Four Layers</h2>
+      <p class="section-desc">Click each layer to explore how it works</p>
+
+      <div class="layer-stack">
+        <div class="layer-card active" data-layer="sql">
+          <div class="layer-num">1</div>
+          <div class="layer-info">
+            <h3>SQL Layer</h3>
+            <p>Parse, plan, optimize, execute</p>
+          </div>
+          <div class="layer-icon">🧠</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="layer-card" data-layer="distribution">
+          <div class="layer-num">2</div>
+          <div class="layer-info">
+            <h3>Distribution Layer</h3>
+            <p>Route KV ops to the right ranges</p>
+          </div>
+          <div class="layer-icon">🗺️</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="layer-card" data-layer="replication">
+          <div class="layer-num">3</div>
+          <div class="layer-info">
+            <h3>Replication Layer</h3>
+            <p>Raft consensus &amp; lease management</p>
+          </div>
+          <div class="layer-icon">🔄</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="layer-card" data-layer="storage">
+          <div class="layer-num">4</div>
+          <div class="layer-info">
+            <h3>Storage Layer</h3>
+            <p>Pebble LSM-tree (MVCC on disk)</p>
+          </div>
+          <div class="layer-icon">💾</div>
+        </div>
+      </div>
+
+      <div class="layer-detail" id="layerDetail">
+        <div class="layer-detail-content" id="layerDetailContent">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Cluster -->
+    <section class="cluster-section">
+      <h2>🖥️ Interactive Cluster</h2>
+      <p class="section-desc">A 5-node CockroachDB cluster with ranges replicated 3 ways</p>
+
+      <div class="cluster-controls">
+        <button id="sendQueryBtn" class="action-btn primary-btn">📡 Send SQL Query</button>
+        <button id="splitRangeBtn" class="action-btn split-btn">✂️ Split Range</button>
+        <button id="transferLeaseBtn" class="action-btn lease-btn">🔄 Transfer Lease</button>
+        <button id="killNodeBtn" class="action-btn kill-btn">💀 Kill Node</button>
+        <button id="clusterResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="cluster-status" id="clusterStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="clusterStatusText">5 nodes online · 3 ranges · RF=3</span>
+      </div>
+
+      <div class="cluster-viz" id="clusterViz">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="cluster-log" id="clusterLog">
+        <div class="log-entry info">Cluster initialized with 3 ranges across 5 nodes</div>
+      </div>
+    </section>
+
+    <!-- Ranges Deep Dive -->
+    <section class="range-section">
+      <h2>📦 Ranges: The Unit of Data</h2>
+      <p class="section-desc">CockroachDB splits the sorted key space into ~512MB ranges</p>
+
+      <div class="range-viz">
+        <div class="keyspace-bar">
+          <div class="keyspace-label">Sorted Key Space (entire database)</div>
+          <div class="keyspace-ranges" id="keyspaceRanges">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <div class="range-details" id="rangeDetails">
+          <div class="range-detail-card">
+            <h4>Each Range Contains</h4>
+            <ul>
+              <li><strong>Data:</strong> ~512MB of sorted key-value pairs</li>
+              <li><strong>Replicas:</strong> 3 copies on different nodes (configurable)</li>
+              <li><strong>Leaseholder:</strong> 1 replica serves reads (no consensus!)</li>
+              <li><strong>Raft group:</strong> All replicas form a Raft consensus group</li>
+            </ul>
+          </div>
+          <div class="range-detail-card highlight-card">
+            <h4>💡 Range Lease vs Raft Leader</h4>
+            <p>
+              The <strong>leaseholder</strong> is usually the Raft leader, but they're separate concepts.
+              The lease is a <em>time-based</em> grant — the leaseholder can serve reads without 
+              talking to other replicas. This is CockroachDB's key performance trick: 
+              <strong>reads don't need consensus</strong>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Query Flow Animation -->
+    <section class="query-section">
+      <h2>🔍 Query Flow: SELECT → Result</h2>
+      <p class="section-desc">Watch a query flow through all four layers</p>
+
+      <div class="query-controls">
+        <div class="query-input">
+          <code>SELECT balance FROM accounts WHERE id = 42</code>
+        </div>
+        <button id="runQueryBtn" class="action-btn primary-btn">▶ Trace Query</button>
+        <button id="queryStepBtn" class="action-btn step-btn" disabled>⏭ Next Step</button>
+        <button id="queryResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="query-flow-viz">
+        <div class="query-steps" id="querySteps">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Distributed Transactions -->
+    <section class="txn-section">
+      <h2>🔐 Distributed Transactions</h2>
+      <p class="section-desc">CockroachDB uses parallel commits and write pipelining for speed</p>
+
+      <div class="txn-controls">
+        <button id="runTxnBtn" class="action-btn primary-btn">▶ Run Transaction</button>
+        <button id="txnResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <div class="txn-toggles">
+          <label><input type="checkbox" id="pipelineToggle" checked> Write Pipelining</label>
+          <label><input type="checkbox" id="parallelToggle" checked> Parallel Commits</label>
+        </div>
+      </div>
+
+      <div class="txn-timeline" id="txnTimeline">
+        <!-- Filled by JS -->
+      </div>
+
+      <div class="txn-explain-grid">
+        <div class="explain-card">
+          <h3>⚡ Write Pipelining</h3>
+          <p>
+            Don't wait for Raft consensus on each write — <strong>pipeline them</strong>. 
+            Send the next write before the previous one is replicated. As long as all writes 
+            succeed before commit, the transaction is valid. Cuts multi-write latency dramatically.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🚀 Parallel Commits</h3>
+          <p>
+            Instead of a separate commit phase, CockroachDB writes the <strong>transaction record</strong> 
+            in parallel with the final batch of writes. The transaction is implicitly committed 
+            when all writes succeed — saving <strong>one full round trip</strong>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Follower Reads -->
+    <section class="follower-section">
+      <h2>📖 Follower Reads</h2>
+      <p class="section-desc">Read from any replica at a historical timestamp — no lease required</p>
+
+      <div class="follower-viz">
+        <div class="follower-diagram">
+          <div class="follower-node leaseholder-node">
+            <div class="node-label">Node 1 (Leaseholder)</div>
+            <div class="node-data">
+              <div class="data-row">ts=100: balance=$500</div>
+              <div class="data-row">ts=90: balance=$300</div>
+              <div class="data-row dim">ts=80: balance=$100</div>
+            </div>
+          </div>
+          <div class="follower-node follower-node-style">
+            <div class="node-label">Node 2 (Follower)</div>
+            <div class="node-data">
+              <div class="data-row">ts=100: balance=$500</div>
+              <div class="data-row highlight-row">ts=90: balance=$300 ← read here</div>
+              <div class="data-row dim">ts=80: balance=$100</div>
+            </div>
+          </div>
+          <div class="follower-node follower-node-style">
+            <div class="node-label">Node 3 (Follower)</div>
+            <div class="node-data">
+              <div class="data-row">ts=100: balance=$500</div>
+              <div class="data-row">ts=90: balance=$300</div>
+              <div class="data-row dim">ts=80: balance=$100</div>
+            </div>
+          </div>
+        </div>
+        <div class="follower-explain">
+          <p>
+            With <code>AS OF SYSTEM TIME '-5s'</code>, CockroachDB can serve reads from 
+            <strong>any replica</strong> — not just the leaseholder. The closed timestamp 
+            mechanism guarantees no writes will occur at or below that timestamp. 
+            Perfect for analytics, dashboards, and geo-distributed reads.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Multi-Region -->
+    <section class="region-section">
+      <h2>🌍 Multi-Region Patterns</h2>
+      <p class="section-desc">Control where your data lives and how it's accessed</p>
+
+      <div class="region-controls">
+        <div class="region-tabs">
+          <button class="region-tab active" data-tab="regional">Regional Tables</button>
+          <button class="region-tab" data-tab="global">Global Tables</button>
+          <button class="region-tab" data-tab="rbr">Regional by Row</button>
+        </div>
+      </div>
+
+      <div class="region-content" id="regionContent">
+        <!-- Filled by JS -->
+      </div>
+
+      <div class="region-map">
+        <div class="region-box us-east">
+          <div class="region-name">🇺🇸 us-east1</div>
+          <div class="region-nodes" id="regionUsEast">N1, N2, N3</div>
+        </div>
+        <div class="region-box us-west">
+          <div class="region-name">🇺🇸 us-west1</div>
+          <div class="region-nodes" id="regionUsWest">N4, N5, N6</div>
+        </div>
+        <div class="region-box eu-west">
+          <div class="region-name">🇪🇺 eu-west1</div>
+          <div class="region-nodes" id="regionEuWest">N7, N8, N9</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.cockroachlabs.com/docs/stable/architecture/overview.html" target="_blank">CockroachDB Architecture Docs</a> and <a href="https://dl.acm.org/doi/10.1145/3318464.3386134" target="_blank">CockroachDB: The Resilient Geo-Distributed SQL Database (SIGMOD 2020)</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20CockroachDB%20distributed%20SQL%20architecture&url=https://systeminternals.dev/cockroachdb/architecture/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/cockroachdb/architecture/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/cockroachdb/architecture/&t=Interactive%20CockroachDB%20Architecture%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #6ded8a, #3ecf8e, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(110, 237, 138, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(110, 237, 138, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #6ded8a; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #6ded8a, #3ecf8e);
+    color: #111;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(62, 207, 142, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .split-btn {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: #111;
+  }
+
+  .lease-btn {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+  }
+
+  .kill-btn {
+    background: linear-gradient(135deg, #f87171, #ef4444);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Layer Stack */
+  .layer-section {
+    margin-bottom: 50px;
+  }
+
+  .layer-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 24px;
+  }
+
+  .layer-arrow {
+    color: #555;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 4px 0;
+  }
+
+  .layer-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    max-width: 500px;
+    padding: 16px 20px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .layer-card:hover, .layer-card.active {
+    background: rgba(110, 237, 138, 0.08);
+    border-color: rgba(110, 237, 138, 0.4);
+  }
+
+  .layer-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(110, 237, 138, 0.2);
+    color: #6ded8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .layer-info h3 {
+    color: #fff;
+    font-size: 1rem;
+    margin-bottom: 2px;
+  }
+
+  .layer-info p {
+    color: #888;
+    font-size: 0.85rem;
+  }
+
+  .layer-icon {
+    margin-left: auto;
+    font-size: 1.5rem;
+  }
+
+  .layer-detail {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    min-height: 120px;
+  }
+
+  .layer-detail-content {
+    color: #ccc;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .layer-detail-content strong { color: #6ded8a; }
+  .layer-detail-content code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #fbbf24;
+  }
+
+  /* Cluster Viz */
+  .cluster-section {
+    margin-bottom: 50px;
+  }
+
+  .cluster-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .cluster-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.routing { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.replicating { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
+  .status-badge.done { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.danger { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  .cluster-viz {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .cluster-log {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.1);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+  }
+
+  .log-entry {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .log-entry.info { color: #9ca3af; }
+  .log-entry.route { color: #fbbf24; }
+  .log-entry.raft { color: #a78bfa; }
+  .log-entry.success { color: #4ade80; }
+  .log-entry.error { color: #f87171; }
+  .log-entry.lease { color: #60a5fa; }
+
+  @keyframes entryAppear {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Range Section */
+  .range-section {
+    margin-bottom: 50px;
+  }
+
+  .range-viz {
+    margin-bottom: 20px;
+  }
+
+  .keyspace-bar {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 20px;
+  }
+
+  .keyspace-label {
+    color: #888;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .keyspace-ranges {
+    display: flex;
+    gap: 4px;
+    height: 50px;
+  }
+
+  .range-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .range-detail-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  .range-detail-card h4 {
+    color: #fff;
+    font-size: 1rem;
+    margin-bottom: 12px;
+  }
+
+  .range-detail-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .range-detail-card li {
+    color: #aaa;
+    padding: 4px 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .range-detail-card li strong { color: #6ded8a; }
+
+  .range-detail-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.9rem;
+  }
+
+  .range-detail-card strong { color: #6ded8a; }
+  .range-detail-card em { color: #fbbf24; font-style: normal; }
+
+  .highlight-card {
+    background: linear-gradient(135deg, rgba(110, 237, 138, 0.08), rgba(96, 165, 250, 0.08));
+    border-color: rgba(110, 237, 138, 0.3);
+  }
+
+  /* Query Flow */
+  .query-section {
+    margin-bottom: 50px;
+  }
+
+  .query-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .query-input {
+    flex: 1;
+    min-width: 280px;
+    padding: 12px 16px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(110, 237, 138, 0.3);
+    border-radius: 10px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9rem;
+    color: #6ded8a;
+  }
+
+  .query-flow-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    min-height: 200px;
+  }
+
+  .query-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .query-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    animation: entryAppear 0.4s ease-out;
+  }
+
+  .query-step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .query-step-body h4 {
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+
+  .query-step-body p {
+    font-size: 0.85rem;
+    color: #aaa;
+    line-height: 1.5;
+  }
+
+  .step-sql { background: rgba(110, 237, 138, 0.08); border-left: 3px solid #6ded8a; }
+  .step-sql .query-step-num { background: rgba(110, 237, 138, 0.3); color: #6ded8a; }
+  .step-sql h4 { color: #6ded8a; }
+
+  .step-dist { background: rgba(251, 191, 36, 0.08); border-left: 3px solid #fbbf24; }
+  .step-dist .query-step-num { background: rgba(251, 191, 36, 0.3); color: #fbbf24; }
+  .step-dist h4 { color: #fbbf24; }
+
+  .step-repl { background: rgba(167, 139, 250, 0.08); border-left: 3px solid #a78bfa; }
+  .step-repl .query-step-num { background: rgba(167, 139, 250, 0.3); color: #a78bfa; }
+  .step-repl h4 { color: #a78bfa; }
+
+  .step-stor { background: rgba(96, 165, 250, 0.08); border-left: 3px solid #60a5fa; }
+  .step-stor .query-step-num { background: rgba(96, 165, 250, 0.3); color: #60a5fa; }
+  .step-stor h4 { color: #60a5fa; }
+
+  .step-result { background: rgba(34, 197, 94, 0.08); border-left: 3px solid #22c55e; }
+  .step-result .query-step-num { background: rgba(34, 197, 94, 0.3); color: #22c55e; }
+  .step-result h4 { color: #22c55e; }
+
+  /* Transaction Section */
+  .txn-section {
+    margin-bottom: 50px;
+  }
+
+  .txn-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .txn-toggles {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+  }
+
+  .txn-toggles label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #ccc;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  .txn-timeline {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 150px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 24px;
+  }
+
+  .txn-step {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .txn-step.write-step { background: rgba(251, 191, 36, 0.1); color: #fde68a; border-left: 3px solid #fbbf24; }
+  .txn-step.raft-step { background: rgba(167, 139, 250, 0.1); color: #c4b5fd; border-left: 3px solid #a78bfa; }
+  .txn-step.commit-step { background: rgba(34, 197, 94, 0.1); color: #86efac; border-left: 3px solid #22c55e; }
+  .txn-step.pipeline-step { background: rgba(244, 114, 182, 0.1); color: #f9a8d4; border-left: 3px solid #f472b6; }
+  .txn-step.result-step { background: rgba(96, 165, 250, 0.1); color: #93c5fd; border-left: 3px solid #60a5fa; }
+
+  .txn-explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* Explain cards (shared) */
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #6ded8a; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #fbbf24;
+  }
+
+  /* Follower Reads */
+  .follower-section {
+    margin-bottom: 50px;
+  }
+
+  .follower-viz {
+    margin-bottom: 20px;
+  }
+
+  .follower-diagram {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .follower-node {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .leaseholder-node {
+    border-color: rgba(110, 237, 138, 0.4);
+    background: rgba(110, 237, 138, 0.05);
+  }
+
+  .follower-node-style {
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+
+  .node-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+
+  .leaseholder-node .node-label { color: #6ded8a; }
+  .follower-node-style .node-label { color: #60a5fa; }
+
+  .node-data {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.78rem;
+  }
+
+  .data-row {
+    padding: 4px 8px;
+    color: #aaa;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .data-row.dim { opacity: 0.4; }
+  .data-row.highlight-row {
+    background: rgba(96, 165, 250, 0.15);
+    color: #60a5fa;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .follower-explain {
+    background: rgba(96, 165, 250, 0.06);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .follower-explain p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .follower-explain strong { color: #60a5fa; }
+  .follower-explain code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #6ded8a;
+  }
+
+  /* Multi-Region */
+  .region-section {
+    margin-bottom: 50px;
+  }
+
+  .region-controls {
+    margin-bottom: 20px;
+  }
+
+  .region-tabs {
+    display: flex;
+    gap: 8px;
+  }
+
+  .region-tab {
+    padding: 10px 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    color: #aaa;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .region-tab:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+  .region-tab.active {
+    background: rgba(110, 237, 138, 0.15);
+    border-color: rgba(110, 237, 138, 0.4);
+    color: #6ded8a;
+    font-weight: 600;
+  }
+
+  .region-content {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 20px;
+    min-height: 100px;
+    color: #ccc;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .region-content strong { color: #6ded8a; }
+  .region-content code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #fbbf24;
+  }
+
+  .region-map {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .region-box {
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .us-east { background: rgba(110, 237, 138, 0.08); border-color: rgba(110, 237, 138, 0.3); }
+  .us-west { background: rgba(96, 165, 250, 0.08); border-color: rgba(96, 165, 250, 0.3); }
+  .eu-west { background: rgba(167, 139, 250, 0.08); border-color: rgba(167, 139, 250, 0.3); }
+
+  .region-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .region-nodes {
+    font-size: 0.85rem;
+    color: #888;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  /* Node cards in cluster viz */
+  .node-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    transition: all 0.3s;
+    min-height: 140px;
+  }
+
+  .node-card.dead {
+    opacity: 0.3;
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .node-card.active-node {
+    border-color: rgba(110, 237, 138, 0.5);
+    background: rgba(110, 237, 138, 0.08);
+    box-shadow: 0 0 20px rgba(110, 237, 138, 0.15);
+  }
+
+  .node-card-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .node-card.dead .node-card-title { color: #f87171; }
+
+  .range-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin: 2px;
+  }
+
+  .range-badge.leaseholder {
+    background: rgba(110, 237, 138, 0.25);
+    color: #6ded8a;
+    border: 1px solid rgba(110, 237, 138, 0.4);
+  }
+
+  .range-badge.follower {
+    background: rgba(96, 165, 250, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  /* Keyspace range blocks */
+  .ks-range {
+    flex: 1;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ks-range:hover {
+    transform: scaleY(1.1);
+    filter: brightness(1.3);
+  }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .cluster-viz { grid-template-columns: repeat(2, 1fr); }
+    .follower-diagram { grid-template-columns: 1fr; }
+    .range-details { grid-template-columns: 1fr; }
+    .txn-explain-grid { grid-template-columns: 1fr; }
+    .region-map { grid-template-columns: 1fr; }
+    .region-tabs { flex-wrap: wrap; }
+  }
+</style>
+
+<script is:inline>
+  // ========== LAYER DETAILS ==========
+  var layerDetails = {
+    sql: '<strong>SQL Layer</strong> — Every CockroachDB node runs a full SQL engine. It parses SQL (PostgreSQL-compatible), builds an AST, runs the <strong>cost-based optimizer</strong>, and produces a logical plan. For distributed queries, it uses <strong>DistSQL</strong> to push computation to nodes that hold the data — like a mini MapReduce. The vectorized execution engine processes data in columnar batches for CPU efficiency.',
+    distribution: '<strong>Distribution Layer</strong> — Translates SQL\'s logical KV operations into physical operations on specific ranges. It maintains a <strong>range descriptor cache</strong> (like a routing table) that maps key spans to range locations. When a range splits or moves, the cache updates lazily — if you hit a stale entry, the node returns a "range not found" error and the cache refreshes. This layer also handles <strong>transaction coordination</strong> — the gateway node becomes the transaction coordinator.',
+    replication: '<strong>Replication Layer</strong> — Each range is a <strong>Raft consensus group</strong>. Writes go through the Raft leader, get replicated to a quorum (2 of 3), then are applied. The <strong>range lease</strong> is separate from Raft leadership — the leaseholder serves reads without consensus. Leases are time-based (typically 9 seconds) and colocated with the Raft leader. This layer handles <strong>membership changes</strong> (adding/removing replicas) using joint consensus.',
+    storage: '<strong>Storage Layer</strong> — Each node runs <strong>Pebble</strong> (CockroachDB\'s custom LSM-tree engine, inspired by RocksDB/LevelDB). Data is stored as MVCC key-value pairs: <code>key@timestamp → value</code>. Pebble uses <strong>bloom filters</strong> for point lookups, <strong>range deletions</strong> for efficient GC, and <strong>table-level properties</strong> for range-key awareness. Each range\'s data lives contiguously in the LSM tree since ranges are sorted key spans.'
+  };
+
+  var layerCards = document.querySelectorAll('.layer-card');
+  var layerDetailContent = document.getElementById('layerDetailContent');
+
+  layerDetailContent.innerHTML = layerDetails.sql;
+
+  layerCards.forEach(function(card) {
+    card.addEventListener('click', function() {
+      layerCards.forEach(function(c) { c.classList.remove('active'); });
+      card.classList.add('active');
+      var layer = card.getAttribute('data-layer');
+      layerDetailContent.innerHTML = layerDetails[layer];
+    });
+  });
+
+  // ========== CLUSTER SIMULATION ==========
+  var clusterState = {
+    nodes: [
+      { id: 1, alive: true },
+      { id: 2, alive: true },
+      { id: 3, alive: true },
+      { id: 4, alive: true },
+      { id: 5, alive: true }
+    ],
+    ranges: [
+      { id: 'R1', start: 'a', end: 'm', replicas: [1, 2, 3], leaseholder: 1, color: '#6ded8a' },
+      { id: 'R2', start: 'm', end: 't', replicas: [2, 3, 4], leaseholder: 3, color: '#60a5fa' },
+      { id: 'R3', start: 't', end: 'z', replicas: [3, 4, 5], leaseholder: 5, color: '#a78bfa' }
+    ]
+  };
+
+  function renderCluster() {
+    var viz = document.getElementById('clusterViz');
+    viz.innerHTML = '';
+
+    clusterState.nodes.forEach(function(node) {
+      var card = document.createElement('div');
+      card.className = 'node-card' + (node.alive ? '' : ' dead');
+      card.id = 'node-' + node.id;
+
+      var title = document.createElement('div');
+      title.className = 'node-card-title';
+      title.textContent = node.alive ? ('Node ' + node.id) : ('Node ' + node.id + ' ☠️');
+      card.appendChild(title);
+
+      if (node.alive) {
+        clusterState.ranges.forEach(function(range) {
+          if (range.replicas.indexOf(node.id) !== -1) {
+            var badge = document.createElement('span');
+            var isLH = range.leaseholder === node.id;
+            badge.className = 'range-badge ' + (isLH ? 'leaseholder' : 'follower');
+            badge.textContent = range.id + (isLH ? ' ★' : '');
+            badge.style.borderColor = range.color;
+            if (isLH) badge.style.color = range.color;
+            card.appendChild(badge);
+          }
+        });
+      }
+
+      viz.appendChild(card);
+    });
+
+    updateClusterStatus();
+  }
+
+  function updateClusterStatus() {
+    var alive = clusterState.nodes.filter(function(n) { return n.alive; }).length;
+    var statusText = document.getElementById('clusterStatusText');
+    statusText.textContent = alive + ' nodes online · ' + clusterState.ranges.length + ' ranges · RF=3';
+  }
+
+  function addLog(text, cls) {
+    var log = document.getElementById('clusterLog');
+    var entry = document.createElement('div');
+    entry.className = 'log-entry ' + (cls || 'info');
+    entry.textContent = text;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  renderCluster();
+
+  // Send Query
+  document.getElementById('sendQueryBtn').addEventListener('click', function() {
+    var badge = document.querySelector('.cluster-status .status-badge');
+    var steps = [
+      { text: '→ Client sends SELECT to Node 1 (gateway)', cls: 'route', delay: 0 },
+      { text: '→ SQL layer: parse → optimize → plan', cls: 'route', delay: 600 },
+      { text: '→ Distribution: key "id=42" maps to R1, leaseholder=Node ' + clusterState.ranges[0].leaseholder, cls: 'route', delay: 600 },
+      { text: '→ Replication: leaseholder serves read (no Raft needed!)', cls: 'raft', delay: 600 },
+      { text: '→ Storage: Pebble point lookup at key@latest_ts', cls: 'info', delay: 400 },
+      { text: '✅ Result: balance=$500 returned to client (2.1ms)', cls: 'success', delay: 500 }
+    ];
+
+    badge.className = 'status-badge routing';
+    badge.textContent = 'Querying';
+
+    var nodeEl = document.getElementById('node-' + clusterState.ranges[0].leaseholder);
+    if (nodeEl) nodeEl.classList.add('active-node');
+
+    var totalDelay = 0;
+    steps.forEach(function(step) {
+      totalDelay += step.delay;
+      setTimeout(function() { addLog(step.text, step.cls); }, totalDelay);
+    });
+
+    setTimeout(function() {
+      badge.className = 'status-badge done';
+      badge.textContent = 'Done';
+      if (nodeEl) nodeEl.classList.remove('active-node');
+    }, totalDelay + 300);
+  });
+
+  // Split Range
+  document.getElementById('splitRangeBtn').addEventListener('click', function() {
+    if (clusterState.ranges.length >= 6) {
+      addLog('⚠️ Max ranges reached for demo', 'error');
+      return;
+    }
+    var target = clusterState.ranges[0];
+    var mid = String.fromCharCode(target.start.charCodeAt(0) + Math.floor((target.end.charCodeAt(0) - target.start.charCodeAt(0)) / 2));
+    var colors = ['#f472b6', '#fbbf24', '#22d3ee'];
+    var newRange = {
+      id: 'R' + (clusterState.ranges.length + 1),
+      start: mid,
+      end: target.end,
+      replicas: target.replicas.slice(),
+      leaseholder: target.replicas[1],
+      color: colors[clusterState.ranges.length % colors.length]
+    };
+    target.end = mid;
+    clusterState.ranges.push(newRange);
+    renderCluster();
+    renderKeyspace();
+    addLog('✂️ Split ' + target.id + ' at key "' + mid + '" → new ' + newRange.id, 'lease');
+  });
+
+  // Transfer Lease
+  document.getElementById('transferLeaseBtn').addEventListener('click', function() {
+    var range = clusterState.ranges[Math.floor(Math.random() * clusterState.ranges.length)];
+    var aliveReplicas = range.replicas.filter(function(nid) {
+      return clusterState.nodes[nid - 1].alive;
+    });
+    var candidates = aliveReplicas.filter(function(nid) { return nid !== range.leaseholder; });
+    if (candidates.length === 0) {
+      addLog('⚠️ No candidates for lease transfer on ' + range.id, 'error');
+      return;
+    }
+    var oldLH = range.leaseholder;
+    range.leaseholder = candidates[Math.floor(Math.random() * candidates.length)];
+    renderCluster();
+    addLog('🔄 Lease transfer: ' + range.id + ' Node ' + oldLH + ' → Node ' + range.leaseholder, 'lease');
+  });
+
+  // Kill Node
+  document.getElementById('killNodeBtn').addEventListener('click', function() {
+    var aliveNodes = clusterState.nodes.filter(function(n) { return n.alive; });
+    if (aliveNodes.length <= 3) {
+      addLog('⚠️ Cannot kill more nodes — need 3 for quorum', 'error');
+      return;
+    }
+    var victim = aliveNodes[Math.floor(Math.random() * aliveNodes.length)];
+    victim.alive = false;
+    addLog('💀 Node ' + victim.id + ' killed!', 'error');
+
+    // Reassign leases and replicas
+    clusterState.ranges.forEach(function(range) {
+      if (range.leaseholder === victim.id) {
+        var newLH = range.replicas.filter(function(nid) {
+          return nid !== victim.id && clusterState.nodes[nid - 1].alive;
+        });
+        if (newLH.length > 0) {
+          range.leaseholder = newLH[0];
+          addLog('🔄 ' + range.id + ' lease transferred to Node ' + range.leaseholder, 'lease');
+        }
+      }
+      // Replace dead replica
+      if (range.replicas.indexOf(victim.id) !== -1) {
+        var available = clusterState.nodes.filter(function(n) {
+          return n.alive && range.replicas.indexOf(n.id) === -1;
+        });
+        if (available.length > 0) {
+          var newNode = available[0];
+          range.replicas[range.replicas.indexOf(victim.id)] = newNode.id;
+          addLog('📦 ' + range.id + ' replica moved to Node ' + newNode.id + ' (rebalancing)', 'raft');
+        }
+      }
+    });
+
+    renderCluster();
+  });
+
+  // Cluster Reset
+  document.getElementById('clusterResetBtn').addEventListener('click', function() {
+    clusterState.nodes = [
+      { id: 1, alive: true },
+      { id: 2, alive: true },
+      { id: 3, alive: true },
+      { id: 4, alive: true },
+      { id: 5, alive: true }
+    ];
+    clusterState.ranges = [
+      { id: 'R1', start: 'a', end: 'm', replicas: [1, 2, 3], leaseholder: 1, color: '#6ded8a' },
+      { id: 'R2', start: 'm', end: 't', replicas: [2, 3, 4], leaseholder: 3, color: '#60a5fa' },
+      { id: 'R3', start: 't', end: 'z', replicas: [3, 4, 5], leaseholder: 5, color: '#a78bfa' }
+    ];
+    document.getElementById('clusterLog').innerHTML = '<div class="log-entry info">Cluster reset — 5 nodes, 3 ranges</div>';
+    var badge = document.querySelector('.cluster-status .status-badge');
+    badge.className = 'status-badge idle';
+    badge.textContent = 'Ready';
+    renderCluster();
+    renderKeyspace();
+  });
+
+  // ========== KEYSPACE VISUALIZATION ==========
+  function renderKeyspace() {
+    var container = document.getElementById('keyspaceRanges');
+    container.innerHTML = '';
+    clusterState.ranges.forEach(function(range) {
+      var block = document.createElement('div');
+      block.className = 'ks-range';
+      block.style.backgroundColor = range.color + '33';
+      block.style.border = '2px solid ' + range.color;
+      block.style.color = range.color;
+      block.textContent = range.id + ' [' + range.start + '-' + range.end + ')';
+      container.appendChild(block);
+    });
+  }
+
+  renderKeyspace();
+
+  // ========== QUERY FLOW TRACE ==========
+  var queryStep = 0;
+  var queryStepData = [
+    { cls: 'step-sql', num: '1', title: 'SQL Layer: Parse & Optimize', desc: 'Parse "SELECT balance FROM accounts WHERE id = 42" → AST → cost-based optimizer chooses index scan on primary key → generates KV read: Get(/Table/accounts/42)' },
+    { cls: 'step-dist', num: '2', title: 'Distribution: Route to Range', desc: 'Look up key /Table/accounts/42 in range cache → maps to Range R1 [/Table/accounts/1, /Table/accounts/1000) → leaseholder is Node 1 → send KV BatchRequest to Node 1' },
+    { cls: 'step-repl', num: '3', title: 'Replication: Leaseholder Read', desc: 'Node 1 holds the lease for R1 → lease is valid (not expired) → serve read locally without Raft consensus. If this were a write, it would go through Raft: propose → replicate to quorum → apply.' },
+    { cls: 'step-stor', num: '4', title: 'Storage: Pebble Lookup', desc: 'Pebble reads MVCC key /Table/accounts/42@ts=1679500000 → check bloom filter → binary search in SSTable → find latest version ≤ read timestamp → return value: balance=$500' },
+    { cls: 'step-result', num: '✓', title: 'Result Returned', desc: 'Response flows back: Storage → Replication → Distribution → SQL → client. Total latency: ~1-2ms local, ~5-10ms cross-region. No consensus needed for reads!' }
+  ];
+
+  document.getElementById('runQueryBtn').addEventListener('click', function() {
+    queryStep = 0;
+    document.getElementById('querySteps').innerHTML = '';
+    renderQueryStep();
+    document.getElementById('queryStepBtn').disabled = false;
+  });
+
+  document.getElementById('queryStepBtn').addEventListener('click', function() {
+    if (queryStep < queryStepData.length - 1) {
+      queryStep++;
+      renderQueryStep();
+      if (queryStep >= queryStepData.length - 1) {
+        document.getElementById('queryStepBtn').disabled = true;
+      }
+    }
+  });
+
+  document.getElementById('queryResetBtn').addEventListener('click', function() {
+    queryStep = 0;
+    document.getElementById('querySteps').innerHTML = '';
+    document.getElementById('queryStepBtn').disabled = true;
+  });
+
+  function renderQueryStep() {
+    var container = document.getElementById('querySteps');
+    var step = queryStepData[queryStep];
+    var el = document.createElement('div');
+    el.className = 'query-step ' + step.cls;
+    el.innerHTML = '<div class="query-step-num">' + step.num + '</div><div class="query-step-body"><h4>' + step.title + '</h4><p>' + step.desc + '</p></div>';
+    container.appendChild(el);
+  }
+
+  // ========== DISTRIBUTED TRANSACTIONS ==========
+  document.getElementById('runTxnBtn').addEventListener('click', function() {
+    var timeline = document.getElementById('txnTimeline');
+    timeline.innerHTML = '';
+
+    var pipelining = document.getElementById('pipelineToggle').checked;
+    var parallel = document.getElementById('parallelToggle').checked;
+
+    var steps;
+    if (pipelining && parallel) {
+      steps = [
+        { cls: 'write-step', text: '📝 BEGIN; INSERT INTO orders (id, total) VALUES (1, $99.99)', delay: 0 },
+        { cls: 'write-step', text: '📝 UPDATE inventory SET qty = qty - 1 WHERE item = "widget"', delay: 500 },
+        { cls: 'pipeline-step', text: '⚡ Write pipelining: both writes sent to Raft without waiting for each other', delay: 500 },
+        { cls: 'raft-step', text: '🔄 Raft: replicating INSERT to quorum (2/3 nodes)...', delay: 400 },
+        { cls: 'raft-step', text: '🔄 Raft: replicating UPDATE to quorum (2/3 nodes)... (in parallel!)', delay: 300 },
+        { cls: 'commit-step', text: '🚀 Parallel commit: transaction record written simultaneously with last batch', delay: 500 },
+        { cls: 'result-step', text: '✅ COMMIT — client sees success after 1 consensus round trip! Transaction record is STAGING → COMMITTED async', delay: 600 }
+      ];
+    } else if (pipelining) {
+      steps = [
+        { cls: 'write-step', text: '📝 BEGIN; INSERT INTO orders (id, total) VALUES (1, $99.99)', delay: 0 },
+        { cls: 'write-step', text: '📝 UPDATE inventory SET qty = qty - 1 WHERE item = "widget"', delay: 500 },
+        { cls: 'pipeline-step', text: '⚡ Write pipelining: both writes sent without waiting', delay: 500 },
+        { cls: 'raft-step', text: '🔄 Raft: replicating both writes to quorum...', delay: 500 },
+        { cls: 'commit-step', text: '📤 COMMIT: write transaction record (separate round trip)', delay: 500 },
+        { cls: 'raft-step', text: '🔄 Raft: replicate transaction record...', delay: 400 },
+        { cls: 'result-step', text: '✅ COMMIT — 2 consensus round trips total (writes + txn record)', delay: 500 }
+      ];
+    } else {
+      steps = [
+        { cls: 'write-step', text: '📝 BEGIN; INSERT INTO orders (id, total) VALUES (1, $99.99)', delay: 0 },
+        { cls: 'raft-step', text: '🔄 Raft: replicate INSERT to quorum... waiting...', delay: 600 },
+        { cls: 'write-step', text: '📝 UPDATE inventory SET qty = qty - 1 WHERE item = "widget"', delay: 500 },
+        { cls: 'raft-step', text: '🔄 Raft: replicate UPDATE to quorum... waiting...', delay: 600 },
+        { cls: 'commit-step', text: '📤 COMMIT: write transaction record', delay: 500 },
+        { cls: 'raft-step', text: '🔄 Raft: replicate txn record to quorum... waiting...', delay: 500 },
+        { cls: 'result-step', text: '✅ COMMIT — 3 sequential consensus round trips 🐌', delay: 500 }
+      ];
+    }
+
+    var totalDelay = 0;
+    steps.forEach(function(step) {
+      totalDelay += step.delay;
+      setTimeout(function() {
+        var el = document.createElement('div');
+        el.className = 'txn-step ' + step.cls;
+        el.textContent = step.text;
+        timeline.appendChild(el);
+        timeline.scrollTop = timeline.scrollHeight;
+      }, totalDelay);
+    });
+  });
+
+  document.getElementById('txnResetBtn').addEventListener('click', function() {
+    document.getElementById('txnTimeline').innerHTML = '';
+  });
+
+  // ========== MULTI-REGION TABS ==========
+  var regionData = {
+    regional: '<h4 style="color:#6ded8a;margin-bottom:10px;">Regional Tables (default)</h4><p>Data is pinned to the <strong>home region</strong> of the database. All replicas stay within one region. Reads and writes in the home region are fast (~2ms). Cross-region access adds latency (~60-100ms).</p><p style="margin-top:10px;"><code>ALTER DATABASE mydb SET PRIMARY REGION "us-east1";</code></p><p style="margin-top:6px;"><code>ALTER TABLE users SET LOCALITY REGIONAL BY TABLE IN PRIMARY REGION;</code></p>',
+    global: '<h4 style="color:#a78bfa;margin-bottom:10px;">Global Tables</h4><p><strong>Reads are fast everywhere</strong> — every region has an up-to-date replica. Writes are slower because they must replicate across all regions via <strong>non-blocking transactions</strong>. Perfect for reference data (countries, config, feature flags) that changes rarely but is read everywhere.</p><p style="margin-top:10px;"><code>ALTER TABLE countries SET LOCALITY GLOBAL;</code></p>',
+    rbr: '<h4 style="color:#fbbf24;margin-bottom:10px;">Regional by Row</h4><p>Each <em>row</em> has a <strong>crdb_region</strong> column that determines where it lives. Users in us-east see low latency for their rows. Users in eu-west see low latency for theirs. The same table spans multiple regions, but each row is pinned.</p><p style="margin-top:10px;"><code>ALTER TABLE users SET LOCALITY REGIONAL BY ROW;</code></p><p style="margin-top:6px;"><code>INSERT INTO users (crdb_region, id, name) VALUES (\'eu-west1\', 1, \'Alice\');</code></p>'
+  };
+
+  document.querySelectorAll('.region-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.region-tab').forEach(function(t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      var tabName = tab.getAttribute('data-tab');
+      document.getElementById('regionContent').innerHTML = regionData[tabName];
+    });
+  });
+
+  // Initial region content
+  document.getElementById('regionContent').innerHTML = regionData.regional;
+</script>
+</BaseLayout>

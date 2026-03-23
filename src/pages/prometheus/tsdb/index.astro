@@ -1,0 +1,1531 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Prometheus TSDB: Time Series Storage Engine" 
+  description="Interactive visualization of Prometheus TSDB internals: head block, WAL, chunk encoding, inverted index, compaction, and PromQL evaluation"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Prometheus", href: "/prometheus/" },
+    { label: "TSDB Internals", href: "/prometheus/tsdb/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📊 Prometheus TSDB</h1>
+      <p class="subtitle">Head Block, WAL, Chunks &amp; Compaction — The Storage Engine Behind Prometheus</p>
+    </header>
+
+    <!-- ===== Section 1: Time Series Data Model ===== -->
+    <section class="demo-section">
+      <h2>🏷️ Time Series Data Model</h2>
+      <p class="section-desc">Every time series is uniquely identified by its <strong>metric name</strong> + <strong>label set</strong>. Each series holds timestamped samples.</p>
+      <div class="data-model-viz">
+        <div class="metric-card" id="metricCard">
+          <div class="metric-header">
+            <span class="metric-name">http_requests_total</span>
+            <span class="metric-labels">&#123;method="GET", handler="/api", status="200"&#125;</span>
+          </div>
+          <div class="series-id">Series ID: <strong>42</strong></div>
+          <div class="samples-row" id="samplesRow"></div>
+        </div>
+        <div class="model-controls">
+          <button id="addSampleBtn" class="action-btn scrape-btn">📥 Scrape Sample</button>
+          <button id="resetModelBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+        <div class="model-info" id="modelInfo">Click "Scrape Sample" to add timestamped data points</div>
+      </div>
+    </section>
+
+    <!-- ===== Section 2: Head Block & WAL ===== -->
+    <section class="demo-section">
+      <h2>🧠 Head Block &amp; Write-Ahead Log</h2>
+      <p class="section-desc">New samples go into the in-memory <strong>head block</strong>. The WAL ensures crash recovery. Every 2 hours, the head is compacted to a persistent block.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="scrapeBtn" class="action-btn scrape-btn">📥 Scrape Metrics</button>
+          <button id="scrape10Btn" class="action-btn scrape-btn-secondary">⚡ Scrape ×10</button>
+          <button id="compactHeadBtn" class="action-btn compact-btn">📦 Compact to Block</button>
+          <button id="resetHeadBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+        <div class="stats-row">
+          <div class="stat">
+            <span class="stat-label">Head Samples</span>
+            <span class="stat-value" id="headSamples">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Head Series</span>
+            <span class="stat-value" id="headSeries">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">WAL Segments</span>
+            <span class="stat-value" id="walSegments">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Disk Blocks</span>
+            <span class="stat-value" id="diskBlocks">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="head-viz">
+        <div class="head-area">
+          <h3>🧠 Head Block (in-memory)</h3>
+          <div class="head-chunks" id="headChunks"></div>
+        </div>
+        <div class="wal-area">
+          <h3>📜 WAL (Write-Ahead Log)</h3>
+          <div class="wal-segments" id="walSegments_viz"></div>
+        </div>
+        <div class="blocks-area">
+          <h3>💾 Disk Blocks</h3>
+          <div class="disk-blocks" id="diskBlocksViz"></div>
+        </div>
+      </div>
+
+      <div class="log-section">
+        <h3>📜 Activity Log</h3>
+        <div class="log-container" id="headLog">
+          <div class="log-entry">TSDB ready. Click "Scrape Metrics" to ingest samples.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 3: XOR Chunk Encoding (Gorilla) ===== -->
+    <section class="demo-section">
+      <h2>🗜️ XOR Double-Delta Compression (Gorilla)</h2>
+      <p class="section-desc">Prometheus uses Facebook's Gorilla paper: timestamps are double-delta encoded, values use XOR with the previous value. Nearly-constant metrics compress to ~1.37 bits/sample.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <select id="compressionPattern" class="codec-select">
+            <option value="constant">Constant value (gauge = 42)</option>
+            <option value="counter">Monotonic counter (+1/s)</option>
+            <option value="spiky">Spiky latency (p99)</option>
+            <option value="random">Random noise</option>
+          </select>
+          <button id="runCompressionBtn" class="action-btn compress-btn">🗜️ Encode 120 Samples</button>
+        </div>
+      </div>
+      <div class="compression-viz">
+        <div class="compression-chart" id="compressionChart"></div>
+        <div class="compression-stats" id="compressionStats"></div>
+        <div class="encoding-detail" id="encodingDetail"></div>
+      </div>
+    </section>
+
+    <!-- ===== Section 4: Inverted Index ===== -->
+    <section class="demo-section">
+      <h2>🔍 Inverted Index: Label Lookup</h2>
+      <p class="section-desc">Prometheus builds an inverted index mapping each <strong>label pair</strong> to a sorted list of series IDs. Queries intersect posting lists.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <select id="labelQuery" class="codec-select">
+            <option value="method_get">method="GET"</option>
+            <option value="status_500">status="500"</option>
+            <option value="handler_api">handler="/api"</option>
+            <option value="intersection">method="GET" AND status="200"</option>
+          </select>
+          <button id="lookupBtn" class="action-btn search-btn">🔍 Lookup</button>
+        </div>
+      </div>
+      <div class="index-viz" id="indexViz">
+        <div class="posting-lists" id="postingLists"></div>
+        <div class="index-result" id="indexResult"></div>
+      </div>
+    </section>
+
+    <!-- ===== Section 5: Block Compaction ===== -->
+    <section class="demo-section">
+      <h2>🔄 Block Compaction</h2>
+      <p class="section-desc">Small 2-hour blocks are merged into larger blocks (up to 31.25% of retention). Tombstones from deletes are cleaned during compaction.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="addBlockBtn" class="action-btn scrape-btn">➕ Add 2h Block</button>
+          <button id="add6BlockBtn" class="action-btn scrape-btn-secondary">⚡ Add ×6</button>
+          <button id="compactBlocksBtn" class="action-btn compact-btn">🔄 Compact</button>
+          <button id="deleteSeriesBtn" class="action-btn delete-btn">🪦 Delete Series</button>
+          <button id="resetBlocksBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+      </div>
+      <div class="compaction-viz">
+        <div class="compaction-timeline" id="compactionTimeline"></div>
+        <div class="compaction-info" id="compactionInfo">Add blocks to see the compaction timeline</div>
+      </div>
+    </section>
+
+    <!-- ===== Section 6: PromQL Query Flow ===== -->
+    <section class="demo-section">
+      <h2>⚡ PromQL Range Query Flow</h2>
+      <p class="section-desc">See how a range query scans through blocks and series to produce results.</p>
+      <div class="query-flow-viz">
+        <div class="query-box">
+          <code>rate(http_requests_total&#123;status="200"&#125;[5m])</code>
+        </div>
+        <div class="flow-steps" id="flowSteps">
+          <div class="flow-step" data-step="0">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <h4>Parse PromQL</h4>
+              <p>AST: rate(selector[5m])</p>
+            </div>
+          </div>
+          <div class="flow-step" data-step="1">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <h4>Resolve Label Matchers</h4>
+              <p>Inverted index: status="200" → posting list</p>
+            </div>
+          </div>
+          <div class="flow-step" data-step="2">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <h4>Find Overlapping Blocks</h4>
+              <p>Time range → which blocks to scan</p>
+            </div>
+          </div>
+          <div class="flow-step" data-step="3">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <h4>Read Chunks</h4>
+              <p>Decode XOR-compressed samples from chunks</p>
+            </div>
+          </div>
+          <div class="flow-step" data-step="4">
+            <div class="step-num">5</div>
+            <div class="step-content">
+              <h4>Evaluate rate()</h4>
+              <p>Compute per-second increase over 5m window</p>
+            </div>
+          </div>
+        </div>
+        <button id="animateQueryBtn" class="action-btn search-btn" style="margin-top: 16px;">▶️ Animate Query Flow</button>
+      </div>
+    </section>
+
+    <!-- ===== Key Settings ===== -->
+    <section class="tuning-section">
+      <h2>🎛️ Key TSDB Settings</h2>
+      <div class="tuning-grid">
+        <div class="tuning-card">
+          <h4>--storage.tsdb.retention.time</h4>
+          <p>How long to keep data. Older blocks are deleted.</p>
+          <code>--storage.tsdb.retention.time=15d</code>
+        </div>
+        <div class="tuning-card">
+          <h4>--storage.tsdb.min-block-duration</h4>
+          <p>Minimum block range. Head compacts after this period.</p>
+          <code>--storage.tsdb.min-block-duration=2h</code>
+        </div>
+        <div class="tuning-card">
+          <h4>--storage.tsdb.max-block-duration</h4>
+          <p>Maximum block range after compaction. Defaults to 10% of retention.</p>
+          <code>--storage.tsdb.max-block-duration=36h</code>
+        </div>
+        <div class="tuning-card">
+          <h4>--storage.tsdb.wal-compression</h4>
+          <p>Enable snappy compression for WAL segments to reduce disk I/O.</p>
+          <code>--storage.tsdb.wal-compression</code>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://ganeshvernekar.com/blog/prometheus-tsdb-the-head-block/" target="_blank">Ganesh Vernekar's TSDB deep-dive</a>, the <a href="https://www.vldb.org/pvldb/vol8/p1816-teller.pdf" target="_blank">Gorilla paper</a>, and Prometheus source code</p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Prometheus%20TSDB%20visualization%20-%20see%20how%20head%20blocks%2C%20WAL%2C%20and%20compaction%20work&url=https://systeminternals.dev/prometheus/tsdb/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/prometheus/tsdb/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #e65732, #f97316, #facc15);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  .demo-section {
+    background: rgba(255,255,255,0.02);
+    border-radius: 20px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .demo-section h2 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .section-desc {
+    color: #888;
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+
+  .section-desc strong {
+    color: #f97316;
+  }
+
+  .controls-section {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .control-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+
+  .action-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .scrape-btn {
+    background: linear-gradient(135deg, #e65732, #d94a28);
+    color: white;
+  }
+  .scrape-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(230, 87, 50, 0.4); }
+
+  .scrape-btn-secondary {
+    background: linear-gradient(135deg, #d94a28, #c2410c);
+    color: white;
+  }
+
+  .compact-btn {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+  }
+  .compact-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(139, 92, 246, 0.4); }
+
+  .search-btn {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+  .search-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+
+  .compress-btn {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+  }
+  .compress-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4); }
+
+  .delete-btn {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+  }
+  .delete-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4); }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .codec-select {
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 0.95rem;
+  }
+
+  .stats-row {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+
+  .stat { text-align: center; }
+
+  .stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* Data Model */
+  .data-model-viz {
+    text-align: center;
+  }
+
+  .metric-card {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(230, 87, 50, 0.3);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    text-align: left;
+  }
+
+  .metric-header {
+    margin-bottom: 8px;
+  }
+
+  .metric-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #e65732;
+  }
+
+  .metric-labels {
+    font-size: 0.85rem;
+    color: #facc15;
+    margin-left: 4px;
+  }
+
+  .series-id {
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 12px;
+  }
+
+  .series-id strong {
+    color: #3b82f6;
+  }
+
+  .samples-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 40px;
+  }
+
+  :global(.sample-point) {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.7rem;
+    color: #aaa;
+    animation: sampleAppear 0.3s ease-out;
+  }
+
+  :global(.sample-point .ts) {
+    color: #666;
+    font-size: 0.6rem;
+  }
+
+  :global(.sample-point .val) {
+    color: #3b82f6;
+    font-weight: 600;
+  }
+
+  @keyframes sampleAppear {
+    from { transform: scale(0.7); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  .model-controls {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 12px;
+  }
+
+  .model-info {
+    font-size: 0.85rem;
+    color: #666;
+    min-height: 20px;
+  }
+
+  /* Head & WAL */
+  .head-viz {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .head-area, .wal-area, .blocks-area {
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .blocks-area {
+    grid-column: 1 / -1;
+  }
+
+  .head-area h3, .wal-area h3, .blocks-area h3 {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-bottom: 12px;
+  }
+
+  .head-chunks, .wal-segments, .disk-blocks {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-height: 50px;
+  }
+
+  :global(.head-chunk) {
+    background: rgba(230, 87, 50, 0.15);
+    border: 1px solid rgba(230, 87, 50, 0.4);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    color: #e65732;
+    animation: sampleAppear 0.3s ease-out;
+  }
+
+  :global(.head-chunk .chunk-info) {
+    font-size: 0.65rem;
+    color: #888;
+  }
+
+  :global(.wal-seg) {
+    background: rgba(250, 204, 21, 0.1);
+    border: 1px solid rgba(250, 204, 21, 0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    color: #facc15;
+    animation: sampleAppear 0.3s ease-out;
+  }
+
+  :global(.disk-block) {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 10px;
+    padding: 12px 16px;
+    animation: sampleAppear 0.4s ease-out;
+  }
+
+  :global(.disk-block .block-name) {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #22c55e;
+    margin-bottom: 4px;
+  }
+
+  :global(.disk-block .block-meta) {
+    font-size: 0.65rem;
+    color: #888;
+  }
+
+  :global(.disk-block .block-files) {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  :global(.block-file) {
+    width: 10px;
+    height: 18px;
+    border-radius: 2px;
+  }
+
+  :global(.block-file.chunks-f) { background: rgba(59, 130, 246, 0.5); }
+  :global(.block-file.index-f) { background: rgba(250, 204, 21, 0.5); }
+  :global(.block-file.meta-f) { background: rgba(168, 85, 247, 0.5); }
+  :global(.block-file.tombstones-f) { background: rgba(239, 68, 68, 0.3); }
+
+  /* Compression */
+  .compression-viz {
+    margin-top: 16px;
+  }
+
+  .compression-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 80px;
+    margin-bottom: 16px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  :global(.chart-bar) {
+    flex: 1;
+    background: rgba(59, 130, 246, 0.5);
+    border-radius: 2px 2px 0 0;
+    min-width: 2px;
+    transition: height 0.3s, background 0.3s;
+  }
+
+  .compression-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  :global(.comp-stat-card) {
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+    text-align: center;
+    animation: sampleAppear 0.3s ease-out;
+  }
+
+  :global(.comp-stat-label) {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 4px;
+  }
+
+  :global(.comp-stat-value) {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #22c55e;
+  }
+
+  .encoding-detail {
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    color: #888;
+    min-height: 40px;
+    line-height: 1.6;
+  }
+
+  :global(.enc-highlight) { color: #22c55e; }
+  :global(.enc-dim) { color: #555; }
+  :global(.enc-xor) { color: #f97316; }
+
+  /* Inverted Index */
+  .index-viz {
+    margin-top: 16px;
+  }
+
+  .posting-lists {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  :global(.posting-row) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: sampleAppear 0.3s ease-out;
+  }
+
+  :global(.posting-label) {
+    min-width: 180px;
+    background: rgba(250, 204, 21, 0.1);
+    border: 1px solid rgba(250, 204, 21, 0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #facc15;
+    text-align: right;
+  }
+
+  :global(.posting-arrow) {
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  :global(.posting-ids) {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  :global(.posting-id) {
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    color: #3b82f6;
+    font-weight: 600;
+    transition: all 0.3s;
+  }
+
+  :global(.posting-id.matched) {
+    background: rgba(34, 197, 94, 0.25);
+    border-color: rgba(34, 197, 94, 0.6);
+    color: #22c55e;
+    transform: scale(1.1);
+  }
+
+  :global(.posting-id.dimmed) {
+    opacity: 0.2;
+  }
+
+  .index-result {
+    font-size: 0.9rem;
+    color: #888;
+    min-height: 24px;
+  }
+
+  /* Compaction */
+  .compaction-viz {
+    margin-top: 16px;
+  }
+
+  .compaction-timeline {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-height: 70px;
+    align-items: flex-end;
+    margin-bottom: 12px;
+  }
+
+  :global(.comp-block) {
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: center;
+    animation: sampleAppear 0.3s ease-out;
+    transition: all 0.3s;
+    position: relative;
+  }
+
+  :global(.comp-block.level-0) {
+    background: rgba(230, 87, 50, 0.15);
+    border: 1px solid rgba(230, 87, 50, 0.4);
+    min-width: 70px;
+  }
+
+  :global(.comp-block.level-1) {
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    min-width: 120px;
+  }
+
+  :global(.comp-block.level-2) {
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    min-width: 180px;
+  }
+
+  :global(.comp-block .comp-label) {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 2px;
+  }
+
+  :global(.comp-block .comp-range) {
+    font-size: 0.6rem;
+    color: #888;
+  }
+
+  :global(.comp-block .tombstone) {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    font-size: 0.6rem;
+    color: #ef4444;
+  }
+
+  :global(.comp-block.merging) {
+    animation: mergePulse 0.6s ease-in-out infinite;
+  }
+
+  @keyframes mergePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.97); }
+  }
+
+  .compaction-info {
+    font-size: 0.85rem;
+    color: #666;
+    min-height: 20px;
+  }
+
+  /* Query Flow */
+  .query-flow-viz {
+    text-align: center;
+  }
+
+  .query-box {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(230, 87, 50, 0.3);
+    border-radius: 10px;
+    padding: 14px 20px;
+    margin-bottom: 20px;
+    display: inline-block;
+  }
+
+  .query-box code {
+    font-size: 0.95rem;
+    color: #e65732;
+  }
+
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 20px;
+    transition: all 0.4s;
+    opacity: 0.3;
+  }
+
+  :global(.flow-step.active) {
+    opacity: 1;
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+  }
+
+  :global(.flow-step.done) {
+    opacity: 1;
+    background: rgba(34, 197, 94, 0.05);
+    border-color: rgba(34, 197, 94, 0.2);
+  }
+
+  .step-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #888;
+    flex-shrink: 0;
+  }
+
+  :global(.flow-step.active .step-num) {
+    background: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+  }
+
+  :global(.flow-step.done .step-num) {
+    background: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+  }
+
+  .step-content h4 {
+    font-size: 0.95rem;
+    color: #fff;
+    margin-bottom: 2px;
+  }
+
+  .step-content p {
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  /* Tuning */
+  .tuning-section {
+    margin-bottom: 40px;
+  }
+
+  .tuning-section h2 {
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+    color: #fff;
+  }
+
+  .tuning-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .tuning-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .tuning-card h4 {
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    color: #fff;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .tuning-card p {
+    font-size: 0.85rem;
+    color: #888;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+
+  .tuning-card code {
+    display: block;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #22c55e;
+    overflow-x: auto;
+  }
+
+  /* Log */
+  .log-section {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .log-section h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+    color: #888;
+  }
+
+  .log-container {
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+  }
+
+  :global(.log-entry) {
+    padding: 4px 0;
+    color: #888;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  :global(.log-entry.scrape) { color: #e65732; }
+  :global(.log-entry.compact) { color: #8b5cf6; }
+  :global(.log-entry.info) { color: #3b82f6; }
+  :global(.log-entry.wal) { color: #facc15; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #e65732; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .head-viz { grid-template-columns: 1fr; }
+    .stats-row { gap: 20px; }
+    .stat-value { font-size: 1.2rem; }
+    :global(.posting-row) { flex-direction: column; align-items: flex-start; }
+    :global(.posting-label) { min-width: auto; text-align: left; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // Section 1: Time Series Data Model
+  // ============================================================
+  (function() {
+    var samplesRow = document.getElementById('samplesRow');
+    var modelInfo = document.getElementById('modelInfo');
+    var sampleCount = 0;
+    var baseTime = Date.now() - 60000;
+    var value = 1000;
+
+    function addSample() {
+      sampleCount++;
+      baseTime += 15000;
+      value += Math.floor(Math.random() * 10) + 1;
+      var t = new Date(baseTime);
+      var timeStr = t.toLocaleTimeString();
+      var el = document.createElement('div');
+      el.className = 'sample-point';
+      el.innerHTML = '<div class="ts">t=' + timeStr + '</div><div class="val">' + value + '</div>';
+      samplesRow.appendChild(el);
+      modelInfo.innerHTML = sampleCount + ' samples ingested. Each sample = (timestamp, float64 value) = <strong style="color:#3b82f6">16 bytes</strong> raw';
+      if (samplesRow.children.length > 12) {
+        samplesRow.removeChild(samplesRow.firstChild);
+      }
+    }
+
+    document.getElementById('addSampleBtn').addEventListener('click', addSample);
+    document.getElementById('resetModelBtn').addEventListener('click', function() {
+      samplesRow.innerHTML = '';
+      sampleCount = 0;
+      value = 1000;
+      baseTime = Date.now() - 60000;
+      modelInfo.textContent = 'Click "Scrape Sample" to add timestamped data points';
+    });
+  })();
+
+  // ============================================================
+  // Section 2: Head Block & WAL
+  // ============================================================
+  (function() {
+    var headSamplesCount = 0;
+    var headSeriesCount = 0;
+    var walSegCount = 0;
+    var diskBlockCount = 0;
+    var scrapeId = 0;
+    var seriesNames = ['http_requests_total', 'process_cpu_seconds', 'go_goroutines', 'node_memory_bytes', 'up'];
+
+    var headChunks = document.getElementById('headChunks');
+    var walViz = document.getElementById('walSegments_viz');
+    var diskViz = document.getElementById('diskBlocksViz');
+    var headLog = document.getElementById('headLog');
+
+    function hLog(msg, type) {
+      var entry = document.createElement('div');
+      entry.className = 'log-entry ' + (type || '');
+      var now = new Date();
+      entry.textContent = '[' + now.toLocaleTimeString() + '] ' + msg;
+      headLog.insertBefore(entry, headLog.firstChild);
+      if (headLog.children.length > 20) headLog.removeChild(headLog.lastChild);
+    }
+
+    function updateStats() {
+      document.getElementById('headSamples').textContent = headSamplesCount;
+      document.getElementById('headSeries').textContent = headSeriesCount;
+      document.getElementById('walSegments').textContent = walSegCount;
+      document.getElementById('diskBlocks').textContent = diskBlockCount;
+    }
+
+    function scrape() {
+      scrapeId++;
+      var newSamples = Math.floor(Math.random() * 50) + 20;
+      var newSeries = Math.min(scrapeId <= 3 ? Math.floor(Math.random() * 3) + 1 : 0, 5 - headSeriesCount);
+      if (headSeriesCount < 5) newSeries = Math.max(newSeries, 1);
+      headSamplesCount += newSamples;
+      headSeriesCount = Math.min(headSeriesCount + newSeries, seriesNames.length);
+
+      // Add head chunk
+      var chunk = document.createElement('div');
+      chunk.className = 'head-chunk';
+      var series = seriesNames[Math.floor(Math.random() * headSeriesCount)];
+      chunk.innerHTML = series + '<div class="chunk-info">+' + newSamples + ' samples</div>';
+      headChunks.appendChild(chunk);
+
+      // WAL entry
+      if (headSamplesCount % 80 < newSamples) {
+        walSegCount++;
+        var seg = document.createElement('div');
+        seg.className = 'wal-seg';
+        seg.textContent = 'seg_' + String(walSegCount).padStart(3, '0');
+        walViz.appendChild(seg);
+        hLog('WAL: new segment seg_' + String(walSegCount).padStart(3, '0'), 'wal');
+      }
+
+      hLog('Scrape #' + scrapeId + ': ' + newSamples + ' samples from ' + headSeriesCount + ' series', 'scrape');
+      updateStats();
+    }
+
+    function compactHead() {
+      if (headSamplesCount === 0) {
+        hLog('Nothing to compact — head is empty', 'info');
+        return;
+      }
+      diskBlockCount++;
+      var blockId = 'block_' + String(diskBlockCount).padStart(2, '0');
+      var block = document.createElement('div');
+      block.className = 'disk-block';
+      block.innerHTML = '<div class="block-name">' + blockId + '</div>' +
+        '<div class="block-meta">' + headSamplesCount + ' samples, ' + headSeriesCount + ' series</div>' +
+        '<div class="block-files">' +
+          '<div class="block-file chunks-f" title="chunks/"></div>' +
+          '<div class="block-file index-f" title="index"></div>' +
+          '<div class="block-file meta-f" title="meta.json"></div>' +
+          '<div class="block-file tombstones-f" title="tombstones"></div>' +
+        '</div>';
+      diskViz.appendChild(block);
+
+      hLog('Compacted head → ' + blockId + ' (' + headSamplesCount + ' samples)', 'compact');
+
+      headSamplesCount = 0;
+      headChunks.innerHTML = '';
+      walViz.innerHTML = '';
+      walSegCount = 0;
+      updateStats();
+    }
+
+    function resetHead() {
+      headSamplesCount = 0;
+      headSeriesCount = 0;
+      walSegCount = 0;
+      diskBlockCount = 0;
+      scrapeId = 0;
+      headChunks.innerHTML = '';
+      walViz.innerHTML = '';
+      diskViz.innerHTML = '';
+      headLog.innerHTML = '<div class="log-entry">TSDB reset. Ready.</div>';
+      updateStats();
+    }
+
+    document.getElementById('scrapeBtn').addEventListener('click', scrape);
+    document.getElementById('scrape10Btn').addEventListener('click', function() {
+      var i = 0;
+      function next() {
+        if (i < 10) { scrape(); i++; setTimeout(next, 200); }
+      }
+      next();
+    });
+    document.getElementById('compactHeadBtn').addEventListener('click', compactHead);
+    document.getElementById('resetHeadBtn').addEventListener('click', resetHead);
+    updateStats();
+  })();
+
+  // ============================================================
+  // Section 3: XOR Double-Delta Compression
+  // ============================================================
+  (function() {
+    var chart = document.getElementById('compressionChart');
+    var stats = document.getElementById('compressionStats');
+    var detail = document.getElementById('encodingDetail');
+
+    function generateSamples(pattern) {
+      var samples = [];
+      var v = 0;
+      for (var i = 0; i < 120; i++) {
+        switch (pattern) {
+          case 'constant': v = 42; break;
+          case 'counter': v = i * 1.0; break;
+          case 'spiky': v = 50 + Math.sin(i * 0.3) * 30 + (Math.random() < 0.05 ? Math.random() * 200 : 0); break;
+          case 'random': v = Math.random() * 1000; break;
+        }
+        samples.push(v);
+      }
+      return samples;
+    }
+
+    function xorBits(a, b) {
+      // Simulate: count significant bits in XOR
+      if (a === b) return 0;
+      var diff = Math.abs(a - b);
+      if (diff === 0) return 1;
+      return Math.max(1, Math.ceil(Math.log2(diff + 1)));
+    }
+
+    function runCompression() {
+      var pattern = document.getElementById('compressionPattern').value;
+      var samples = generateSamples(pattern);
+
+      // Draw chart
+      var maxVal = 0;
+      for (var i = 0; i < samples.length; i++) {
+        if (Math.abs(samples[i]) > maxVal) maxVal = Math.abs(samples[i]);
+      }
+      if (maxVal === 0) maxVal = 1;
+
+      chart.innerHTML = '';
+      for (var i = 0; i < samples.length; i++) {
+        var bar = document.createElement('div');
+        bar.className = 'chart-bar';
+        var h = Math.max(2, (Math.abs(samples[i]) / maxVal) * 60);
+        bar.style.height = h + 'px';
+        chart.appendChild(bar);
+      }
+
+      // Calculate compression stats
+      var rawBits = 120 * 128; // 16 bytes per sample (ts + val)
+      var totalBits = 0;
+      var xorBitsArr = [];
+
+      // Timestamp: double-delta encoding
+      var tsBits = 0;
+      for (var i = 0; i < 120; i++) {
+        if (i === 0) { tsBits += 64; }
+        else if (i === 1) { tsBits += 14; }
+        else { tsBits += 1; } // constant interval = 1 bit (0 = same delta)
+      }
+      totalBits += tsBits;
+
+      // Value: XOR encoding
+      var valBits = 0;
+      var prev = 0;
+      for (var i = 0; i < 120; i++) {
+        if (i === 0) { valBits += 64; prev = samples[i]; }
+        else {
+          var bits = xorBits(samples[i], prev);
+          xorBitsArr.push(bits);
+          if (bits === 0) { valBits += 1; } // single 0 bit
+          else { valBits += 2 + 5 + 6 + bits; } // control bits + leading + length + value
+          prev = samples[i];
+        }
+      }
+      totalBits += valBits;
+
+      var bitsPerSample = (totalBits / 120).toFixed(2);
+      var ratio = (rawBits / totalBits).toFixed(1);
+      var compressed = (totalBits / 8 / 1024).toFixed(2);
+      var raw = (rawBits / 8 / 1024).toFixed(2);
+
+      stats.innerHTML = '';
+      var statItems = [
+        { label: 'Raw Size', value: raw + ' KB' },
+        { label: 'Compressed', value: compressed + ' KB' },
+        { label: 'Bits/Sample', value: bitsPerSample },
+        { label: 'Ratio', value: ratio + 'x' }
+      ];
+      for (var i = 0; i < statItems.length; i++) {
+        var card = document.createElement('div');
+        card.className = 'comp-stat-card';
+        card.innerHTML = '<div class="comp-stat-label">' + statItems[i].label + '</div>' +
+          '<div class="comp-stat-value">' + statItems[i].value + '</div>';
+        stats.appendChild(card);
+      }
+
+      // Encoding detail
+      var detailHtml = '<span class="enc-dim">Timestamp encoding:</span> first=64b, delta-of-delta: ';
+      detailHtml += '<span class="enc-highlight">1 bit per sample</span> (constant 15s interval)<br>';
+      detailHtml += '<span class="enc-dim">Value encoding (XOR):</span> ';
+
+      if (pattern === 'constant') {
+        detailHtml += 'all XOR=0 → <span class="enc-highlight">1 bit per sample</span> (just a "same" flag)';
+      } else if (pattern === 'counter') {
+        detailHtml += 'XOR of sequential floats → <span class="enc-xor">~12-16 bits</span> per sample';
+      } else if (pattern === 'spiky') {
+        detailHtml += 'mostly small XOR, occasional spikes → <span class="enc-xor">variable 8-64 bits</span>';
+      } else {
+        detailHtml += 'random data → XOR gives no compression → <span class="enc-xor">~64 bits</span> per sample';
+      }
+
+      detail.innerHTML = detailHtml;
+    }
+
+    document.getElementById('runCompressionBtn').addEventListener('click', runCompression);
+    runCompression();
+  })();
+
+  // ============================================================
+  // Section 4: Inverted Index
+  // ============================================================
+  (function() {
+    var index = {
+      '__name__="http_requests_total"': [1, 2, 3, 4, 5, 6, 7, 8],
+      'method="GET"': [1, 2, 5, 6, 7],
+      'method="POST"': [3, 4, 8],
+      'status="200"': [1, 3, 5, 6],
+      'status="500"': [2, 4, 7, 8],
+      'handler="/api"': [1, 2, 3, 4],
+      'handler="/web"': [5, 6, 7, 8]
+    };
+
+    var queries = {
+      method_get: { labels: ['method="GET"'], name: 'method="GET"' },
+      status_500: { labels: ['status="500"'], name: 'status="500"' },
+      handler_api: { labels: ['handler="/api"'], name: 'handler="/api"' },
+      intersection: { labels: ['method="GET"', 'status="200"'], name: 'method="GET" AND status="200"' }
+    };
+
+    var postingLists = document.getElementById('postingLists');
+    var indexResult = document.getElementById('indexResult');
+
+    function renderIndex(highlightLabels, matchedIds) {
+      postingLists.innerHTML = '';
+      var labels = Object.keys(index);
+      for (var i = 0; i < labels.length; i++) {
+        var label = labels[i];
+        var isHighlighted = highlightLabels && highlightLabels.indexOf(label) !== -1;
+        var row = document.createElement('div');
+        row.className = 'posting-row';
+
+        var labelEl = document.createElement('div');
+        labelEl.className = 'posting-label';
+        labelEl.textContent = label;
+        if (isHighlighted) labelEl.style.borderColor = 'rgba(250, 204, 21, 0.7)';
+
+        var arrow = document.createElement('div');
+        arrow.className = 'posting-arrow';
+        arrow.textContent = '→';
+
+        var idsEl = document.createElement('div');
+        idsEl.className = 'posting-ids';
+
+        var ids = index[label];
+        for (var j = 0; j < ids.length; j++) {
+          var idEl = document.createElement('div');
+          idEl.className = 'posting-id';
+          idEl.textContent = ids[j];
+          if (matchedIds && matchedIds.indexOf(ids[j]) !== -1 && isHighlighted) {
+            idEl.classList.add('matched');
+          } else if (matchedIds && !isHighlighted) {
+            idEl.classList.add('dimmed');
+          }
+          idsEl.appendChild(idEl);
+        }
+
+        row.appendChild(labelEl);
+        row.appendChild(arrow);
+        row.appendChild(idsEl);
+        postingLists.appendChild(row);
+      }
+    }
+
+    function lookup() {
+      var queryKey = document.getElementById('labelQuery').value;
+      var q = queries[queryKey];
+
+      // Find matching IDs (intersection of all label posting lists)
+      var sets = [];
+      for (var i = 0; i < q.labels.length; i++) {
+        sets.push(index[q.labels[i]] || []);
+      }
+
+      var result = sets[0].slice();
+      for (var i = 1; i < sets.length; i++) {
+        result = result.filter(function(id) { return sets[i].indexOf(id) !== -1; });
+      }
+
+      renderIndex(q.labels, result);
+      indexResult.innerHTML = '<strong style="color:#facc15">' + q.name + '</strong> → matched series: <strong style="color:#22c55e">[' + result.join(', ') + ']</strong>' +
+        (sets.length > 1 ? ' (intersection of ' + sets.length + ' posting lists)' : ' (' + result.length + ' of ' + index[q.labels[0]].length + ' series)');
+    }
+
+    document.getElementById('lookupBtn').addEventListener('click', lookup);
+    renderIndex(null, null);
+  })();
+
+  // ============================================================
+  // Section 5: Block Compaction
+  // ============================================================
+  (function() {
+    var blocks = [];
+    var blockId = 0;
+    var baseHour = 0;
+
+    var timeline = document.getElementById('compactionTimeline');
+    var compInfo = document.getElementById('compactionInfo');
+
+    function renderBlocks() {
+      timeline.innerHTML = '';
+      for (var i = 0; i < blocks.length; i++) {
+        var b = blocks[i];
+        var div = document.createElement('div');
+        div.className = 'comp-block level-' + b.level;
+        div.innerHTML = '<div class="comp-label">' + b.name + '</div>' +
+          '<div class="comp-range">' + b.range + '</div>' +
+          (b.tombstone ? '<div class="tombstone">🪦</div>' : '');
+        timeline.appendChild(div);
+      }
+    }
+
+    function addBlock() {
+      blockId++;
+      var startH = baseHour;
+      baseHour += 2;
+      blocks.push({
+        name: 'blk_' + String(blockId).padStart(2, '0'),
+        range: startH + 'h–' + (startH + 2) + 'h',
+        startH: startH,
+        endH: startH + 2,
+        level: 0,
+        tombstone: false,
+        samples: Math.floor(Math.random() * 5000) + 2000
+      });
+      renderBlocks();
+      compInfo.textContent = blocks.length + ' blocks on disk. ' + blocks.filter(function(b) { return b.level === 0; }).length + ' uncompacted.';
+    }
+
+    function compact() {
+      // Find groups of consecutive level-0 blocks (3+)
+      var level0 = [];
+      for (var i = 0; i < blocks.length; i++) {
+        if (blocks[i].level === 0) level0.push(i);
+      }
+
+      if (level0.length < 3) {
+        // Try merging level-1 blocks
+        var level1 = [];
+        for (var i = 0; i < blocks.length; i++) {
+          if (blocks[i].level === 1) level1.push(i);
+        }
+        if (level1.length < 2) {
+          compInfo.textContent = 'Need at least 3 level-0 blocks (or 2 level-1) to compact.';
+          return;
+        }
+        // Merge first two level-1
+        var b1 = blocks[level1[0]];
+        var b2 = blocks[level1[1]];
+        blockId++;
+        var merged = {
+          name: 'blk_' + String(blockId).padStart(2, '0'),
+          range: b1.startH + 'h–' + b2.endH + 'h',
+          startH: b1.startH,
+          endH: b2.endH,
+          level: 2,
+          tombstone: false,
+          samples: b1.samples + b2.samples
+        };
+        blocks.splice(level1[1], 1);
+        blocks.splice(level1[0], 1, merged);
+        renderBlocks();
+        compInfo.innerHTML = 'Compacted ' + b1.name + ' + ' + b2.name + ' → <strong style="color:#22c55e">' + merged.name + '</strong> (level 2, ' + merged.range + ')';
+        return;
+      }
+
+      // Merge first 3 level-0 blocks
+      var toMerge = level0.slice(0, 3);
+      var first = blocks[toMerge[0]];
+      var last = blocks[toMerge[2]];
+      blockId++;
+      var merged = {
+        name: 'blk_' + String(blockId).padStart(2, '0'),
+        range: first.startH + 'h–' + last.endH + 'h',
+        startH: first.startH,
+        endH: last.endH,
+        level: 1,
+        tombstone: false,
+        samples: 0
+      };
+      for (var i = 0; i < 3; i++) {
+        merged.samples += blocks[toMerge[i]].samples;
+      }
+      // Remove tombstoned series during compaction
+      var hadTombstones = false;
+      for (var i = 2; i >= 0; i--) {
+        if (blocks[toMerge[i]].tombstone) hadTombstones = true;
+        blocks.splice(toMerge[i], 1);
+      }
+      blocks.push(merged);
+      blocks.sort(function(a, b) { return a.startH - b.startH; });
+      renderBlocks();
+      var msg = 'Compacted 3 blocks → <strong style="color:#8b5cf6">' + merged.name + '</strong> (level 1, ' + merged.range + ')';
+      if (hadTombstones) msg += ' — <span style="color:#ef4444">tombstoned series removed</span>';
+      compInfo.innerHTML = msg;
+    }
+
+    function deleteSeries() {
+      if (blocks.length === 0) {
+        compInfo.textContent = 'No blocks to mark for deletion.';
+        return;
+      }
+      // Mark a random block with tombstone
+      var idx = Math.floor(Math.random() * blocks.length);
+      blocks[idx].tombstone = true;
+      renderBlocks();
+      compInfo.innerHTML = 'Marked tombstone on <strong style="color:#ef4444">' + blocks[idx].name + '</strong> — will be cleaned on next compaction';
+    }
+
+    function resetBlocks() {
+      blocks = [];
+      blockId = 0;
+      baseHour = 0;
+      timeline.innerHTML = '';
+      compInfo.textContent = 'Add blocks to see the compaction timeline';
+    }
+
+    document.getElementById('addBlockBtn').addEventListener('click', addBlock);
+    document.getElementById('add6BlockBtn').addEventListener('click', function() {
+      var i = 0;
+      function next() {
+        if (i < 6) { addBlock(); i++; setTimeout(next, 200); }
+      }
+      next();
+    });
+    document.getElementById('compactBlocksBtn').addEventListener('click', compact);
+    document.getElementById('deleteSeriesBtn').addEventListener('click', deleteSeries);
+    document.getElementById('resetBlocksBtn').addEventListener('click', resetBlocks);
+  })();
+
+  // ============================================================
+  // Section 6: PromQL Query Flow Animation
+  // ============================================================
+  (function() {
+    var steps = document.querySelectorAll('.flow-step');
+    var animating = false;
+
+    function animateFlow() {
+      if (animating) return;
+      animating = true;
+      // Reset
+      for (var i = 0; i < steps.length; i++) {
+        steps[i].classList.remove('active', 'done');
+      }
+
+      var current = 0;
+      function nextStep() {
+        if (current > 0) {
+          steps[current - 1].classList.remove('active');
+          steps[current - 1].classList.add('done');
+        }
+        if (current >= steps.length) {
+          animating = false;
+          return;
+        }
+        steps[current].classList.add('active');
+        current++;
+        setTimeout(nextStep, 800);
+      }
+      nextStep();
+    }
+
+    document.getElementById('animateQueryBtn').addEventListener('click', animateFlow);
+  })();
+</script>
