@@ -1,0 +1,1884 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Vitess Sharding: Horizontal Scaling for MySQL" 
+  description="Interactive visualization of Vitess sharding — keyspaces, VSchema, vindexes, query routing, and zero-downtime resharding"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Vitess", href: "/vitess/" },
+    { label: "Sharding", href: "/vitess/sharding/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐬 Vitess Sharding</h1>
+      <p class="subtitle">Horizontal Scaling for MySQL — Born at YouTube</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Vitess sits between your application and MySQL, transparently <strong>sharding</strong> data 
+          across many MySQL instances. Your app talks to <em>vtgate</em> (a proxy), which routes queries 
+          to the right <em>vttablet</em> (one per MySQL). The magic: your app thinks it's talking to a 
+          single database. Vitess handles the rest — including <strong>resharding with zero downtime</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="arch-section">
+      <h2>🏗️ Architecture</h2>
+      <p class="section-desc">Click on components to learn more</p>
+
+      <div class="arch-diagram" id="archDiagram">
+        <div class="arch-layer app-layer">
+          <div class="arch-label">Application Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node app-node" data-comp="app">📱 App</div>
+            <div class="arch-node app-node" data-comp="app">📱 App</div>
+            <div class="arch-node app-node" data-comp="app">📱 App</div>
+          </div>
+        </div>
+        <div class="arch-arrow">▼ MySQL Protocol</div>
+        <div class="arch-layer gate-layer">
+          <div class="arch-label">Proxy Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node gate-node" data-comp="vtgate">⚡ vtgate</div>
+            <div class="arch-node gate-node" data-comp="vtgate">⚡ vtgate</div>
+          </div>
+        </div>
+        <div class="arch-arrow">▼ gRPC</div>
+        <div class="arch-layer tablet-layer">
+          <div class="arch-label">Tablet Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node tablet-node" data-comp="vttablet">📦 vttablet<br><small>primary</small></div>
+            <div class="arch-node tablet-node" data-comp="vttablet">📦 vttablet<br><small>primary</small></div>
+            <div class="arch-node tablet-node replica" data-comp="replica">📦 vttablet<br><small>replica</small></div>
+          </div>
+        </div>
+        <div class="arch-arrow">▼ SQL</div>
+        <div class="arch-layer mysql-layer">
+          <div class="arch-label">Storage Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node mysql-node" data-comp="mysql">🐬 MySQL</div>
+            <div class="arch-node mysql-node" data-comp="mysql">🐬 MySQL</div>
+            <div class="arch-node mysql-node" data-comp="mysql">🐬 MySQL</div>
+          </div>
+        </div>
+        <div class="arch-side topo-side">
+          <div class="arch-node topo-node" data-comp="topo">🗺️ Topology<br><small>etcd / ZooKeeper</small></div>
+          <div class="arch-node vtctld-node" data-comp="vtctld">🎛️ vtctld<br><small>control plane</small></div>
+        </div>
+      </div>
+
+      <div class="arch-info" id="archInfo">
+        <div class="info-title" id="archInfoTitle">Click a component</div>
+        <div class="info-body" id="archInfoBody">Select any component in the diagram above to see what it does.</div>
+      </div>
+    </section>
+
+    <!-- VSchema & Keyspace -->
+    <section class="vschema-section">
+      <h2>📋 VSchema: Defining Your Sharding Strategy</h2>
+      <p class="section-desc">The VSchema tells Vitess how to distribute data across shards</p>
+
+      <div class="vschema-demo">
+        <div class="vschema-editor">
+          <div class="editor-header">
+            <span>VSchema — commerce keyspace</span>
+            <div class="editor-tabs">
+              <button class="editor-tab active" data-tab="hash">Hash Vindex</button>
+              <button class="editor-tab" data-tab="region">Region Vindex</button>
+              <button class="editor-tab" data-tab="lookup">Lookup Vindex</button>
+            </div>
+          </div>
+          <pre class="editor-code" id="vschemaCode"></pre>
+        </div>
+        <div class="vschema-explain" id="vschemaExplain"></div>
+      </div>
+    </section>
+
+    <!-- Interactive Keyspace Visualizer -->
+    <section class="keyspace-section">
+      <h2>🗄️ Interactive Keyspace</h2>
+      <p class="section-desc">Watch how data distributes across shards based on the sharding key</p>
+
+      <div class="keyspace-controls">
+        <div class="insert-form">
+          <label>Insert row with user_id:</label>
+          <input type="number" id="insertUserId" value="42" min="1" max="999">
+          <button class="action-btn primary-btn" id="insertBtn">➕ Insert</button>
+          <button class="action-btn primary-btn" id="insertBatchBtn">📦 Insert 20 Random</button>
+          <button class="action-btn reset-btn" id="resetKeyspaceBtn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="keyspace-viz" id="keyspaceViz">
+        <div class="keyspace-ring" id="keyspaceRing">
+          <div class="ring-center">
+            <div class="ring-label">Keyspace</div>
+            <div class="ring-sublabel">commerce</div>
+          </div>
+        </div>
+        <div class="shard-panels" id="shardPanels"></div>
+      </div>
+
+      <div class="vindex-calc" id="vindexCalc"></div>
+    </section>
+
+    <!-- Query Routing -->
+    <section class="routing-section">
+      <h2>📡 Query Routing</h2>
+      <p class="section-desc">See how vtgate routes different queries to shards</p>
+
+      <div class="query-controls">
+        <div class="query-presets">
+          <button class="query-btn" data-query="SELECT * FROM users WHERE user_id = 42">Single-shard lookup</button>
+          <button class="query-btn" data-query="SELECT * FROM users WHERE name = 'Alice'">Scatter-gather</button>
+          <button class="query-btn" data-query="SELECT * FROM users WHERE user_id IN (42, 137, 256)">Multi-shard IN</button>
+          <button class="query-btn" data-query="INSERT INTO users (user_id, name) VALUES (99, 'Bob')">Insert (routed)</button>
+          <button class="query-btn" data-query="SELECT count(*) FROM users">Aggregate scatter</button>
+        </div>
+        <div class="query-input-row">
+          <input type="text" id="queryInput" class="query-input" placeholder="Or type a query...">
+          <button class="action-btn primary-btn" id="runQueryBtn">▶ Route</button>
+        </div>
+      </div>
+
+      <div class="routing-viz" id="routingViz">
+        <div class="routing-stage" id="routingStage">
+          <div class="route-app">📱 Application</div>
+          <div class="route-arrow" id="routeArrow1"></div>
+          <div class="route-gate" id="routeGate">⚡ vtgate</div>
+          <div class="route-arrows" id="routeArrows"></div>
+          <div class="route-shards" id="routeShards"></div>
+        </div>
+        <div class="routing-log" id="routingLog"></div>
+      </div>
+    </section>
+
+    <!-- Resharding -->
+    <section class="reshard-section">
+      <h2>🔀 Zero-Downtime Resharding</h2>
+      <p class="section-desc">Watch data migrate from 2 shards to 4 shards with no downtime</p>
+
+      <div class="reshard-controls">
+        <button class="action-btn primary-btn" id="startReshardBtn">▶ Start Reshard (2→4)</button>
+        <button class="action-btn step-btn" id="reshardStepBtn" disabled>⏭ Next Phase</button>
+        <button class="action-btn auto-btn" id="reshardAutoBtn" disabled>⚡ Auto-Play</button>
+        <button class="action-btn reset-btn" id="resetReshardBtn">🔄 Reset</button>
+      </div>
+
+      <div class="reshard-status" id="reshardStatus">
+        <span class="status-badge idle">Ready</span>
+        <span class="status-text" id="reshardStatusText">Click "Start Reshard" to begin the migration</span>
+      </div>
+
+      <div class="reshard-viz">
+        <div class="reshard-side">
+          <h4>Source Shards (2)</h4>
+          <div class="reshard-shards" id="sourceShards">
+            <div class="reshard-shard source-shard" id="src-80">
+              <div class="shard-header">-80</div>
+              <div class="shard-rows" id="src-80-rows"></div>
+            </div>
+            <div class="reshard-shard source-shard" id="src80-">
+              <div class="shard-header">80-</div>
+              <div class="shard-rows" id="src80--rows"></div>
+            </div>
+          </div>
+        </div>
+        <div class="reshard-middle">
+          <div class="reshard-flow" id="reshardFlow"></div>
+        </div>
+        <div class="reshard-side">
+          <h4>Target Shards (4)</h4>
+          <div class="reshard-shards" id="targetShards">
+            <div class="reshard-shard target-shard" id="tgt-40">
+              <div class="shard-header">-40</div>
+              <div class="shard-rows" id="tgt-40-rows"></div>
+            </div>
+            <div class="reshard-shard target-shard" id="tgt40-80">
+              <div class="shard-header">40-80</div>
+              <div class="shard-rows" id="tgt40-80-rows"></div>
+            </div>
+            <div class="reshard-shard target-shard" id="tgt80-c0">
+              <div class="shard-header">80-c0</div>
+              <div class="shard-rows" id="tgt80-c0-rows"></div>
+            </div>
+            <div class="reshard-shard target-shard" id="tgtc0-">
+              <div class="shard-header">c0-</div>
+              <div class="shard-rows" id="tgtc0--rows"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reshard-timeline" id="reshardTimeline"></div>
+    </section>
+
+    <!-- Explain: Resharding Phases -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📋 Phase 1: Copy</h3>
+          <p>
+            VReplication creates a <strong>snapshot</strong> of existing data and streams it to 
+            the new target shards. The source shards continue serving all traffic. 
+            No downtime, no impact on reads or writes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Phase 2: Catch-up</h3>
+          <p>
+            After the bulk copy, VReplication enters <strong>streaming mode</strong> — 
+            replicating the binlog in real-time. Target shards converge to match the source. 
+            The lag drops to near-zero.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>👀 Phase 3: SwitchReads</h3>
+          <p>
+            vtgate starts sending <strong>read queries</strong> to the new target shards. 
+            Writes still go to source. This is safe because target is caught up. 
+            Validate data integrity before proceeding.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>✅ Phase 4: SwitchWrites</h3>
+          <p>
+            The critical moment: vtgate switches <strong>writes</strong> to target shards. 
+            There's a brief pause (seconds) to ensure the final binlog events replicate. 
+            After this, source shards are idle and can be removed.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VReplication Animation -->
+    <section class="vrepl-section">
+      <h2>🔄 VReplication: The Engine Behind Resharding</h2>
+      <p class="section-desc">Stream-based data movement — the backbone of all Vitess data operations</p>
+
+      <div class="vrepl-controls">
+        <button class="action-btn primary-btn" id="startVreplBtn">▶ Start Stream</button>
+        <button class="action-btn reset-btn" id="resetVreplBtn">🔄 Reset</button>
+      </div>
+
+      <div class="vrepl-viz">
+        <div class="vrepl-source">
+          <h4>Source MySQL (binlog)</h4>
+          <div class="binlog-stream" id="binlogStream"></div>
+        </div>
+        <div class="vrepl-pipe">
+          <div class="pipe-label">VStream gRPC</div>
+          <div class="pipe-particles" id="pipeParticles"></div>
+        </div>
+        <div class="vrepl-target">
+          <h4>Target vttablet</h4>
+          <div class="vrepl-stages">
+            <div class="vrepl-stage" id="vreplFilter">🔍 Filter</div>
+            <div class="vrepl-stage" id="vreplTransform">🔄 Transform</div>
+            <div class="vrepl-stage" id="vreplApply">💾 Apply</div>
+          </div>
+          <div class="applied-rows" id="appliedRows"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vindex Lookup Animation -->
+    <section class="vindex-section">
+      <h2>🔑 Vindex: How Vitess Finds Your Data</h2>
+      <p class="section-desc">Vindexes map column values to keyspace IDs, determining which shard owns a row</p>
+
+      <div class="vindex-controls">
+        <label>Lookup user_id:</label>
+        <input type="number" id="vindexInput" value="42" min="1" max="999">
+        <button class="action-btn primary-btn" id="vindexLookupBtn">🔍 Resolve Vindex</button>
+      </div>
+
+      <div class="vindex-viz" id="vindexViz">
+        <div class="vindex-step" id="vindexStep1">
+          <div class="vindex-step-num">1</div>
+          <div class="vindex-step-content">
+            <div class="vindex-step-title">Input Value</div>
+            <div class="vindex-step-value" id="vindexInputVal">user_id = 42</div>
+          </div>
+        </div>
+        <div class="vindex-arrow-down">▼</div>
+        <div class="vindex-step" id="vindexStep2">
+          <div class="vindex-step-num">2</div>
+          <div class="vindex-step-content">
+            <div class="vindex-step-title">Hash Function (xxHash64)</div>
+            <div class="vindex-step-value" id="vindexHashVal">computing...</div>
+          </div>
+        </div>
+        <div class="vindex-arrow-down">▼</div>
+        <div class="vindex-step" id="vindexStep3">
+          <div class="vindex-step-num">3</div>
+          <div class="vindex-step-content">
+            <div class="vindex-step-title">Keyspace ID</div>
+            <div class="vindex-step-value" id="vindexKsid">0x...</div>
+          </div>
+        </div>
+        <div class="vindex-arrow-down">▼</div>
+        <div class="vindex-step" id="vindexStep4">
+          <div class="vindex-step-num">4</div>
+          <div class="vindex-step-content">
+            <div class="vindex-step-title">Shard Match</div>
+            <div class="vindex-step-value" id="vindexShard">shard -80</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://vitess.io/docs/" target="_blank">Vitess Documentation</a> and <a href="https://www.youtube.com/watch?v=OCS45iy5v1M" target="_blank">Vitess: Sharding MySQL at Scale (YouTube)</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Vitess%20Sharding%20—%20MySQL%20horizontal%20scaling&url=https://systeminternals.dev/vitess/sharding/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/vitess/sharding/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/vitess/sharding/&t=Interactive%20Vitess%20Sharding%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #56db3a, #3b82f6, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(86, 219, 58, 0.1), rgba(59, 130, 246, 0.05));
+    border: 1px solid rgba(86, 219, 58, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #56db3a; font-style: normal; font-weight: 500; }
+  .overview-card a { color: #60a5fa; }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #56db3a, #22a83a);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(86, 219, 58, 0.4);
+  }
+
+  .step-btn {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .auto-btn {
+    background: linear-gradient(135deg, #f472b6, #ec4899);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Architecture */
+  .arch-section {
+    margin-bottom: 50px;
+  }
+
+  .arch-diagram {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative;
+    margin-bottom: 16px;
+  }
+
+  .arch-layer {
+    margin-bottom: 8px;
+  }
+
+  .arch-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+
+  .arch-nodes {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .arch-node {
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    border: 1px solid transparent;
+  }
+
+  .arch-node:hover {
+    transform: translateY(-2px);
+  }
+
+  .arch-node small {
+    font-size: 0.7rem;
+    opacity: 0.7;
+  }
+
+  .app-node { background: rgba(167, 139, 250, 0.15); border-color: rgba(167, 139, 250, 0.3); color: #c4b5fd; }
+  .gate-node { background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.3); color: #fcd34d; }
+  .tablet-node { background: rgba(86, 219, 58, 0.15); border-color: rgba(86, 219, 58, 0.3); color: #86efac; }
+  .tablet-node.replica { opacity: 0.7; }
+  .mysql-node { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.3); color: #93c5fd; }
+  .topo-node { background: rgba(244, 114, 182, 0.15); border-color: rgba(244, 114, 182, 0.3); color: #f9a8d4; }
+  .vtctld-node { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; }
+
+  .arch-node.selected {
+    box-shadow: 0 0 20px rgba(86, 219, 58, 0.4);
+    transform: translateY(-3px);
+  }
+
+  .arch-arrow {
+    text-align: center;
+    color: #555;
+    font-size: 0.8rem;
+    padding: 6px 0;
+  }
+
+  .arch-side {
+    position: absolute;
+    right: 20px;
+    top: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .arch-info {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px 20px;
+  }
+
+  .info-title {
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 8px;
+    font-size: 1rem;
+  }
+
+  .info-body {
+    color: #aaa;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  /* VSchema */
+  .vschema-section {
+    margin-bottom: 50px;
+  }
+
+  .vschema-demo {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 20px;
+  }
+
+  .vschema-editor {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .editor-header {
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: #aaa;
+  }
+
+  .editor-tabs {
+    display: flex;
+    gap: 6px;
+  }
+
+  .editor-tab {
+    padding: 4px 12px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    background: transparent;
+    color: #888;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .editor-tab.active {
+    background: rgba(86, 219, 58, 0.2);
+    border-color: rgba(86, 219, 58, 0.4);
+    color: #56db3a;
+  }
+
+  .editor-code {
+    padding: 16px;
+    margin: 0;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: #ccc;
+    overflow-x: auto;
+    min-height: 200px;
+  }
+
+  .vschema-explain {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  /* Keyspace Visualizer */
+  .keyspace-section {
+    margin-bottom: 50px;
+  }
+
+  .keyspace-controls {
+    margin-bottom: 20px;
+  }
+
+  .insert-form {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .insert-form label {
+    color: #ccc;
+    font-size: 0.95rem;
+  }
+
+  .insert-form input {
+    padding: 8px 14px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.95rem;
+    width: 80px;
+  }
+
+  .keyspace-viz {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 24px;
+    margin-bottom: 16px;
+  }
+
+  .keyspace-ring {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    border: 3px solid rgba(86, 219, 58, 0.3);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle, rgba(86, 219, 58, 0.05), transparent);
+  }
+
+  .ring-center {
+    text-align: center;
+  }
+
+  .ring-label {
+    font-weight: 600;
+    color: #fff;
+    font-size: 1rem;
+  }
+
+  .ring-sublabel {
+    color: #56db3a;
+    font-size: 0.85rem;
+  }
+
+  .shard-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .shard-panel {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .shard-panel-header {
+    padding: 8px 12px;
+    background: rgba(86, 219, 58, 0.1);
+    border-bottom: 1px solid rgba(86, 219, 58, 0.2);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #56db3a;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .shard-panel-body {
+    padding: 8px 12px;
+    min-height: 60px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.78rem;
+    color: #aaa;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .shard-row {
+    padding: 2px 0;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .shard-row.highlight {
+    color: #56db3a;
+    font-weight: 600;
+  }
+
+  .vindex-calc {
+    padding: 12px 16px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 0.85rem;
+    color: #888;
+    font-family: 'Monaco', 'Menlo', monospace;
+    min-height: 20px;
+  }
+
+  /* Query Routing */
+  .routing-section {
+    margin-bottom: 50px;
+  }
+
+  .query-controls {
+    margin-bottom: 20px;
+  }
+
+  .query-presets {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .query-btn {
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #aaa;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .query-btn:hover {
+    background: rgba(86, 219, 58, 0.1);
+    border-color: rgba(86, 219, 58, 0.3);
+    color: #fff;
+  }
+
+  .query-input-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .query-input {
+    flex: 1;
+    padding: 10px 16px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 10px;
+    color: #fff;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9rem;
+  }
+
+  .routing-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .routing-stage {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .route-app, .route-gate {
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .route-app {
+    background: rgba(167, 139, 250, 0.15);
+    border: 1px solid rgba(167, 139, 250, 0.3);
+    color: #c4b5fd;
+  }
+
+  .route-gate {
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: #fcd34d;
+  }
+
+  .route-gate.active {
+    box-shadow: 0 0 20px rgba(251, 191, 36, 0.3);
+  }
+
+  .route-arrow {
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  .route-arrows {
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  .route-shards {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .route-shard {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: rgba(86, 219, 58, 0.1);
+    border: 1px solid rgba(86, 219, 58, 0.2);
+    color: #86efac;
+    opacity: 0.3;
+    transition: all 0.3s;
+  }
+
+  .route-shard.targeted {
+    opacity: 1;
+    box-shadow: 0 0 15px rgba(86, 219, 58, 0.3);
+    border-color: rgba(86, 219, 58, 0.6);
+  }
+
+  .routing-log {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.82rem;
+    color: #888;
+    padding: 12px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    min-height: 60px;
+    line-height: 1.6;
+  }
+
+  .log-line {
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .log-line .log-route { color: #56db3a; }
+  .log-line .log-scatter { color: #f59e0b; }
+  .log-line .log-info { color: #60a5fa; }
+
+  /* Resharding */
+  .reshard-section {
+    margin-bottom: 50px;
+  }
+
+  .reshard-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .reshard-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .status-badge.idle { background: rgba(107, 114, 128, 0.3); color: #9ca3af; }
+  .status-badge.copy { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+  .status-badge.catchup { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+  .status-badge.switchreads { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
+  .status-badge.switchwrite { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+  .status-badge.done { background: rgba(86, 219, 58, 0.2); color: #56db3a; }
+
+  .status-text {
+    color: #aaa;
+    font-size: 0.95rem;
+  }
+
+  .reshard-viz {
+    display: grid;
+    grid-template-columns: 1fr 80px 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .reshard-side h4 {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .reshard-shards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .reshard-shard {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+  }
+
+  .source-shard { background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); }
+  .target-shard { background: rgba(86, 219, 58, 0.08); border-color: rgba(86, 219, 58, 0.2); }
+  .target-shard.inactive { opacity: 0.3; }
+  .target-shard.active { opacity: 1; box-shadow: 0 0 10px rgba(86, 219, 58, 0.2); }
+  .source-shard.dimmed { opacity: 0.3; }
+
+  .shard-header {
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #ccc;
+    background: rgba(255,255,255,0.05);
+  }
+
+  .shard-rows {
+    padding: 6px 10px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.72rem;
+    color: #888;
+    min-height: 40px;
+    max-height: 100px;
+    overflow-y: auto;
+  }
+
+  .shard-data-row {
+    padding: 1px 0;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .reshard-middle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .reshard-flow {
+    font-size: 1.5rem;
+    color: #555;
+    text-align: center;
+  }
+
+  .reshard-flow.streaming { color: #56db3a; }
+
+  .reshard-timeline {
+    background: rgba(0,0,0,0.15);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    color: #888;
+    min-height: 40px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .reshard-event {
+    padding: 4px 0;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .reshard-event .ev-phase { font-weight: 600; }
+  .reshard-event.copy-ev .ev-phase { color: #fbbf24; }
+  .reshard-event.catchup-ev .ev-phase { color: #60a5fa; }
+  .reshard-event.switch-ev .ev-phase { color: #a78bfa; }
+  .reshard-event.done-ev .ev-phase { color: #56db3a; }
+
+  /* Explain */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #56db3a; }
+  .explain-card em { color: #60a5fa; }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  /* VReplication */
+  .vrepl-section {
+    margin-bottom: 50px;
+  }
+
+  .vrepl-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .vrepl-viz {
+    display: grid;
+    grid-template-columns: 1fr 120px 1fr;
+    gap: 16px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    align-items: start;
+  }
+
+  .vrepl-source h4, .vrepl-target h4 {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-bottom: 12px;
+  }
+
+  .binlog-stream {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.78rem;
+    color: #888;
+    min-height: 100px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .binlog-entry {
+    padding: 3px 0;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .binlog-entry .be-type { font-weight: 600; }
+  .binlog-entry.insert-entry .be-type { color: #56db3a; }
+  .binlog-entry.update-entry .be-type { color: #f59e0b; }
+  .binlog-entry.delete-entry .be-type { color: #ef4444; }
+
+  .vrepl-pipe {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding-top: 30px;
+  }
+
+  .pipe-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .pipe-particles {
+    width: 4px;
+    height: 80px;
+    background: rgba(86, 219, 58, 0.15);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pipe-particles.active {
+    background: rgba(86, 219, 58, 0.3);
+  }
+
+  .pipe-dot {
+    position: absolute;
+    width: 4px;
+    height: 8px;
+    background: #56db3a;
+    border-radius: 2px;
+    animation: pipeDotMove 0.8s linear infinite;
+  }
+
+  @keyframes pipeDotMove {
+    from { top: -8px; }
+    to { top: 80px; }
+  }
+
+  .vrepl-stages {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .vrepl-stage {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #888;
+    transition: all 0.3s;
+  }
+
+  .vrepl-stage.active {
+    background: rgba(86, 219, 58, 0.15);
+    border-color: rgba(86, 219, 58, 0.3);
+    color: #56db3a;
+  }
+
+  .applied-rows {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.78rem;
+    color: #888;
+    min-height: 100px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .applied-row {
+    padding: 3px 0;
+    color: #86efac;
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  /* Vindex Lookup */
+  .vindex-section {
+    margin-bottom: 50px;
+  }
+
+  .vindex-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+
+  .vindex-controls label {
+    color: #ccc;
+    font-size: 0.95rem;
+  }
+
+  .vindex-controls input {
+    padding: 8px 14px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.95rem;
+    width: 80px;
+  }
+
+  .vindex-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 16px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    max-width: 500px;
+    margin: 0 auto;
+  }
+
+  .vindex-step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+    opacity: 0.4;
+  }
+
+  .vindex-step.active {
+    opacity: 1;
+    border-color: rgba(86, 219, 58, 0.3);
+    background: rgba(86, 219, 58, 0.05);
+  }
+
+  .vindex-step-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(86, 219, 58, 0.2);
+    color: #56db3a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .vindex-step-title {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 4px;
+  }
+
+  .vindex-step-value {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.95rem;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .vindex-arrow-down {
+    text-align: center;
+    color: #555;
+    font-size: 1.2rem;
+    padding: 6px 0;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @keyframes entryAppear {
+    from { opacity: 0; background: rgba(255,255,255,0.1); }
+    to { opacity: 1; background: transparent; }
+  }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .arch-side { position: static; flex-direction: row; justify-content: center; }
+    .vschema-demo { grid-template-columns: 1fr; }
+    .keyspace-viz { grid-template-columns: 1fr; }
+    .keyspace-ring { margin: 0 auto; }
+    .shard-panels { grid-template-columns: 1fr; }
+    .reshard-viz { grid-template-columns: 1fr; }
+    .reshard-middle { padding: 10px 0; }
+    .vrepl-viz { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script is:inline>
+  // ========== UTILITY: Simple hash for vindex simulation ==========
+  function simpleHash(val) {
+    var h = 0x811c9dc5;
+    var s = String(val);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  function toKeyspaceId(userId) {
+    var h = simpleHash(userId);
+    return ((h & 0xFF) << 24 | (h >> 8 & 0xFF) << 16 | (h >> 16 & 0xFF) << 8 | (h >> 24 & 0xFF)) >>> 0;
+  }
+
+  function ksidHex(userId) {
+    return '0x' + toKeyspaceId(userId).toString(16).padStart(8, '0');
+  }
+
+  function getShardFor2(userId) {
+    var ksid = toKeyspaceId(userId);
+    return ksid < 0x80000000 ? '-80' : '80-';
+  }
+
+  function getShardFor4(userId) {
+    var ksid = toKeyspaceId(userId);
+    if (ksid < 0x40000000) return '-40';
+    if (ksid < 0x80000000) return '40-80';
+    if (ksid < 0xC0000000) return '80-c0';
+    return 'c0-';
+  }
+
+  // ========== ARCHITECTURE COMPONENT INFO ==========
+  var compInfo = {
+    app: { title: '📱 Application', body: 'Your application connects to vtgate using the standard MySQL protocol. No code changes needed — vtgate looks like a regular MySQL server. Connection pools, ORMs, and existing queries all work as-is.' },
+    vtgate: { title: '⚡ vtgate (Proxy)', body: 'The stateless query router. Parses SQL, consults the VSchema to determine which shard(s) to target, sends sub-queries to vttablets, and merges results. Multiple vtgates run behind a load balancer for HA.' },
+    vttablet: { title: '📦 vttablet (Tablet Manager)', body: 'One vttablet per MySQL instance. It manages the MySQL lifecycle, handles connection pooling (reducing MySQL connections 10-100×), enforces query timeouts, and runs health checks. Each tablet is either primary or replica.' },
+    replica: { title: '📦 vttablet (Replica)', body: 'Replica tablets serve read-only queries (SELECT). vtgate can route reads to replicas to spread load. During resharding, replicas are promoted to serve the new shard topology.' },
+    mysql: { title: '🐬 MySQL', body: 'Standard MySQL (or Percona/MariaDB). Vitess treats MySQL as a "dumb" storage engine — all intelligence lives in vttablet and vtgate. Each MySQL instance stores one shard\'s data.' },
+    topo: { title: '🗺️ Topology Service', body: 'A distributed lock server (etcd, ZooKeeper, or Consul) that stores the cluster metadata: which shards exist, where tablets are, who is primary. The single source of truth for cluster state.' },
+    vtctld: { title: '🎛️ vtctld (Control Plane)', body: 'The admin server. Exposes APIs and a web UI for managing the cluster: initiating resharding, running schema changes, performing failovers, and monitoring health. You interact with it via vtctlclient CLI.' }
+  };
+
+  document.querySelectorAll('.arch-node').forEach(function(node) {
+    node.addEventListener('click', function() {
+      var comp = this.getAttribute('data-comp');
+      var info = compInfo[comp];
+      if (!info) return;
+      document.querySelectorAll('.arch-node').forEach(function(n) { n.classList.remove('selected'); });
+      this.classList.add('selected');
+      document.getElementById('archInfoTitle').textContent = info.title;
+      document.getElementById('archInfoBody').textContent = info.body;
+    });
+  });
+
+  // ========== VSCHEMA TABS ==========
+  var vschemaData = {
+    hash: {
+      code: '{\n  "sharded": true,\n  "vindexes": {\n    "hash": {\n      "type": "hash"\n    }\n  },\n  "tables": {\n    "users": {\n      "column_vindexes": [\n        {\n          "column": "user_id",\n          "name": "hash"\n        }\n      ]\n    }\n  }\n}',
+      explain: '<strong style="color:#fff">Hash Vindex</strong><br><br>The most common vindex type. Takes the sharding column value (user_id), hashes it, and produces a <span style="color:#56db3a">keyspace ID</span>.<br><br>✅ <strong style="color:#56db3a">Even distribution</strong> — hash spreads data uniformly<br>✅ <strong style="color:#56db3a">Single-shard lookups</strong> — WHERE user_id = ? hits one shard<br>❌ No range queries on user_id (hash destroys ordering)<br><br>Best for: primary keys, user IDs, UUIDs'
+    },
+    region: {
+      code: '{\n  "sharded": true,\n  "vindexes": {\n    "region_vdx": {\n      "type": "region_experimental",\n      "params": {\n        "region_bytes": "1"\n      }\n    }\n  },\n  "tables": {\n    "orders": {\n      "column_vindexes": [\n        {\n          "columns": ["region", "order_id"],\n          "name": "region_vdx"\n        }\n      ]\n    }\n  }\n}',
+      explain: '<strong style="color:#fff">Region Vindex</strong><br><br>Prefixes the keyspace ID with a <span style="color:#56db3a">region byte</span>, guaranteeing all rows from the same region land on the same shard (or adjacent shards).<br><br>✅ <strong style="color:#56db3a">Data locality</strong> — same-region queries stay single-shard<br>✅ <strong style="color:#56db3a">Compliance</strong> — keep EU data in EU shards<br>❌ Risk of hotspots if one region is much larger<br><br>Best for: multi-region deployments, data sovereignty'
+    },
+    lookup: {
+      code: '{\n  "sharded": true,\n  "vindexes": {\n    "hash": { "type": "hash" },\n    "email_lookup": {\n      "type": "consistent_lookup",\n      "params": {\n        "table": "email_user_idx",\n        "from": "email",\n        "to": "user_id"\n      },\n      "owner": "users"\n    }\n  },\n  "tables": {\n    "users": {\n      "column_vindexes": [\n        { "column": "user_id", "name": "hash" },\n        { "column": "email", "name": "email_lookup" }\n      ]\n    }\n  }\n}',
+      explain: '<strong style="color:#fff">Lookup Vindex</strong><br><br>A secondary index stored as a <span style="color:#56db3a">separate Vitess table</span>. Maps a non-sharding column (email) back to the sharding key (user_id).<br><br>✅ <strong style="color:#56db3a">Single-shard lookup by email</strong> — no scatter!<br>✅ Automatically maintained by Vitess on INSERT/UPDATE<br>❌ Extra write per insert (to maintain the lookup table)<br>❌ Slightly higher read latency (two-hop lookup)<br><br>Best for: unique secondary keys (email, username, SSN)'
+    }
+  };
+
+  function showVschemaTab(tab) {
+    document.querySelectorAll('.editor-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelector('.editor-tab[data-tab="' + tab + '"]').classList.add('active');
+    document.getElementById('vschemaCode').textContent = vschemaData[tab].code;
+    document.getElementById('vschemaExplain').innerHTML = vschemaData[tab].explain;
+  }
+
+  document.querySelectorAll('.editor-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      showVschemaTab(this.getAttribute('data-tab'));
+    });
+  });
+  showVschemaTab('hash');
+
+  // ========== KEYSPACE VISUALIZER ==========
+  var shardData = { '-80': [], '80-': [] };
+
+  function renderKeyspace() {
+    var panels = document.getElementById('shardPanels');
+    panels.innerHTML = '';
+    var shardNames = Object.keys(shardData);
+    shardNames.forEach(function(name) {
+      var panel = document.createElement('div');
+      panel.className = 'shard-panel';
+      var rows = shardData[name];
+      panel.innerHTML = '<div class="shard-panel-header"><span>Shard ' + name + '</span><span>' + rows.length + ' rows</span></div>' +
+        '<div class="shard-panel-body">' +
+        (rows.length === 0 ? '<span style="color:#555">Empty</span>' :
+          rows.map(function(r) { return '<div class="shard-row">user_id=' + r.id + ' ksid=' + r.ksid + '</div>'; }).join('')) +
+        '</div>';
+      panels.appendChild(panel);
+    });
+  }
+
+  function insertUser(userId, highlight) {
+    var shard = getShardFor2(userId);
+    var hex = ksidHex(userId);
+    shardData[shard].push({ id: userId, ksid: hex });
+    renderKeyspace();
+    document.getElementById('vindexCalc').textContent = 'user_id=' + userId + ' → hash → ksid=' + hex + ' → shard ' + shard;
+    if (highlight) {
+      var panels = document.getElementById('shardPanels');
+      var allRows = panels.querySelectorAll('.shard-row');
+      var last = allRows[allRows.length - 1];
+      if (last) last.classList.add('highlight');
+    }
+  }
+
+  document.getElementById('insertBtn').addEventListener('click', function() {
+    var val = parseInt(document.getElementById('insertUserId').value) || 1;
+    insertUser(val, true);
+  });
+
+  document.getElementById('insertBatchBtn').addEventListener('click', function() {
+    for (var i = 0; i < 20; i++) {
+      var uid = Math.floor(Math.random() * 999) + 1;
+      var shard = getShardFor2(uid);
+      shardData[shard].push({ id: uid, ksid: ksidHex(uid) });
+    }
+    renderKeyspace();
+    document.getElementById('vindexCalc').textContent = 'Inserted 20 random users across shards';
+  });
+
+  document.getElementById('resetKeyspaceBtn').addEventListener('click', function() {
+    shardData = { '-80': [], '80-': [] };
+    renderKeyspace();
+    document.getElementById('vindexCalc').textContent = '';
+  });
+
+  renderKeyspace();
+
+  // ========== QUERY ROUTING ==========
+  var shardNames2 = ['-80', '80-'];
+
+  function routeQuery(sql) {
+    var gate = document.getElementById('routeGate');
+    var shards = document.getElementById('routeShards');
+    var arrows = document.getElementById('routeArrows');
+    var log = document.getElementById('routingLog');
+    var arrow1 = document.getElementById('routeArrow1');
+
+    arrow1.textContent = '→';
+    gate.classList.add('active');
+
+    shards.innerHTML = '';
+    shardNames2.forEach(function(s) {
+      var el = document.createElement('div');
+      el.className = 'route-shard';
+      el.textContent = s;
+      el.setAttribute('data-shard', s);
+      shards.appendChild(el);
+    });
+
+    var targeted = [];
+    var plan = '';
+    var routeType = '';
+
+    var lowerSql = sql.toLowerCase();
+
+    if (lowerSql.match(/where\s+user_id\s*=\s*(\d+)/)) {
+      var uid = parseInt(lowerSql.match(/where\s+user_id\s*=\s*(\d+)/)[1]);
+      var shard = getShardFor2(uid);
+      targeted = [shard];
+      plan = 'Equal unique vindex: user_id=' + uid + ' → ksid=' + ksidHex(uid) + ' → shard ' + shard;
+      routeType = 'Single Shard';
+    } else if (lowerSql.match(/user_id\s+in\s*\(/)) {
+      var ids = lowerSql.match(/\(([^)]+)\)/);
+      if (ids) {
+        var nums = ids[1].split(',').map(function(x) { return parseInt(x.trim()); });
+        var shardSet = {};
+        nums.forEach(function(n) { shardSet[getShardFor2(n)] = true; });
+        targeted = Object.keys(shardSet);
+        plan = 'IN clause: resolving ' + nums.length + ' vindex lookups → ' + targeted.length + ' shard(s): ' + targeted.join(', ');
+        routeType = targeted.length > 1 ? 'Scatter (subset)' : 'Single Shard';
+      }
+    } else if (lowerSql.match(/insert\s+into/)) {
+      var valMatch = lowerSql.match(/values\s*\(\s*(\d+)/);
+      if (valMatch) {
+        var iuid = parseInt(valMatch[1]);
+        var ishard = getShardFor2(iuid);
+        targeted = [ishard];
+        plan = 'INSERT routed by primary vindex: user_id=' + iuid + ' → shard ' + ishard;
+        routeType = 'Single Shard';
+      }
+    }
+
+    if (targeted.length === 0) {
+      targeted = shardNames2.slice();
+      plan = 'No vindex match — scatter query to ALL shards, merge results at vtgate';
+      routeType = 'Scatter-Gather';
+    }
+
+    arrows.textContent = targeted.length > 1 ? '⇉' : '→';
+
+    setTimeout(function() {
+      targeted.forEach(function(s) {
+        var el = shards.querySelector('[data-shard="' + s + '"]');
+        if (el) el.classList.add('targeted');
+      });
+
+      var color = routeType === 'Scatter-Gather' ? 'log-scatter' : 'log-route';
+      log.innerHTML = '<div class="log-line"><span class="' + color + '">[' + routeType + ']</span> ' + plan + '</div>' +
+        '<div class="log-line"><span class="log-info">[SQL]</span> ' + sql + '</div>';
+    }, 300);
+
+    setTimeout(function() {
+      gate.classList.remove('active');
+    }, 1500);
+  }
+
+  document.querySelectorAll('.query-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var q = this.getAttribute('data-query');
+      document.getElementById('queryInput').value = q;
+      routeQuery(q);
+    });
+  });
+
+  document.getElementById('runQueryBtn').addEventListener('click', function() {
+    var q = document.getElementById('queryInput').value.trim();
+    if (q) routeQuery(q);
+  });
+
+  document.getElementById('queryInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      var q = this.value.trim();
+      if (q) routeQuery(q);
+    }
+  });
+
+  // ========== RESHARDING ==========
+  var reshardStep = 0;
+  var reshardAutoPlaying = false;
+  var sourceRows = [];
+
+  // Generate initial data
+  (function() {
+    for (var i = 0; i < 16; i++) {
+      var uid = Math.floor(Math.random() * 999) + 1;
+      sourceRows.push({ id: uid, ksid: toKeyspaceId(uid) });
+    }
+  })();
+
+  function renderSourceShards() {
+    var s80 = document.getElementById('src-80-rows');
+    var s80p = document.getElementById('src80--rows');
+    s80.innerHTML = '';
+    s80p.innerHTML = '';
+    sourceRows.forEach(function(r) {
+      var el = document.createElement('div');
+      el.className = 'shard-data-row';
+      el.textContent = 'uid=' + r.id;
+      if (r.ksid < 0x80000000) {
+        s80.appendChild(el);
+      } else {
+        s80p.appendChild(el);
+      }
+    });
+  }
+
+  function clearTargetShards() {
+    ['tgt-40-rows', 'tgt40-80-rows', 'tgt80-c0-rows', 'tgtc0--rows'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+  }
+
+  function renderTargetShards() {
+    clearTargetShards();
+    sourceRows.forEach(function(r) {
+      var shard = getShardFor4(r.id);
+      var targetId;
+      if (shard === '-40') targetId = 'tgt-40-rows';
+      else if (shard === '40-80') targetId = 'tgt40-80-rows';
+      else if (shard === '80-c0') targetId = 'tgt80-c0-rows';
+      else targetId = 'tgtc0--rows';
+      var el = document.createElement('div');
+      el.className = 'shard-data-row';
+      el.textContent = 'uid=' + r.id;
+      var container = document.getElementById(targetId);
+      if (container) container.appendChild(el);
+    });
+  }
+
+  var reshardPhases = [
+    {
+      badge: 'copy', badgeText: 'Copy',
+      text: 'Phase 1: VReplication copying snapshot from source → target shards',
+      action: function() {
+        document.getElementById('reshardFlow').innerHTML = '📋<br>Copying...';
+        document.getElementById('reshardFlow').className = 'reshard-flow streaming';
+        document.querySelectorAll('.target-shard').forEach(function(s) { s.classList.add('active'); s.classList.remove('inactive'); });
+        renderTargetShards();
+        addReshardEvent('copy-ev', 'COPY', 'Snapshot copy started — streaming existing rows to target shards');
+      }
+    },
+    {
+      badge: 'catchup', badgeText: 'Catch-up',
+      text: 'Phase 2: Streaming binlog events — target shards catching up to source',
+      action: function() {
+        document.getElementById('reshardFlow').innerHTML = '🔄<br>Streaming';
+        addReshardEvent('catchup-ev', 'CATCH-UP', 'VReplication streaming binlog — replication lag < 1s');
+      }
+    },
+    {
+      badge: 'switchreads', badgeText: 'SwitchReads',
+      text: 'Phase 3: SwitchReads — reads now served by target shards',
+      action: function() {
+        document.getElementById('reshardFlow').innerHTML = '👀<br>Reads →';
+        addReshardEvent('switch-ev', 'SWITCH_READS', 'vtgate now routing SELECT queries to target shards');
+      }
+    },
+    {
+      badge: 'switchwrite', badgeText: 'SwitchWrites',
+      text: 'Phase 4: SwitchWrites — brief pause, then writes go to target shards',
+      action: function() {
+        document.getElementById('reshardFlow').innerHTML = '✅<br>Writes →';
+        document.querySelectorAll('.source-shard').forEach(function(s) { s.classList.add('dimmed'); });
+        addReshardEvent('switch-ev', 'SWITCH_WRITES', 'Traffic fully cut over — target shards are now primary');
+      }
+    },
+    {
+      badge: 'done', badgeText: 'Complete',
+      text: 'Resharding complete! Source shards can be decommissioned 🎉',
+      action: function() {
+        document.getElementById('reshardFlow').innerHTML = '🎉<br>Done!';
+        addReshardEvent('done-ev', 'COMPLETE', 'Reshard 2→4 finished. Source shards idle, safe to remove.');
+      }
+    }
+  ];
+
+  function addReshardEvent(cls, phase, text) {
+    var tl = document.getElementById('reshardTimeline');
+    var ev = document.createElement('div');
+    ev.className = 'reshard-event ' + cls;
+    ev.innerHTML = '<span class="ev-phase">[' + phase + ']</span> ' + text;
+    tl.appendChild(ev);
+    tl.scrollTop = tl.scrollHeight;
+  }
+
+  function updateReshardStatus(badge, text) {
+    var statusBadge = document.querySelector('.reshard-status .status-badge');
+    statusBadge.className = 'status-badge ' + badge;
+    statusBadge.textContent = reshardPhases[reshardStep] ? reshardPhases[reshardStep].badgeText : 'Done';
+    document.getElementById('reshardStatusText').textContent = text;
+  }
+
+  function executeReshardStep() {
+    var phase = reshardPhases[reshardStep];
+    if (!phase) return;
+    updateReshardStatus(phase.badge, phase.text);
+    phase.action();
+  }
+
+  document.getElementById('startReshardBtn').addEventListener('click', function() {
+    reshardStep = 0;
+    document.getElementById('reshardTimeline').innerHTML = '';
+    document.querySelectorAll('.source-shard').forEach(function(s) { s.classList.remove('dimmed'); });
+    document.querySelectorAll('.target-shard').forEach(function(s) { s.classList.add('inactive'); s.classList.remove('active'); });
+    clearTargetShards();
+    document.getElementById('reshardFlow').innerHTML = '⏸<br>Ready';
+    document.getElementById('reshardFlow').className = 'reshard-flow';
+    renderSourceShards();
+    executeReshardStep();
+    document.getElementById('reshardStepBtn').disabled = false;
+    document.getElementById('reshardAutoBtn').disabled = false;
+  });
+
+  document.getElementById('reshardStepBtn').addEventListener('click', function() {
+    if (reshardStep < reshardPhases.length - 1) {
+      reshardStep++;
+      executeReshardStep();
+      if (reshardStep >= reshardPhases.length - 1) {
+        document.getElementById('reshardStepBtn').disabled = true;
+        document.getElementById('reshardAutoBtn').disabled = true;
+      }
+    }
+  });
+
+  document.getElementById('reshardAutoBtn').addEventListener('click', function() {
+    if (reshardAutoPlaying) return;
+    reshardAutoPlaying = true;
+    document.getElementById('reshardAutoBtn').disabled = true;
+    document.getElementById('reshardStepBtn').disabled = true;
+
+    function nextStep() {
+      if (reshardStep < reshardPhases.length - 1) {
+        reshardStep++;
+        executeReshardStep();
+        setTimeout(nextStep, 1500);
+      } else {
+        reshardAutoPlaying = false;
+      }
+    }
+    setTimeout(nextStep, 1500);
+  });
+
+  document.getElementById('resetReshardBtn').addEventListener('click', function() {
+    reshardStep = 0;
+    reshardAutoPlaying = false;
+    document.getElementById('reshardTimeline').innerHTML = '';
+    var statusBadge = document.querySelector('.reshard-status .status-badge');
+    statusBadge.className = 'status-badge idle';
+    statusBadge.textContent = 'Ready';
+    document.getElementById('reshardStatusText').textContent = 'Click "Start Reshard" to begin the migration';
+    document.getElementById('reshardFlow').innerHTML = '';
+    document.getElementById('reshardFlow').className = 'reshard-flow';
+    document.querySelectorAll('.source-shard').forEach(function(s) { s.classList.remove('dimmed'); });
+    document.querySelectorAll('.target-shard').forEach(function(s) { s.classList.remove('active'); s.classList.add('inactive'); });
+    clearTargetShards();
+    renderSourceShards();
+    document.getElementById('reshardStepBtn').disabled = true;
+    document.getElementById('reshardAutoBtn').disabled = true;
+  });
+
+  renderSourceShards();
+  document.querySelectorAll('.target-shard').forEach(function(s) { s.classList.add('inactive'); });
+
+  // ========== VREPLICATION ANIMATION ==========
+  var vreplRunning = false;
+  var vreplInterval = null;
+  var vreplCount = 0;
+
+  var binlogOps = ['INSERT', 'UPDATE', 'DELETE', 'INSERT', 'INSERT', 'UPDATE'];
+  var binlogTables = ['users', 'orders', 'products', 'users', 'orders', 'users'];
+
+  document.getElementById('startVreplBtn').addEventListener('click', function() {
+    if (vreplRunning) {
+      vreplRunning = false;
+      clearInterval(vreplInterval);
+      this.textContent = '▶ Start Stream';
+      document.getElementById('pipeParticles').classList.remove('active');
+      document.getElementById('pipeParticles').innerHTML = '';
+      document.querySelectorAll('.vrepl-stage').forEach(function(s) { s.classList.remove('active'); });
+      return;
+    }
+
+    vreplRunning = true;
+    this.textContent = '⏹ Stop Stream';
+    document.getElementById('pipeParticles').classList.add('active');
+
+    var dot = document.createElement('div');
+    dot.className = 'pipe-dot';
+    document.getElementById('pipeParticles').appendChild(dot);
+
+    var stages = ['vreplFilter', 'vreplTransform', 'vreplApply'];
+
+    vreplInterval = setInterval(function() {
+      vreplCount++;
+      var opIdx = vreplCount % binlogOps.length;
+      var op = binlogOps[opIdx];
+      var table = binlogTables[opIdx];
+      var uid = Math.floor(Math.random() * 999) + 1;
+
+      // Add binlog entry
+      var binlog = document.getElementById('binlogStream');
+      var cls = op === 'INSERT' ? 'insert-entry' : op === 'UPDATE' ? 'update-entry' : 'delete-entry';
+      var entry = document.createElement('div');
+      entry.className = 'binlog-entry ' + cls;
+      entry.innerHTML = '<span class="be-type">' + op + '</span> ' + table + ' uid=' + uid;
+      binlog.appendChild(entry);
+      binlog.scrollTop = binlog.scrollHeight;
+
+      // Animate stages
+      var stageIdx = 0;
+      function lightStage() {
+        if (stageIdx > 0) document.getElementById(stages[stageIdx - 1]).classList.remove('active');
+        if (stageIdx < stages.length) {
+          document.getElementById(stages[stageIdx]).classList.add('active');
+          stageIdx++;
+          setTimeout(lightStage, 200);
+        } else {
+          setTimeout(function() {
+            document.getElementById(stages[stages.length - 1]).classList.remove('active');
+          }, 200);
+
+          // Add applied row
+          if (op !== 'DELETE') {
+            var applied = document.getElementById('appliedRows');
+            var row = document.createElement('div');
+            row.className = 'applied-row';
+            row.textContent = '✓ ' + op + ' ' + table + ' uid=' + uid;
+            applied.appendChild(row);
+            applied.scrollTop = applied.scrollHeight;
+          }
+        }
+      }
+      lightStage();
+    }, 1200);
+  });
+
+  document.getElementById('resetVreplBtn').addEventListener('click', function() {
+    vreplRunning = false;
+    clearInterval(vreplInterval);
+    vreplCount = 0;
+    document.getElementById('startVreplBtn').textContent = '▶ Start Stream';
+    document.getElementById('binlogStream').innerHTML = '';
+    document.getElementById('appliedRows').innerHTML = '';
+    document.getElementById('pipeParticles').classList.remove('active');
+    document.getElementById('pipeParticles').innerHTML = '';
+    document.querySelectorAll('.vrepl-stage').forEach(function(s) { s.classList.remove('active'); });
+  });
+
+  // ========== VINDEX LOOKUP ANIMATION ==========
+  document.getElementById('vindexLookupBtn').addEventListener('click', function() {
+    var userId = parseInt(document.getElementById('vindexInput').value) || 1;
+    var hex = ksidHex(userId);
+    var shard = getShardFor2(userId);
+
+    var steps = document.querySelectorAll('.vindex-step');
+    steps.forEach(function(s) { s.classList.remove('active'); });
+
+    document.getElementById('vindexInputVal').textContent = 'user_id = ' + userId;
+    document.getElementById('vindexHashVal').textContent = 'computing...';
+    document.getElementById('vindexKsid').textContent = '0x...';
+    document.getElementById('vindexShard').textContent = '...';
+
+    // Animate step by step
+    setTimeout(function() {
+      steps[0].classList.add('active');
+    }, 100);
+
+    setTimeout(function() {
+      steps[1].classList.add('active');
+      document.getElementById('vindexHashVal').textContent = 'xxHash64(' + userId + ') = ' + hex;
+    }, 600);
+
+    setTimeout(function() {
+      steps[2].classList.add('active');
+      document.getElementById('vindexKsid').textContent = hex;
+    }, 1200);
+
+    setTimeout(function() {
+      steps[3].classList.add('active');
+      var firstByte = parseInt(hex.substring(2, 4), 16);
+      var rangeExplain = firstByte < 0x80 ? hex + ' < 0x80... → shard -80' : hex + ' >= 0x80... → shard 80-';
+      document.getElementById('vindexShard').textContent = shard + ' (' + rangeExplain + ')';
+    }, 1800);
+  });
+
+  // Initial vindex lookup
+  document.getElementById('vindexLookupBtn').click();
+</script>

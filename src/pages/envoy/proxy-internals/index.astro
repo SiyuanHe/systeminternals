@@ -1,0 +1,1136 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Envoy Proxy Internals: Architecture, Load Balancing & xDS" 
+  description="Interactive visualization of Envoy proxy internals — request flow, load balancing algorithms, circuit breaking, xDS API, and health checking"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Envoy", href: "/envoy/" },
+    { label: "Proxy Internals", href: "/envoy/proxy-internals/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🛡️ Envoy Proxy Internals</h1>
+      <p class="subtitle">Request Flow · Load Balancing · Circuit Breaking · xDS · Health Checking</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Envoy is a <strong>L4/L7 proxy</strong> designed for cloud-native applications. Requests flow through
+          <strong>listeners</strong> into <strong>filter chains</strong>, are matched to <strong>routes</strong>,
+          then forwarded to <strong>clusters</strong> of upstream <strong>endpoints</strong>. All configuration
+          is dynamic via the <em>xDS API</em> — the same mechanism Istio uses to program thousands of sidecars.
+        </p>
+      </div>
+    </section>
+
+    <!-- Request Flow -->
+    <section class="flow-section">
+      <h2>🔀 Request Flow: Listener → Endpoint</h2>
+      <p class="section-desc">A request enters a listener, traverses filter chains (L4 + L7), matches a route, selects a cluster, and reaches an endpoint. Click "Send Request" to trace the path.</p>
+
+      <div class="flow-controls">
+        <div class="flow-toggle">
+          <button class="flow-btn active" data-layer="l7">L7 (HTTP)</button>
+          <button class="flow-btn" data-layer="l4">L4 (TCP)</button>
+        </div>
+        <button id="sendFlowBtn" class="action-btn primary-btn">▶ Send Request</button>
+        <button id="resetFlowBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="flow-viz" id="flowViz">
+        <div class="flow-stage" id="flowStage0">
+          <div class="flow-icon">🌐</div>
+          <div class="flow-label">Client</div>
+        </div>
+        <div class="flow-arrow" id="flowArrow0">→</div>
+        <div class="flow-stage" id="flowStage1">
+          <div class="flow-icon">👂</div>
+          <div class="flow-label">Listener<br><span class="flow-detail">:8080</span></div>
+        </div>
+        <div class="flow-arrow" id="flowArrow1">→</div>
+        <div class="flow-stage" id="flowStage2">
+          <div class="flow-icon">⛓️</div>
+          <div class="flow-label">Filter Chain<br><span class="flow-detail" id="filterDetail">HTTP conn mgr</span></div>
+        </div>
+        <div class="flow-arrow" id="flowArrow2">→</div>
+        <div class="flow-stage" id="flowStage3">
+          <div class="flow-icon">🗺️</div>
+          <div class="flow-label">Route<br><span class="flow-detail" id="routeDetail">/api/* → svc</span></div>
+        </div>
+        <div class="flow-arrow" id="flowArrow3">→</div>
+        <div class="flow-stage" id="flowStage4">
+          <div class="flow-icon">📦</div>
+          <div class="flow-label">Cluster<br><span class="flow-detail">my-service</span></div>
+        </div>
+        <div class="flow-arrow" id="flowArrow4">→</div>
+        <div class="flow-stage" id="flowStage5">
+          <div class="flow-icon">🖥️</div>
+          <div class="flow-label">Endpoint<br><span class="flow-detail">10.0.0.3:8080</span></div>
+        </div>
+      </div>
+
+      <div class="flow-log" id="flowLog"></div>
+    </section>
+
+    <!-- Load Balancing -->
+    <section class="lb-section">
+      <h2>⚖️ Load Balancing Algorithms</h2>
+      <p class="section-desc">Envoy supports multiple load balancing policies. Watch how each distributes requests across endpoints.</p>
+
+      <div class="lb-controls">
+        <div class="lb-tabs">
+          <button class="lb-tab active" data-algo="round_robin">Round Robin</button>
+          <button class="lb-tab" data-algo="least_request">Least Request</button>
+          <button class="lb-tab" data-algo="ring_hash">Ring Hash</button>
+          <button class="lb-tab" data-algo="maglev">Maglev</button>
+        </div>
+        <div class="slider-group">
+          <label>Endpoints: <strong id="epCountLabel">4</strong></label>
+          <input type="range" id="epCountSlider" min="2" max="8" value="4">
+        </div>
+        <button id="sendLbBtn" class="action-btn primary-btn">📤 Send 20 Requests</button>
+        <button id="resetLbBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="lb-viz" id="lbViz">
+        <div class="lb-proxy-col">
+          <div class="lb-proxy-box">
+            <div class="lb-proxy-label">Envoy</div>
+            <div class="lb-algo-label" id="lbAlgoLabel">round_robin</div>
+          </div>
+          <div class="lb-queue" id="lbQueue"></div>
+        </div>
+        <div class="lb-endpoints-col" id="lbEndpoints"></div>
+      </div>
+
+      <div class="lb-desc" id="lbDesc">
+        <strong>Round Robin:</strong> Requests are distributed sequentially across all endpoints. Simple and fair, but doesn't account for varying response times.
+      </div>
+    </section>
+
+    <!-- Circuit Breaking -->
+    <section class="cb-section">
+      <h2>🔌 Circuit Breaking</h2>
+      <p class="section-desc">Circuit breakers prevent cascading failures by limiting connections, pending requests, and retries. Watch the circuit trip when thresholds are exceeded.</p>
+
+      <div class="cb-controls">
+        <div class="slider-group">
+          <label>Max connections: <strong id="cbMaxConnLabel">5</strong></label>
+          <input type="range" id="cbMaxConnSlider" min="1" max="10" value="5">
+        </div>
+        <div class="slider-group">
+          <label>Request rate (req/s): <strong id="cbRateLabel">3</strong></label>
+          <input type="range" id="cbRateSlider" min="1" max="15" value="3">
+        </div>
+        <button id="startCbBtn" class="action-btn primary-btn">▶ Start Traffic</button>
+        <button id="stopCbBtn" class="action-btn danger-btn" disabled>⏹ Stop</button>
+        <button id="resetCbBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="cb-viz" id="cbViz">
+        <div class="cb-meter-group">
+          <div class="cb-meter">
+            <div class="cb-meter-label">Active Connections</div>
+            <div class="cb-meter-bar-wrap">
+              <div class="cb-meter-bar" id="cbConnBar" style="width:0%"></div>
+              <div class="cb-meter-threshold" id="cbConnThreshold"></div>
+            </div>
+            <div class="cb-meter-val"><span id="cbConnVal">0</span> / <span id="cbConnMax">5</span></div>
+          </div>
+          <div class="cb-meter">
+            <div class="cb-meter-label">Pending Requests</div>
+            <div class="cb-meter-bar-wrap">
+              <div class="cb-meter-bar pending-bar" id="cbPendBar" style="width:0%"></div>
+              <div class="cb-meter-threshold" id="cbPendThreshold"></div>
+            </div>
+            <div class="cb-meter-val"><span id="cbPendVal">0</span> / <span id="cbPendMax">10</span></div>
+          </div>
+          <div class="cb-meter">
+            <div class="cb-meter-label">Retries</div>
+            <div class="cb-meter-bar-wrap">
+              <div class="cb-meter-bar retry-bar" id="cbRetryBar" style="width:0%"></div>
+              <div class="cb-meter-threshold" id="cbRetryThreshold"></div>
+            </div>
+            <div class="cb-meter-val"><span id="cbRetryVal">0</span> / <span id="cbRetryMax">3</span></div>
+          </div>
+        </div>
+        <div class="cb-state-display">
+          <div class="cb-state-icon" id="cbStateIcon">✅</div>
+          <div class="cb-state-text" id="cbStateText">CLOSED (healthy)</div>
+        </div>
+      </div>
+
+      <div class="cb-log" id="cbLog"></div>
+    </section>
+
+    <!-- xDS API -->
+    <section class="xds-section">
+      <h2>📡 xDS Dynamic Configuration</h2>
+      <p class="section-desc">Envoy discovers configuration from a control plane (like Istio's istiod) via the xDS protocol. Click a resource type to see how config is pushed.</p>
+
+      <div class="xds-controls">
+        <div class="xds-tabs">
+          <button class="xds-tab active" data-xds="LDS">LDS</button>
+          <button class="xds-tab" data-xds="RDS">RDS</button>
+          <button class="xds-tab" data-xds="CDS">CDS</button>
+          <button class="xds-tab" data-xds="EDS">EDS</button>
+          <button class="xds-tab" data-xds="SDS">SDS</button>
+        </div>
+        <button id="pushXdsBtn" class="action-btn primary-btn">📤 Push Config</button>
+        <button id="pushAllXdsBtn" class="action-btn secondary-btn">🔄 Full Sync</button>
+      </div>
+
+      <div class="xds-viz" id="xdsViz">
+        <div class="xds-cp">
+          <div class="xds-cp-label">Control Plane</div>
+          <div class="xds-cp-sub">(istiod / go-control-plane)</div>
+          <div class="xds-cp-config" id="xdsCpConfig"></div>
+        </div>
+        <div class="xds-stream" id="xdsStream">
+          <div class="xds-stream-label">gRPC bi-directional stream</div>
+          <div class="xds-msgs" id="xdsMsgs"></div>
+        </div>
+        <div class="xds-envoy">
+          <div class="xds-envoy-label">Envoy Proxy</div>
+          <div class="xds-envoy-config" id="xdsEnvoyConfig">
+            <div class="xds-config-slot" id="xdsSlotLDS">LDS: —</div>
+            <div class="xds-config-slot" id="xdsSlotRDS">RDS: —</div>
+            <div class="xds-config-slot" id="xdsSlotCDS">CDS: —</div>
+            <div class="xds-config-slot" id="xdsSlotEDS">EDS: —</div>
+            <div class="xds-config-slot" id="xdsSlotSDS">SDS: —</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="xds-desc" id="xdsDesc">
+        <strong>LDS (Listener Discovery Service):</strong> Discovers listener configurations — which ports to bind, what filter chains to attach. When Istio creates a VirtualService, it updates LDS.
+      </div>
+    </section>
+
+    <!-- Health Checking -->
+    <section class="hc-section">
+      <h2>🏥 Health Checking</h2>
+      <p class="section-desc">Envoy uses active health checks (HTTP/TCP/gRPC probes) and passive outlier detection to remove unhealthy endpoints.</p>
+
+      <div class="hc-controls">
+        <div class="hc-toggle">
+          <button class="hc-btn active" data-mode="active">Active (HTTP)</button>
+          <button class="hc-btn" data-mode="passive">Passive (Outlier)</button>
+        </div>
+        <button id="startHcBtn" class="action-btn primary-btn">▶ Start Checking</button>
+        <button id="failEndpointBtn" class="action-btn danger-btn">💀 Fail Endpoint</button>
+        <button id="resetHcBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hc-viz" id="hcViz"></div>
+      <div class="hc-log" id="hcLog"></div>
+    </section>
+
+    <!-- Retry Policies -->
+    <section class="retry-section">
+      <h2>🔁 Retry Policies</h2>
+      <p class="section-desc">Envoy retries failed requests with configurable back-off, jitter, and retry budgets to prevent thundering herds.</p>
+
+      <div class="retry-controls">
+        <div class="slider-group">
+          <label>Max retries: <strong id="retryMaxLabel">3</strong></label>
+          <input type="range" id="retryMaxSlider" min="1" max="5" value="3">
+        </div>
+        <div class="slider-group">
+          <label>Failure rate: <strong id="retryFailLabel">60</strong>%</label>
+          <input type="range" id="retryFailSlider" min="10" max="90" value="60">
+        </div>
+        <button id="sendRetryBtn" class="action-btn primary-btn">▶ Send Request</button>
+        <button id="resetRetryBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="retry-viz" id="retryViz"></div>
+      <div class="retry-desc">
+        <strong>Retry budget:</strong> Limits total retry ratio to 20% of active requests, preventing retry storms. Combined with <em>jitter</em> (randomized delay), retries don't thundering-herd the upstream.
+      </div>
+    </section>
+
+    <!-- Rate Limiting -->
+    <section class="rl-section">
+      <h2>🚦 Rate Limiting</h2>
+      <p class="section-desc">Envoy supports local rate limiting (per-proxy token bucket) and global rate limiting (centralized service). Watch requests get throttled.</p>
+
+      <div class="rl-controls">
+        <div class="rl-toggle">
+          <button class="rl-btn active" data-mode="local">Local</button>
+          <button class="rl-btn" data-mode="global">Global</button>
+        </div>
+        <div class="slider-group">
+          <label>Rate limit: <strong id="rlLimitLabel">5</strong> req/s</label>
+          <input type="range" id="rlLimitSlider" min="1" max="15" value="5">
+        </div>
+        <button id="sendRlBtn" class="action-btn primary-btn">📤 Burst 10 Requests</button>
+        <button id="resetRlBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="rl-viz" id="rlViz">
+        <div class="rl-bucket">
+          <div class="rl-bucket-label">Token Bucket</div>
+          <div class="rl-bucket-fill" id="rlBucketFill"></div>
+          <div class="rl-bucket-val" id="rlBucketVal">5 / 5</div>
+        </div>
+        <div class="rl-results" id="rlResults"></div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 L4 vs L7</h3>
+          <p>
+            <strong>L4 (TCP proxy)</strong> operates on connections — Envoy sees bytes, not HTTP semantics.
+            <strong>L7 (HTTP)</strong> understands headers, paths, and methods, enabling content-based routing,
+            header manipulation, and per-route policies. Most service mesh traffic uses L7.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 xDS Ordering</h3>
+          <p>
+            Config must be applied in order: <code>CDS/EDS</code> first (so clusters exist),
+            then <code>LDS/RDS</code> (so routes can reference clusters).
+            Istio's istiod handles this via <em>Aggregated Discovery Service (ADS)</em> —
+            a single gRPC stream that serializes updates.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🏥 Outlier Detection</h3>
+          <p>
+            Passive health checking counts <strong>consecutive 5xx errors</strong> per endpoint.
+            After a threshold (e.g., 5 errors), the endpoint is ejected for a base interval.
+            Each subsequent ejection doubles the time. This is <em>complementary</em> to active checks.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚖️ Maglev vs Ring Hash</h3>
+          <p>
+            Both provide <strong>consistent hashing</strong> — great for caching proxies.
+            Maglev builds a 65537-entry lookup table for O(1) lookups and more uniform distribution.
+            Ring hash is simpler but can have hotspots with fewer endpoints.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.envoyproxy.io/docs/envoy/latest/" target="_blank">Envoy Documentation</a> and <a href="https://istio.io/latest/docs/ops/deployment/architecture/" target="_blank">Istio Architecture</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Envoy%20Proxy%20Internals%20Visualizer&url=https://systeminternals.dev/envoy/proxy-internals/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/envoy/proxy-internals/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/envoy/proxy-internals/&t=Interactive%20Envoy%20Proxy%20Internals%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #8b5cf6, #06b6d4, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(6,182,212,0.05)); border: 1px solid rgba(139,92,246,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #8b5cf6; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(139,92,246,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(6,182,212,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #8b5cf6; cursor: pointer; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #8b5cf6; }
+  .slider-group input[type="range"] { max-width: 400px; }
+
+  /* Request Flow */
+  .flow-section { margin-bottom: 50px; }
+  .flow-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .flow-toggle { display: flex; gap: 8px; }
+  .flow-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .flow-btn.active { border-color: #8b5cf6; background: rgba(139,92,246,0.15); color: #a78bfa; font-weight: 600; }
+  .flow-viz { display: flex; align-items: center; gap: 0; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px 16px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; overflow-x: auto; }
+  .flow-stage { text-align: center; min-width: 80px; padding: 12px 8px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); transition: all 0.4s; flex-shrink: 0; }
+  .flow-stage.active { border-color: #8b5cf6; background: rgba(139,92,246,0.15); box-shadow: 0 0 20px rgba(139,92,246,0.3); }
+  .flow-stage.done { border-color: #10b981; background: rgba(16,185,129,0.1); }
+  .flow-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .flow-label { font-size: 0.75rem; color: #ccc; line-height: 1.4; }
+  .flow-detail { color: #888; font-size: 0.65rem; }
+  .flow-arrow { color: #555; font-size: 1.2rem; padding: 0 4px; flex-shrink: 0; transition: color 0.4s; }
+  .flow-arrow.active { color: #8b5cf6; }
+  .flow-arrow.done { color: #10b981; }
+  .flow-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; color: #aaa; }
+
+  /* Load Balancing */
+  .lb-section { margin-bottom: 50px; }
+  .lb-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .lb-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .lb-tab { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; font-family: monospace; }
+  .lb-tab.active { border-color: #06b6d4; background: rgba(6,182,212,0.15); color: #06b6d4; font-weight: 600; }
+  .lb-viz { display: flex; gap: 32px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 200px; }
+  .lb-proxy-col { display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+  .lb-proxy-box { background: rgba(139,92,246,0.15); border: 2px solid rgba(139,92,246,0.4); border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 12px; }
+  .lb-proxy-label { font-size: 0.8rem; color: #888; text-transform: uppercase; font-weight: 600; }
+  .lb-algo-label { font-size: 0.85rem; color: #a78bfa; font-family: monospace; margin-top: 4px; }
+  .lb-queue { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .lb-endpoints-col { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .lb-endpoint { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; transition: all 0.3s; }
+  .lb-endpoint.hit { background: rgba(6,182,212,0.15); border-color: rgba(6,182,212,0.4); }
+  .lb-ep-name { font-size: 0.85rem; color: #ccc; font-family: monospace; min-width: 100px; }
+  .lb-ep-bar-wrap { flex: 1; height: 20px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; }
+  .lb-ep-bar { height: 100%; background: linear-gradient(90deg, #06b6d4, #8b5cf6); border-radius: 4px; transition: width 0.3s; width: 0%; }
+  .lb-ep-count { font-size: 0.85rem; color: #06b6d4; font-weight: 600; min-width: 30px; text-align: right; }
+  .lb-desc { background: rgba(0,0,0,0.15); border-radius: 10px; padding: 14px 18px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .lb-desc strong { color: #06b6d4; }
+
+  /* Circuit Breaking */
+  .cb-section { margin-bottom: 50px; }
+  .cb-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .cb-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; }
+  .cb-meter-group { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+  .cb-meter { display: flex; align-items: center; gap: 12px; }
+  .cb-meter-label { font-size: 0.85rem; color: #ccc; min-width: 140px; }
+  .cb-meter-bar-wrap { flex: 1; height: 24px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; position: relative; }
+  .cb-meter-bar { height: 100%; background: linear-gradient(90deg, #10b981, #06b6d4); border-radius: 6px; transition: width 0.3s, background 0.3s; }
+  .cb-meter-bar.warning { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .cb-meter-bar.tripped { background: linear-gradient(90deg, #ef4444, #dc2626); }
+  .pending-bar { background: linear-gradient(90deg, #f59e0b, #f97316); }
+  .retry-bar { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+  .cb-meter-threshold { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; }
+  .cb-meter-val { font-size: 0.85rem; color: #888; min-width: 60px; text-align: right; font-family: monospace; }
+  .cb-state-display { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 10px; }
+  .cb-state-icon { font-size: 2rem; }
+  .cb-state-text { font-size: 1.1rem; font-weight: 700; color: #10b981; font-family: monospace; }
+  .cb-state-text.open { color: #ef4444; }
+  .cb-state-text.half { color: #f59e0b; }
+  .cb-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; color: #aaa; }
+
+  /* xDS */
+  .xds-section { margin-bottom: 50px; }
+  .xds-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .xds-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .xds-tab { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; font-family: monospace; font-weight: 600; }
+  .xds-tab.active { border-color: #10b981; background: rgba(16,185,129,0.15); color: #10b981; }
+  .xds-viz { display: flex; gap: 0; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 200px; align-items: stretch; }
+  .xds-cp, .xds-envoy { min-width: 180px; text-align: center; padding: 16px; }
+  .xds-cp { background: rgba(16,185,129,0.05); border-radius: 12px 0 0 12px; border: 1px solid rgba(16,185,129,0.2); }
+  .xds-envoy { background: rgba(139,92,246,0.05); border-radius: 0 12px 12px 0; border: 1px solid rgba(139,92,246,0.2); }
+  .xds-cp-label, .xds-envoy-label { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .xds-cp-sub { font-size: 0.7rem; color: #666; margin-bottom: 12px; }
+  .xds-cp-config { font-size: 0.75rem; color: #888; text-align: left; font-family: monospace; line-height: 1.6; }
+  .xds-stream { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; border-top: 2px dashed rgba(16,185,129,0.3); border-bottom: 2px dashed rgba(16,185,129,0.3); min-height: 160px; overflow: hidden; }
+  .xds-stream-label { font-size: 0.7rem; color: #555; position: absolute; top: 8px; }
+  .xds-msgs { display: flex; flex-direction: column; gap: 8px; align-items: center; min-height: 60px; }
+  .xds-envoy-config { text-align: left; }
+  .xds-config-slot { font-size: 0.8rem; font-family: monospace; color: #888; padding: 4px 8px; margin-bottom: 4px; border-radius: 4px; transition: all 0.3s; }
+  .xds-config-slot.updated { background: rgba(16,185,129,0.2); color: #10b981; }
+  .xds-desc { background: rgba(0,0,0,0.15); border-radius: 10px; padding: 14px 18px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .xds-desc strong { color: #10b981; }
+  .xds-desc code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #10b981; }
+  .xds-desc em { color: #8b5cf6; }
+
+  /* Health Checking */
+  .hc-section { margin-bottom: 50px; }
+  .hc-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .hc-toggle { display: flex; gap: 8px; }
+  .hc-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .hc-btn.active { border-color: #10b981; background: rgba(16,185,129,0.15); color: #10b981; font-weight: 600; }
+  .hc-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; min-height: 120px; display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .hc-endpoint { text-align: center; padding: 16px; border-radius: 12px; border: 2px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.05); min-width: 100px; transition: all 0.3s; }
+  .hc-endpoint.unhealthy { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.1); }
+  .hc-endpoint.ejected { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); opacity: 0.5; }
+  .hc-ep-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .hc-ep-name { font-size: 0.8rem; color: #ccc; font-family: monospace; }
+  .hc-ep-status { font-size: 0.7rem; margin-top: 4px; color: #10b981; font-weight: 600; }
+  .hc-ep-status.fail { color: #ef4444; }
+  .hc-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 200px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; color: #aaa; }
+
+  /* Retry */
+  .retry-section { margin-bottom: 50px; }
+  .retry-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .retry-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 80px; display: flex; flex-direction: column; gap: 8px; }
+  .retry-attempt { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; animation: fadeIn 0.3s; }
+  .retry-attempt.success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); }
+  .retry-attempt.failure { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); }
+  .retry-num { font-size: 0.8rem; color: #888; font-family: monospace; min-width: 80px; }
+  .retry-result { font-size: 0.85rem; font-weight: 600; }
+  .retry-delay { font-size: 0.75rem; color: #666; margin-left: auto; font-family: monospace; }
+  .retry-desc { background: rgba(0,0,0,0.15); border-radius: 10px; padding: 14px 18px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .retry-desc strong { color: #8b5cf6; }
+  .retry-desc em { color: #06b6d4; }
+
+  /* Rate Limiting */
+  .rl-section { margin-bottom: 50px; }
+  .rl-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .rl-toggle { display: flex; gap: 8px; }
+  .rl-btn { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+  .rl-btn.active { border-color: #f59e0b; background: rgba(245,158,11,0.15); color: #f59e0b; font-weight: 600; }
+  .rl-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; display: flex; gap: 24px; align-items: flex-start; min-height: 150px; }
+  .rl-bucket { text-align: center; min-width: 100px; }
+  .rl-bucket-label { font-size: 0.8rem; color: #888; margin-bottom: 8px; }
+  .rl-bucket-fill { width: 80px; height: 120px; border: 2px solid rgba(245,158,11,0.4); border-radius: 0 0 8px 8px; margin: 0 auto 8px; position: relative; overflow: hidden; background: rgba(0,0,0,0.2); }
+  .rl-bucket-fill::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 100%; background: linear-gradient(0deg, rgba(245,158,11,0.6), rgba(245,158,11,0.2)); transition: height 0.3s; }
+  .rl-bucket-val { font-size: 0.85rem; color: #f59e0b; font-family: monospace; }
+  .rl-results { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
+  .rl-req { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; animation: fadeIn 0.2s; }
+  .rl-req.allowed { background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #10b981; }
+  .rl-req.denied { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.4); color: #ef4444; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #8b5cf6; }
+  .explain-card em { color: #06b6d4; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #8b5cf6; }
+  .highlight-card { background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(6,182,212,0.08)); border-color: rgba(139,92,246,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #8b5cf6; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes msgRight { from { left: 0; opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } to { left: calc(100% - 30px); opacity: 0; } }
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 5px rgba(139,92,246,0.3); } 50% { box-shadow: 0 0 20px rgba(139,92,246,0.6); } }
+  @keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .flow-viz { flex-wrap: wrap; justify-content: center; }
+    .lb-viz { flex-direction: column; }
+    .xds-viz { flex-direction: column; }
+    .xds-cp { border-radius: 12px 12px 0 0; }
+    .xds-envoy { border-radius: 0 0 12px 12px; }
+    .rl-viz { flex-direction: column; align-items: center; }
+  }
+</style>
+
+<script is:inline>
+  // ========== COLORS ==========
+  var COLORS = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#f43f5e', '#3b82f6', '#84cc16'];
+
+  // ========== REQUEST FLOW ==========
+  var flowLayer = 'l7';
+  var flowRunning = false;
+
+  document.querySelectorAll('.flow-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.flow-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      flowLayer = btn.getAttribute('data-layer');
+      var fd = document.getElementById('filterDetail');
+      var rd = document.getElementById('routeDetail');
+      if (flowLayer === 'l4') {
+        fd.textContent = 'TCP proxy filter';
+        rd.textContent = 'TCP match';
+      } else {
+        fd.textContent = 'HTTP conn mgr';
+        rd.textContent = '/api/* → svc';
+      }
+    });
+  });
+
+  document.getElementById('sendFlowBtn').addEventListener('click', function() {
+    if (flowRunning) return;
+    flowRunning = true;
+    var log = document.getElementById('flowLog');
+    log.innerHTML = '';
+    var stages = 6;
+    var stageNames = ['Client', 'Listener :8080', 'Filter Chain', 'Route Match', 'Cluster Selection', 'Endpoint 10.0.0.3:8080'];
+    var l7Logs = [
+      'Client sends GET /api/users HTTP/1.1',
+      'Listener 0.0.0.0:8080 accepts connection',
+      'HTTP Connection Manager → Router filter → RBAC filter',
+      'Route match: prefix /api/* → cluster "my-service"',
+      'Cluster "my-service" selects endpoint via round_robin',
+      'Request forwarded to 10.0.0.3:8080 — 200 OK (12ms)'
+    ];
+    var l4Logs = [
+      'Client opens TCP connection',
+      'Listener 0.0.0.0:8080 accepts connection',
+      'TCP proxy filter matches destination CIDR',
+      'Route to cluster "my-service-tcp"',
+      'Cluster selects endpoint via round_robin',
+      'TCP bytes proxied to 10.0.0.3:8080'
+    ];
+    var logs = flowLayer === 'l7' ? l7Logs : l4Logs;
+
+    // Reset
+    for (var i = 0; i < stages; i++) {
+      document.getElementById('flowStage' + i).classList.remove('active', 'done');
+      if (i < stages - 1) {
+        document.getElementById('flowArrow' + i).classList.remove('active', 'done');
+      }
+    }
+
+    function animateStage(idx) {
+      if (idx >= stages) {
+        flowRunning = false;
+        return;
+      }
+      if (idx > 0) {
+        document.getElementById('flowStage' + (idx - 1)).classList.remove('active');
+        document.getElementById('flowStage' + (idx - 1)).classList.add('done');
+        document.getElementById('flowArrow' + (idx - 1)).classList.remove('active');
+        document.getElementById('flowArrow' + (idx - 1)).classList.add('done');
+      }
+      document.getElementById('flowStage' + idx).classList.add('active');
+      if (idx < stages - 1) {
+        document.getElementById('flowArrow' + idx).classList.add('active');
+      }
+      var entry = document.createElement('div');
+      entry.style.cssText = 'color:#a78bfa;animation:fadeIn 0.3s';
+      entry.textContent = '[' + (idx + 1) + '/' + stages + '] ' + logs[idx];
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+      setTimeout(function() { animateStage(idx + 1); }, 700);
+    }
+    animateStage(0);
+  });
+
+  document.getElementById('resetFlowBtn').addEventListener('click', function() {
+    flowRunning = false;
+    for (var i = 0; i < 6; i++) {
+      document.getElementById('flowStage' + i).classList.remove('active', 'done');
+      if (i < 5) document.getElementById('flowArrow' + i).classList.remove('active', 'done');
+    }
+    document.getElementById('flowLog').innerHTML = '';
+  });
+
+  // ========== LOAD BALANCING ==========
+  var lbAlgo = 'round_robin';
+  var epCount = 4;
+  var lbCounts = [];
+  var lbRRIndex = 0;
+  var lbAnimating = false;
+
+  var lbDescs = {
+    round_robin: '<strong>Round Robin:</strong> Requests are distributed sequentially across all endpoints. Simple and fair, but doesn\'t account for varying response times.',
+    least_request: '<strong>Least Request:</strong> Picks 2 random endpoints and sends to the one with fewer active requests. Adapts to heterogeneous latency without global state.',
+    ring_hash: '<strong>Ring Hash:</strong> Consistent hashing maps requests to endpoints on a virtual ring. Adding/removing endpoints only remaps nearby keys — ideal for caching.',
+    maglev: '<strong>Maglev:</strong> Google\'s consistent hashing builds a 65537-entry lookup table. More uniform than ring hash with O(1) lookups. Used in production at massive scale.'
+  };
+
+  function buildLbEndpoints() {
+    var container = document.getElementById('lbEndpoints');
+    container.innerHTML = '';
+    lbCounts = [];
+    for (var i = 0; i < epCount; i++) {
+      lbCounts.push(0);
+      var ep = document.createElement('div');
+      ep.className = 'lb-endpoint';
+      ep.id = 'lbEp' + i;
+      ep.innerHTML = '<div class="lb-ep-name">10.0.0.' + (i + 1) + ':8080</div>' +
+        '<div class="lb-ep-bar-wrap"><div class="lb-ep-bar" id="lbBar' + i + '"></div></div>' +
+        '<div class="lb-ep-count" id="lbCount' + i + '">0</div>';
+      container.appendChild(ep);
+    }
+  }
+  buildLbEndpoints();
+
+  document.getElementById('epCountSlider').addEventListener('input', function(e) {
+    epCount = parseInt(e.target.value);
+    document.getElementById('epCountLabel').textContent = epCount;
+    buildLbEndpoints();
+  });
+
+  document.querySelectorAll('.lb-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.lb-tab').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      lbAlgo = btn.getAttribute('data-algo');
+      document.getElementById('lbAlgoLabel').textContent = lbAlgo;
+      document.getElementById('lbDesc').innerHTML = lbDescs[lbAlgo];
+      buildLbEndpoints();
+    });
+  });
+
+  function pickEndpoint(reqIdx) {
+    if (lbAlgo === 'round_robin') {
+      var idx = lbRRIndex % epCount;
+      lbRRIndex++;
+      return idx;
+    } else if (lbAlgo === 'least_request') {
+      var a = Math.floor(Math.random() * epCount);
+      var b = Math.floor(Math.random() * epCount);
+      return lbCounts[a] <= lbCounts[b] ? a : b;
+    } else if (lbAlgo === 'ring_hash') {
+      var hash = 0;
+      var key = 'req-' + reqIdx;
+      for (var c = 0; c < key.length; c++) { hash = ((hash << 5) - hash) + key.charCodeAt(c); hash |= 0; }
+      return Math.abs(hash) % epCount;
+    } else {
+      // maglev-like
+      var hash2 = 0;
+      var key2 = 'req-' + reqIdx;
+      for (var c2 = 0; c2 < key2.length; c2++) { hash2 = ((hash2 << 7) ^ (hash2 >> 3)) + key2.charCodeAt(c2); hash2 |= 0; }
+      return Math.abs(hash2) % epCount;
+    }
+  }
+
+  document.getElementById('sendLbBtn').addEventListener('click', function() {
+    if (lbAnimating) return;
+    lbAnimating = true;
+    lbRRIndex = 0;
+    buildLbEndpoints();
+    var totalReqs = 20;
+    var sent = 0;
+
+    function sendOne() {
+      if (sent >= totalReqs) { lbAnimating = false; return; }
+      var idx = pickEndpoint(sent);
+      lbCounts[idx]++;
+      var maxCount = Math.max.apply(null, lbCounts);
+
+      // Update bars
+      for (var i = 0; i < epCount; i++) {
+        var pct = maxCount > 0 ? (lbCounts[i] / totalReqs) * 100 : 0;
+        document.getElementById('lbBar' + i).style.width = pct + '%';
+        document.getElementById('lbCount' + i).textContent = lbCounts[i];
+        document.getElementById('lbEp' + i).classList.remove('hit');
+      }
+      document.getElementById('lbEp' + idx).classList.add('hit');
+      sent++;
+      setTimeout(sendOne, 120);
+    }
+    sendOne();
+  });
+
+  document.getElementById('resetLbBtn').addEventListener('click', function() {
+    lbAnimating = false;
+    lbRRIndex = 0;
+    buildLbEndpoints();
+  });
+
+  // ========== CIRCUIT BREAKING ==========
+  var cbMaxConn = 5;
+  var cbRate = 3;
+  var cbInterval = null;
+  var cbConns = 0;
+  var cbPending = 0;
+  var cbRetries = 0;
+  var cbState = 'closed';
+  var cbMaxPend = 10;
+  var cbMaxRetry = 3;
+
+  document.getElementById('cbMaxConnSlider').addEventListener('input', function(e) {
+    cbMaxConn = parseInt(e.target.value);
+    document.getElementById('cbMaxConnLabel').textContent = cbMaxConn;
+    document.getElementById('cbConnMax').textContent = cbMaxConn;
+    document.getElementById('cbConnThreshold').style.left = '100%';
+  });
+
+  document.getElementById('cbRateSlider').addEventListener('input', function(e) {
+    cbRate = parseInt(e.target.value);
+    document.getElementById('cbRateLabel').textContent = cbRate;
+  });
+
+  function updateCbDisplay() {
+    var connPct = Math.min((cbConns / cbMaxConn) * 100, 100);
+    var pendPct = Math.min((cbPending / cbMaxPend) * 100, 100);
+    var retryPct = Math.min((cbRetries / cbMaxRetry) * 100, 100);
+
+    var connBar = document.getElementById('cbConnBar');
+    connBar.style.width = connPct + '%';
+    connBar.className = 'cb-meter-bar' + (connPct >= 80 ? ' warning' : '') + (connPct >= 100 ? ' tripped' : '');
+
+    document.getElementById('cbPendBar').style.width = pendPct + '%';
+    document.getElementById('cbRetryBar').style.width = retryPct + '%';
+
+    document.getElementById('cbConnVal').textContent = cbConns;
+    document.getElementById('cbPendVal').textContent = cbPending;
+    document.getElementById('cbRetryVal').textContent = cbRetries;
+
+    var stateIcon = document.getElementById('cbStateIcon');
+    var stateText = document.getElementById('cbStateText');
+
+    if (cbConns >= cbMaxConn || cbRetries >= cbMaxRetry) {
+      cbState = 'open';
+      stateIcon.textContent = '🔴';
+      stateText.textContent = 'OPEN (tripped!)';
+      stateText.className = 'cb-state-text open';
+    } else if (cbConns >= cbMaxConn * 0.8) {
+      cbState = 'half';
+      stateIcon.textContent = '🟡';
+      stateText.textContent = 'HALF-OPEN (near limit)';
+      stateText.className = 'cb-state-text half';
+    } else {
+      cbState = 'closed';
+      stateIcon.textContent = '✅';
+      stateText.textContent = 'CLOSED (healthy)';
+      stateText.className = 'cb-state-text';
+    }
+  }
+
+  function cbLog(msg, color) {
+    var log = document.getElementById('cbLog');
+    var entry = document.createElement('div');
+    entry.style.cssText = 'color:' + (color || '#aaa') + ';animation:fadeIn 0.2s';
+    entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('startCbBtn').addEventListener('click', function() {
+    if (cbInterval) return;
+    document.getElementById('startCbBtn').disabled = true;
+    document.getElementById('stopCbBtn').disabled = false;
+    cbLog('Traffic started at ' + cbRate + ' req/s', '#10b981');
+
+    cbInterval = setInterval(function() {
+      if (cbState === 'open') {
+        cbPending++;
+        if (cbPending > cbMaxPend) cbPending = cbMaxPend;
+        cbLog('Request REJECTED — circuit OPEN', '#ef4444');
+        // Slowly recover
+        if (Math.random() < 0.15) {
+          cbConns = Math.max(0, cbConns - 1);
+          cbRetries = Math.max(0, cbRetries - 1);
+          cbLog('Connection released (recovery)', '#f59e0b');
+        }
+      } else {
+        cbConns++;
+        if (Math.random() < 0.3) {
+          cbRetries = Math.min(cbRetries + 1, cbMaxRetry);
+          cbLog('Request failed → retry #' + cbRetries, '#f59e0b');
+        } else {
+          cbLog('Request accepted (conn: ' + cbConns + '/' + cbMaxConn + ')', '#06b6d4');
+        }
+        // Connections complete after delay
+        setTimeout(function() {
+          cbConns = Math.max(0, cbConns - 1);
+          cbPending = Math.max(0, cbPending - 1);
+          updateCbDisplay();
+        }, 1500 + Math.random() * 1500);
+      }
+      updateCbDisplay();
+    }, 1000 / cbRate);
+  });
+
+  document.getElementById('stopCbBtn').addEventListener('click', function() {
+    clearInterval(cbInterval);
+    cbInterval = null;
+    document.getElementById('startCbBtn').disabled = false;
+    document.getElementById('stopCbBtn').disabled = true;
+    cbLog('Traffic stopped', '#888');
+  });
+
+  document.getElementById('resetCbBtn').addEventListener('click', function() {
+    clearInterval(cbInterval);
+    cbInterval = null;
+    cbConns = 0; cbPending = 0; cbRetries = 0; cbState = 'closed';
+    document.getElementById('startCbBtn').disabled = false;
+    document.getElementById('stopCbBtn').disabled = true;
+    updateCbDisplay();
+    document.getElementById('cbLog').innerHTML = '';
+  });
+
+  // ========== xDS ==========
+  var currentXds = 'LDS';
+  var xdsVersions = { LDS: 0, RDS: 0, CDS: 0, EDS: 0, SDS: 0 };
+
+  var xdsInfo = {
+    LDS: { desc: '<strong>LDS (Listener Discovery Service):</strong> Discovers listener configurations — which ports to bind, what filter chains to attach. When Istio creates a VirtualService, it updates LDS.', config: 'listeners:\n- name: http_listener\n  address: 0.0.0.0:8080\n  filter_chains:\n  - filters:\n    - http_connection_manager' },
+    RDS: { desc: '<strong>RDS (Route Discovery Service):</strong> Discovers route tables — maps virtual hosts and URL paths to clusters. Changed when you update VirtualService routing rules.', config: 'routes:\n- match: { prefix: /api }\n  route: { cluster: my-svc }\n- match: { prefix: /web }\n  route: { cluster: frontend }' },
+    CDS: { desc: '<strong>CDS (Cluster Discovery Service):</strong> Discovers upstream clusters — their LB policy, circuit breaker settings, and TLS context. Maps to Istio DestinationRules.', config: 'clusters:\n- name: my-svc\n  type: EDS\n  lb_policy: ROUND_ROBIN\n  circuit_breakers:\n    max_connections: 1024' },
+    EDS: { desc: '<strong>EDS (Endpoint Discovery Service):</strong> Discovers the actual IP:port endpoints for each cluster. Updated as pods scale up/down in Kubernetes.', config: 'endpoints:\n- cluster: my-svc\n  endpoints:\n  - 10.0.0.1:8080 (healthy)\n  - 10.0.0.2:8080 (healthy)\n  - 10.0.0.3:8080 (draining)' },
+    SDS: { desc: '<strong>SDS (Secret Discovery Service):</strong> Delivers TLS certificates and keys. Istio\'s Citadel/istiod rotates mTLS certs via SDS — no restart needed.', config: 'secrets:\n- name: default\n  tls_certificate:\n    certificate_chain: [PEM]\n    private_key: [PEM]\n  validation_context:\n    trusted_ca: [PEM]' }
+  };
+
+  function updateXdsDisplay() {
+    document.getElementById('xdsCpConfig').textContent = xdsInfo[currentXds].config;
+    document.getElementById('xdsDesc').innerHTML = xdsInfo[currentXds].desc;
+  }
+  updateXdsDisplay();
+
+  document.querySelectorAll('.xds-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.xds-tab').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentXds = btn.getAttribute('data-xds');
+      updateXdsDisplay();
+    });
+  });
+
+  function pushXds(type) {
+    xdsVersions[type]++;
+    var ver = xdsVersions[type];
+    var msgs = document.getElementById('xdsMsgs');
+
+    // DiscoveryRequest
+    var req = document.createElement('div');
+    req.style.cssText = 'background:rgba(139,92,246,0.2);border:1px solid rgba(139,92,246,0.4);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:#a78bfa;font-family:monospace;animation:slideDown 0.3s;white-space:nowrap;';
+    req.textContent = '← DiscoveryRequest{type:' + type + ', v:' + (ver - 1) + '}';
+    msgs.appendChild(req);
+
+    setTimeout(function() {
+      var resp = document.createElement('div');
+      resp.style.cssText = 'background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:#10b981;font-family:monospace;animation:slideDown 0.3s;white-space:nowrap;';
+      resp.textContent = '→ DiscoveryResponse{type:' + type + ', v:' + ver + ', nonce:' + Math.random().toString(36).slice(2, 8) + '}';
+      msgs.appendChild(resp);
+
+      // Update slot
+      var slot = document.getElementById('xdsSlot' + type);
+      slot.textContent = type + ': v' + ver + ' ✓';
+      slot.classList.add('updated');
+      setTimeout(function() { slot.classList.remove('updated'); }, 2000);
+
+      // ACK
+      setTimeout(function() {
+        var ack = document.createElement('div');
+        ack.style.cssText = 'background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.2);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:#888;font-family:monospace;animation:slideDown 0.3s;white-space:nowrap;';
+        ack.textContent = '← ACK{type:' + type + ', v:' + ver + '}';
+        msgs.appendChild(ack);
+      }, 400);
+    }, 500);
+  }
+
+  document.getElementById('pushXdsBtn').addEventListener('click', function() {
+    document.getElementById('xdsMsgs').innerHTML = '';
+    pushXds(currentXds);
+  });
+
+  document.getElementById('pushAllXdsBtn').addEventListener('click', function() {
+    document.getElementById('xdsMsgs').innerHTML = '';
+    var order = ['CDS', 'EDS', 'LDS', 'RDS', 'SDS'];
+    order.forEach(function(type, i) {
+      setTimeout(function() { pushXds(type); }, i * 1200);
+    });
+  });
+
+  // ========== HEALTH CHECKING ==========
+  var hcMode = 'active';
+  var hcEndpoints = [
+    { name: '10.0.0.1', healthy: true, failures: 0 },
+    { name: '10.0.0.2', healthy: true, failures: 0 },
+    { name: '10.0.0.3', healthy: true, failures: 0 },
+    { name: '10.0.0.4', healthy: true, failures: 0 }
+  ];
+  var hcInterval = null;
+  var hcFailTarget = -1;
+
+  document.querySelectorAll('.hc-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.hc-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      hcMode = btn.getAttribute('data-mode');
+    });
+  });
+
+  function buildHcViz() {
+    var container = document.getElementById('hcViz');
+    container.innerHTML = '';
+    hcEndpoints.forEach(function(ep, i) {
+      var div = document.createElement('div');
+      div.className = 'hc-endpoint' + (ep.healthy ? '' : ' unhealthy') + (ep.failures >= 5 ? ' ejected' : '');
+      div.id = 'hcEp' + i;
+      div.innerHTML = '<div class="hc-ep-icon">' + (ep.healthy ? '🖥️' : '💀') + '</div>' +
+        '<div class="hc-ep-name">' + ep.name + '</div>' +
+        '<div class="hc-ep-status' + (ep.healthy ? '' : ' fail') + '">' +
+        (ep.failures >= 5 ? 'EJECTED' : (ep.healthy ? 'HEALTHY' : 'FAILING (' + ep.failures + ')')) + '</div>';
+      container.appendChild(div);
+    });
+  }
+  buildHcViz();
+
+  function hcLog(msg, color) {
+    var log = document.getElementById('hcLog');
+    var entry = document.createElement('div');
+    entry.style.cssText = 'color:' + (color || '#aaa') + ';animation:fadeIn 0.2s';
+    entry.textContent = msg;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('startHcBtn').addEventListener('click', function() {
+    if (hcInterval) return;
+    hcLog('Health checking started (' + hcMode + ' mode)', '#10b981');
+
+    hcInterval = setInterval(function() {
+      hcEndpoints.forEach(function(ep, i) {
+        if (i === hcFailTarget) {
+          ep.failures++;
+          if (ep.failures >= 3) ep.healthy = false;
+          if (hcMode === 'active') {
+            hcLog('Active probe to ' + ep.name + ' → ' + (ep.healthy ? '200 OK' : 'TIMEOUT'), ep.healthy ? '#10b981' : '#ef4444');
+          } else {
+            hcLog('Outlier: ' + ep.name + ' consecutive 5xx count: ' + ep.failures, '#f59e0b');
+          }
+          if (ep.failures >= 5) {
+            hcLog('⚠ ' + ep.name + ' EJECTED (threshold exceeded)', '#ef4444');
+          }
+        } else {
+          if (hcMode === 'active') {
+            hcLog('Active probe to ' + ep.name + ' → 200 OK', '#10b981');
+          }
+        }
+      });
+      buildHcViz();
+    }, 1500);
+  });
+
+  document.getElementById('failEndpointBtn').addEventListener('click', function() {
+    hcFailTarget = Math.floor(Math.random() * hcEndpoints.length);
+    hcLog('Endpoint ' + hcEndpoints[hcFailTarget].name + ' is now failing!', '#ef4444');
+  });
+
+  document.getElementById('resetHcBtn').addEventListener('click', function() {
+    clearInterval(hcInterval);
+    hcInterval = null;
+    hcFailTarget = -1;
+    hcEndpoints.forEach(function(ep) { ep.healthy = true; ep.failures = 0; });
+    buildHcViz();
+    document.getElementById('hcLog').innerHTML = '';
+  });
+
+  // ========== RETRY POLICIES ==========
+  var retryMax = 3;
+  var retryFailRate = 60;
+
+  document.getElementById('retryMaxSlider').addEventListener('input', function(e) {
+    retryMax = parseInt(e.target.value);
+    document.getElementById('retryMaxLabel').textContent = retryMax;
+  });
+
+  document.getElementById('retryFailSlider').addEventListener('input', function(e) {
+    retryFailRate = parseInt(e.target.value);
+    document.getElementById('retryFailLabel').textContent = retryFailRate;
+  });
+
+  document.getElementById('sendRetryBtn').addEventListener('click', function() {
+    var viz = document.getElementById('retryViz');
+    viz.innerHTML = '';
+    var attempt = 0;
+    var baseDelay = 100;
+
+    function tryOnce() {
+      if (attempt > retryMax) {
+        var final = document.createElement('div');
+        final.className = 'retry-attempt failure';
+        final.innerHTML = '<span class="retry-num">EXHAUSTED</span><span class="retry-result" style="color:#ef4444">All retries failed — 503 returned to client</span>';
+        viz.appendChild(final);
+        return;
+      }
+
+      var fail = Math.random() * 100 < retryFailRate;
+      var delay = attempt === 0 ? 0 : Math.floor(baseDelay * Math.pow(2, attempt - 1) * (0.5 + Math.random()));
+      var div = document.createElement('div');
+      div.className = 'retry-attempt ' + (fail ? 'failure' : 'success');
+      div.innerHTML = '<span class="retry-num">' + (attempt === 0 ? 'Initial' : 'Retry #' + attempt) + '</span>' +
+        '<span class="retry-result" style="color:' + (fail ? '#ef4444' : '#10b981') + '">' + (fail ? '503 Service Unavailable' : '200 OK ✓') + '</span>' +
+        (delay > 0 ? '<span class="retry-delay">+' + delay + 'ms jitter</span>' : '');
+      viz.appendChild(div);
+
+      if (fail) {
+        attempt++;
+        setTimeout(tryOnce, 500);
+      }
+    }
+    tryOnce();
+  });
+
+  document.getElementById('resetRetryBtn').addEventListener('click', function() {
+    document.getElementById('retryViz').innerHTML = '';
+  });
+
+  // ========== RATE LIMITING ==========
+  var rlLimit = 5;
+  var rlMode = 'local';
+  var rlTokens = 5;
+
+  document.querySelectorAll('.rl-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.rl-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      rlMode = btn.getAttribute('data-mode');
+    });
+  });
+
+  document.getElementById('rlLimitSlider').addEventListener('input', function(e) {
+    rlLimit = parseInt(e.target.value);
+    rlTokens = rlLimit;
+    document.getElementById('rlLimitLabel').textContent = rlLimit;
+    updateRlBucket();
+  });
+
+  function updateRlBucket() {
+    var pct = (rlTokens / rlLimit) * 100;
+    var fill = document.getElementById('rlBucketFill');
+    fill.style.setProperty('--fill', pct + '%');
+    fill.setAttribute('style', '');
+    // Set the fill via the after pseudo-element height
+    fill.innerHTML = '<div style="position:absolute;bottom:0;left:0;right:0;height:' + pct + '%;background:linear-gradient(0deg,rgba(245,158,11,0.6),rgba(245,158,11,0.2));transition:height 0.3s;border-radius:0 0 6px 6px;"></div>';
+    document.getElementById('rlBucketVal').textContent = rlTokens + ' / ' + rlLimit;
+  }
+  updateRlBucket();
+
+  document.getElementById('sendRlBtn').addEventListener('click', function() {
+    var results = document.getElementById('rlResults');
+    results.innerHTML = '';
+    rlTokens = rlLimit;
+    updateRlBucket();
+
+    var totalReqs = 10;
+    var sent = 0;
+
+    function sendOne() {
+      if (sent >= totalReqs) return;
+      sent++;
+      var allowed = rlTokens > 0;
+      if (allowed) rlTokens--;
+      updateRlBucket();
+
+      var req = document.createElement('div');
+      req.className = 'rl-req ' + (allowed ? 'allowed' : 'denied');
+      req.textContent = allowed ? '✓' : '✗';
+      req.title = (allowed ? '200 OK' : '429 Too Many Requests') + (rlMode === 'global' ? ' (global RLS)' : ' (local)');
+      results.appendChild(req);
+
+      setTimeout(sendOne, 200);
+    }
+    sendOne();
+
+    // Token refill
+    setTimeout(function() {
+      if (rlTokens < rlLimit) {
+        rlTokens = Math.min(rlTokens + Math.floor(rlLimit / 2), rlLimit);
+        updateRlBucket();
+      }
+    }, 2500);
+  });
+
+  document.getElementById('resetRlBtn').addEventListener('click', function() {
+    rlTokens = rlLimit;
+    updateRlBucket();
+    document.getElementById('rlResults').innerHTML = '';
+  });
+</script>

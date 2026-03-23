@@ -79,6 +79,26 @@ const grpcTopics = [
   { title: "Load Balancing", description: "Client-side vs proxy LB, xDS, service mesh integration", href: "#", status: "coming" },
 ];
 
+const rocksdbTopics = [
+  { title: "Compaction Strategies", description: "Leveled, Universal, FIFO — amplification tradeoffs, bloom filters, block cache", href: "/rocksdb/compaction/", status: "live" },
+  { title: "Write Path Deep Dive", description: "WAL, MemTable, flush triggers, and write stalls", href: "#", status: "coming" },
+];
+
+const dockerTopics = [
+  { title: "Container Internals", description: "Namespaces, cgroups, overlay FS, and container lifecycle", href: "/docker/container-internals/", status: "live" },
+  { title: "Image Building", description: "Layers, caching, multi-stage builds, and BuildKit", href: "#", status: "coming" },
+];
+
+const vitessTopics = [
+  { title: "Sharding", description: "VSchema, vindexes, query routing, and zero-downtime resharding", href: "/vitess/sharding/", status: "live" },
+  { title: "VReplication", description: "Stream-based data movement and materialized views", href: "#", status: "coming" },
+];
+
+const envoyTopics = [
+  { title: "Proxy Internals", description: "Request flow, load balancing, circuit breaking, xDS, and health checking", href: "/envoy/proxy-internals/", status: "live" },
+  { title: "TLS & mTLS", description: "Certificate management, SDS, and mutual TLS in service mesh", href: "#", status: "coming" },
+];
+
 const clickhouseTopics = [
   { title: "MergeTree Engine", description: "Parts, merges, sparse indexes, and column-oriented storage", href: "/clickhouse/mergetree/", status: "live" },
   { title: "Distributed Tables", description: "Sharding, replication, and cross-shard queries", href: "#", status: "coming" },
@@ -410,6 +430,78 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {grpcTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🛡️</span>
+      RocksDB
+    </h2>
+    <div class="topics-grid">
+      {rocksdbTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🐳</span>
+      Docker / Containers
+    </h2>
+    <div class="topics-grid">
+      {dockerTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔱</span>
+      Vitess
+    </h2>
+    <div class="topics-grid">
+      {vitessTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔺</span>
+      Envoy Proxy
+    </h2>
+    <div class="topics-grid">
+      {envoyTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

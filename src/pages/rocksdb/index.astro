@@ -1,0 +1,122 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "Compaction Strategies", description: "Leveled, Universal, and FIFO — interactive deep dive with amplification tradeoffs", href: "/rocksdb/compaction/", status: "live" },
+  { title: "Block Cache & Read Path", description: "LRU vs Clock cache, compressed blocks, and cache hit simulation", href: "#", status: "coming" },
+  { title: "Write-Ahead Log (WAL)", description: "Durability guarantees, sync modes, and recovery mechanics", href: "#", status: "coming" },
+  { title: "Bloom Filters", description: "Per-SST filters, bits-per-key tuning, and false positive rates", href: "#", status: "coming" },
+  { title: "Column Families", description: "Separate LSM trees sharing a WAL, isolation and use cases", href: "#", status: "coming" },
+  { title: "Rate Limiter & Flow Control", description: "Preventing write stalls with backpressure and I/O scheduling", href: "#", status: "coming" },
+  { title: "Compression", description: "Per-level compression strategies: Snappy, LZ4, Zstd tradeoffs", href: "#", status: "coming" },
+  { title: "Iterators & Merge Operator", description: "Point lookups, range scans, and custom merge semantics", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="RocksDB Internals" 
+  description="Interactive visualizations for understanding RocksDB architecture, compaction strategies, and performance tuning"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "RocksDB", href: "/rocksdb/" }]}
+>
+  <section class="section-header">
+    <h1>🪨 RocksDB Internals</h1>
+    <p>
+      RocksDB is an embeddable persistent key-value store optimized for fast storage.
+      Built on the LSM-tree architecture, it powers everything from TiKV to CockroachDB to MySQL's MyRocks.
+      These visualizations help you understand and tune its internals.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(245, 158, 11, 0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

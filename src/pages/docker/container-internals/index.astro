@@ -1,0 +1,1747 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Container Internals: Namespaces, Cgroups & Overlay FS" 
+  description="Interactive visualization of how containers work under the hood — Linux namespaces, cgroups v2, overlay filesystems, and the container lifecycle"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Docker", href: "/docker/" },
+    { label: "Container Internals", href: "/docker/container-internals/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐳 Container Internals</h1>
+      <p class="subtitle">Namespaces, Cgroups &amp; Overlay FS — What Really Happens Under the Hood</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Containers are <strong>not lightweight VMs</strong>. A VM runs a full guest kernel on
+          virtualized hardware. A container is just a <em>regular Linux process</em> with three
+          kernel features applied: <strong>namespaces</strong> for isolation (what the process can
+          <em>see</em>), <strong>cgroups</strong> for resource limits (what the process can <em>use</em>),
+          and a <strong>union filesystem</strong> for efficient image layering. The kernel is
+          <em>shared</em> — there is no second OS.
+        </p>
+      </div>
+    </section>
+
+    <!-- Containers vs VMs -->
+    <section class="compare-section">
+      <h2>🔀 Containers vs Virtual Machines</h2>
+      <p class="section-desc">Same goal (isolation), fundamentally different approach.</p>
+      <div class="compare-grid">
+        <div class="compare-card vm-card">
+          <h3>Virtual Machine</h3>
+          <div class="stack-viz" id="vmStack">
+            <div class="stack-layer hardware">Hardware</div>
+            <div class="stack-layer hypervisor">Hypervisor (KVM / VMware)</div>
+            <div class="stack-layer guest-os">Guest OS Kernel</div>
+            <div class="stack-layer guest-os">Guest OS Libs</div>
+            <div class="stack-layer app">App Process</div>
+          </div>
+          <p class="compare-note">Full kernel copy per VM. GBs of overhead. Minutes to boot.</p>
+        </div>
+        <div class="compare-card container-card">
+          <h3>Container</h3>
+          <div class="stack-viz" id="containerStack">
+            <div class="stack-layer hardware">Hardware</div>
+            <div class="stack-layer host-kernel">Host Kernel (shared)</div>
+            <div class="stack-layer namespace">Namespaces + Cgroups</div>
+            <div class="stack-layer app">App Process</div>
+          </div>
+          <p class="compare-note">Shared kernel. MBs of overhead. Milliseconds to start.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Linux Namespaces -->
+    <section class="ns-section">
+      <h2>📦 Linux Namespaces</h2>
+      <p class="section-desc">Each namespace type isolates a different aspect of the system. Click to explore.</p>
+
+      <div class="ns-tabs" id="nsTabs">
+        <button class="ns-tab active" data-ns="pid">PID</button>
+        <button class="ns-tab" data-ns="net">NET</button>
+        <button class="ns-tab" data-ns="mnt">MNT</button>
+        <button class="ns-tab" data-ns="uts">UTS</button>
+        <button class="ns-tab" data-ns="ipc">IPC</button>
+        <button class="ns-tab" data-ns="user">USER</button>
+      </div>
+
+      <div class="ns-display" id="nsDisplay">
+        <!-- Rendered by JS -->
+      </div>
+
+      <!-- Interactive Process Tree -->
+      <div class="ptree-section">
+        <h3>🌳 Process Tree: Namespace Isolation</h3>
+        <p class="section-desc">Host sees all processes. Each container sees only its own PID tree starting from PID 1.</p>
+        <div class="ptree-controls">
+          <button class="action-btn primary-btn" id="spawnContainerBtn">+ Spawn Container</button>
+          <button class="action-btn reset-btn" id="ptreeResetBtn">🔄 Reset</button>
+          <span class="ptree-view-label">View as:</span>
+          <button class="action-btn view-btn active" id="viewHostBtn">Host</button>
+          <button class="action-btn view-btn" id="viewC1Btn">Container 1</button>
+          <button class="action-btn view-btn" id="viewC2Btn" disabled>Container 2</button>
+          <button class="action-btn view-btn" id="viewC3Btn" disabled>Container 3</button>
+        </div>
+        <div class="ptree" id="ptree">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Cgroups v2 -->
+    <section class="cgroup-section">
+      <h2>⚙️ Cgroups v2: Resource Limits</h2>
+      <p class="section-desc">Cgroups control how much CPU, memory, and I/O a container can consume. Drag the sliders to see what happens when processes hit their limits.</p>
+
+      <div class="cgroup-demo">
+        <div class="cgroup-config">
+          <h3>Container Resource Limits</h3>
+          <div class="config-group">
+            <label>CPU Limit: <strong id="cgCpuLabel">100%</strong> (of 1 core)</label>
+            <input type="range" id="cgCpuSlider" min="10" max="100" value="100" step="5" class="slider">
+          </div>
+          <div class="config-group">
+            <label>Memory Limit: <strong id="cgMemLabel">512Mi</strong></label>
+            <input type="range" id="cgMemSlider" min="64" max="1024" value="512" step="64" class="slider">
+          </div>
+          <div class="config-group">
+            <label>IO Bandwidth: <strong id="cgIoLabel">100MB/s</strong></label>
+            <input type="range" id="cgIoSlider" min="10" max="200" value="100" step="10" class="slider">
+          </div>
+          <button class="action-btn chaos-btn" id="stressBtn">🔥 Stress Test Container</button>
+          <button class="action-btn reset-btn" id="cgResetBtn">🔄 Reset</button>
+        </div>
+
+        <div class="cgroup-meters">
+          <div class="meter-card">
+            <div class="meter-header">
+              <span class="meter-icon">⚡</span>
+              <span class="meter-title">CPU Usage</span>
+              <span class="meter-value" id="cpuMeterVal">0%</span>
+            </div>
+            <div class="meter-bar">
+              <div class="meter-fill cpu-fill" id="cpuMeterFill" style="width: 0%"></div>
+              <div class="meter-limit" id="cpuMeterLimit" style="left: 100%"></div>
+            </div>
+            <div class="meter-status" id="cpuStatus">Idle</div>
+          </div>
+          <div class="meter-card">
+            <div class="meter-header">
+              <span class="meter-icon">🧠</span>
+              <span class="meter-title">Memory Usage</span>
+              <span class="meter-value" id="memMeterVal">0 Mi</span>
+            </div>
+            <div class="meter-bar">
+              <div class="meter-fill mem-fill" id="memMeterFill" style="width: 0%"></div>
+              <div class="meter-limit" id="memMeterLimit" style="left: 100%"></div>
+            </div>
+            <div class="meter-status" id="memStatus">Idle</div>
+          </div>
+          <div class="meter-card">
+            <div class="meter-header">
+              <span class="meter-icon">💾</span>
+              <span class="meter-title">IO Throughput</span>
+              <span class="meter-value" id="ioMeterVal">0 MB/s</span>
+            </div>
+            <div class="meter-bar">
+              <div class="meter-fill io-fill" id="ioMeterFill" style="width: 0%"></div>
+              <div class="meter-limit" id="ioMeterLimit" style="left: 100%"></div>
+            </div>
+            <div class="meter-status" id="ioStatus">Idle</div>
+          </div>
+          <div class="cgroup-log" id="cgLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Overlay Filesystem -->
+    <section class="overlay-section">
+      <h2>📂 Union / Overlay Filesystem</h2>
+      <p class="section-desc">Container images are stacks of read-only layers. The container gets a thin writable layer on top. File lookups walk top-down.</p>
+
+      <div class="overlay-demo">
+        <div class="overlay-layers" id="overlayLayers">
+          <!-- Rendered by JS -->
+        </div>
+
+        <div class="overlay-controls">
+          <div class="overlay-lookup">
+            <h3>🔍 File Lookup</h3>
+            <p class="section-desc">Type a filename to see how overlay FS resolves it through layers.</p>
+            <div class="lookup-input-wrap">
+              <select id="fileLookupSelect" class="config-select">
+                <option value="/app/server.js">/app/server.js</option>
+                <option value="/etc/nginx/nginx.conf">/etc/nginx/nginx.conf</option>
+                <option value="/var/log/app.log">/var/log/app.log</option>
+                <option value="/usr/lib/libc.so">/usr/lib/libc.so</option>
+                <option value="/tmp/session.dat">/tmp/session.dat</option>
+                <option value="/app/config.json">/app/config.json</option>
+              </select>
+              <button class="action-btn primary-btn" id="lookupBtn">Lookup</button>
+            </div>
+            <div class="lookup-result" id="lookupResult"></div>
+          </div>
+
+          <div class="overlay-write">
+            <h3>✏️ Copy-on-Write</h3>
+            <p class="section-desc">Modifying a file from a lower layer copies it to the writable layer first.</p>
+            <button class="action-btn election-btn" id="cowBtn">Modify /etc/nginx/nginx.conf</button>
+            <button class="action-btn chaos-btn" id="deleteBtn">Delete /app/server.js</button>
+            <button class="action-btn reset-btn" id="overlayResetBtn">🔄 Reset</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Container Lifecycle -->
+    <section class="lifecycle-section">
+      <h2>🔄 Container Lifecycle</h2>
+      <p class="section-desc">Step through what happens when you run <code>docker run nginx</code>.</p>
+
+      <div class="lifecycle-timeline" id="lifecycleTimeline">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="lifecycle-controls">
+        <button class="action-btn primary-btn" id="lcNextBtn">▶ Next Step</button>
+        <button class="action-btn election-btn" id="lcAutoBtn">⏩ Auto Play</button>
+        <button class="action-btn reset-btn" id="lcResetBtn">🔄 Reset</button>
+      </div>
+
+      <div class="lifecycle-detail" id="lcDetail">
+        <div class="log-empty">Click "Next Step" to begin the container lifecycle...</div>
+      </div>
+    </section>
+
+    <!-- Image Layers -->
+    <section class="explain-section">
+      <h2>🏗️ Image Layers &amp; Builds</h2>
+      <p class="section-desc">Each Dockerfile instruction creates a layer. Understanding layers is key to fast builds.</p>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📋 One Instruction = One Layer</h3>
+          <p>
+            Each <code>RUN</code>, <code>COPY</code>, and <code>ADD</code> instruction creates a new
+            layer in the image. Layers are <strong>content-addressable</strong> (SHA256 hash) and
+            <strong>shared</strong> across images. If two images use the same base, they share those layers on disk.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Layer Caching</h3>
+          <p>
+            Docker caches each layer. If a layer's instruction and inputs haven't changed, the cached
+            version is reused. <strong>Order matters</strong>: put rarely-changing instructions (install deps)
+            before frequently-changing ones (copy source code) to maximize cache hits.
+          </p>
+        </div>
+        <div class="explain-card highlight-card">
+          <h3>🎯 Multi-Stage Builds</h3>
+          <p>
+            Use multiple <code>FROM</code> statements. Build in a fat image (compilers, tools), then
+            <code>COPY --from=builder</code> only the binary into a slim runtime image. Result:
+            <strong>10x smaller images</strong>, no build tools in production.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html" target="_blank">Linux namespaces(7)</a>, <a href="https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html" target="_blank">cgroups v2</a>, and <a href="https://docs.kernel.org/filesystems/overlayfs.html" target="_blank">OverlayFS</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Container%20Internals%20visualizer%20—%20namespaces%2C%20cgroups%2C%20overlay%20FS&url=https://systeminternals.dev/docker/container-internals/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/docker/container-internals/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/docker/container-internals/&t=Interactive%20Container%20Internals%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #06b6d4, #3b82f6, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  .section-desc code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(139, 92, 246, 0.05));
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #06b6d4; font-style: normal; font-weight: 500; }
+
+  /* Compare Section */
+  .compare-section {
+    margin-bottom: 50px;
+  }
+
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .compare-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .compare-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .stack-viz {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+
+  .stack-layer {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  .stack-layer.hardware {
+    background: rgba(107, 114, 128, 0.3);
+    color: #9ca3af;
+    border: 1px solid rgba(107, 114, 128, 0.4);
+  }
+
+  .stack-layer.hypervisor {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .stack-layer.guest-os {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fcd34d;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .stack-layer.host-kernel {
+    background: rgba(34, 197, 94, 0.15);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .stack-layer.namespace {
+    background: rgba(6, 182, 212, 0.15);
+    color: #67e8f9;
+    border: 1px solid rgba(6, 182, 212, 0.3);
+  }
+
+  .stack-layer.app {
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+  }
+
+  .compare-note {
+    font-size: 0.85rem;
+    color: #888;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* Namespace Section */
+  .ns-section {
+    margin-bottom: 50px;
+  }
+
+  .ns-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .ns-tab {
+    padding: 8px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #aaa;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ns-tab:hover {
+    border-color: rgba(6, 182, 212, 0.4);
+    color: #fff;
+  }
+
+  .ns-tab.active {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: rgba(6, 182, 212, 0.5);
+    color: #67e8f9;
+  }
+
+  .ns-display {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 30px;
+    min-height: 120px;
+  }
+
+  .ns-info-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .ns-info-desc {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+  }
+
+  .ns-info-desc strong { color: #fff; }
+  .ns-info-desc code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .ns-example {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .ns-example .host-label { color: #f87171; font-weight: 700; }
+  .ns-example .container-label { color: #4ade80; font-weight: 700; }
+
+  /* Process Tree */
+  .ptree-section {
+    margin-top: 30px;
+  }
+
+  .ptree-section h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .ptree-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .ptree-view-label {
+    color: #888;
+    font-size: 0.85rem;
+    margin-left: 8px;
+  }
+
+  .view-btn {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    background: rgba(255,255,255,0.05);
+    color: #888;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .view-btn.active {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: rgba(6, 182, 212, 0.4);
+    color: #67e8f9;
+  }
+
+  .view-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .ptree {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+
+  .ptree-line { color: #888; }
+  .ptree-line.highlight { color: #4ade80; background: rgba(74, 222, 128, 0.08); border-radius: 4px; }
+  .ptree-line .pid { color: #60a5fa; font-weight: 700; }
+  .ptree-line .proc { color: #e2e8f0; }
+  .ptree-line .ns-badge {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+  }
+  .ns-badge.host-ns { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+  .ns-badge.c1-ns { background: rgba(6, 182, 212, 0.2); color: #67e8f9; }
+  .ns-badge.c2-ns { background: rgba(168, 85, 247, 0.2); color: #c4b5fd; }
+  .ns-badge.c3-ns { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
+
+  /* Cgroups Section */
+  .cgroup-section {
+    margin-bottom: 50px;
+  }
+
+  .cgroup-demo {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+  }
+
+  .cgroup-config {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .cgroup-config h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+
+  .config-group {
+    margin-bottom: 16px;
+  }
+
+  .config-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 6px;
+  }
+
+  .config-group label strong {
+    color: #06b6d4;
+  }
+
+  .slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #06b6d4;
+    cursor: pointer;
+  }
+
+  .config-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ddd;
+    font-size: 0.85rem;
+  }
+
+  .cgroup-config .action-btn {
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .cgroup-meters {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .meter-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 16px 20px;
+  }
+
+  .meter-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .meter-icon { font-size: 1.2rem; }
+  .meter-title { font-size: 0.9rem; color: #fff; font-weight: 600; flex: 1; }
+  .meter-value { font-size: 0.9rem; color: #06b6d4; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+  .meter-bar {
+    height: 10px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 5px;
+    position: relative;
+    overflow: visible;
+    margin-bottom: 8px;
+  }
+
+  .meter-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease, background 0.3s;
+  }
+
+  .meter-fill.cpu-fill { background: linear-gradient(90deg, #06b6d4, #3b82f6); }
+  .meter-fill.mem-fill { background: linear-gradient(90deg, #8b5cf6, #a855f7); }
+  .meter-fill.io-fill { background: linear-gradient(90deg, #22c55e, #16a34a); }
+
+  .meter-fill.warning { background: linear-gradient(90deg, #f59e0b, #ef4444) !important; }
+  .meter-fill.critical { background: linear-gradient(90deg, #ef4444, #dc2626) !important; animation: meterPulse 0.5s infinite; }
+
+  @keyframes meterPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .meter-limit {
+    position: absolute;
+    top: -4px;
+    width: 3px;
+    height: 18px;
+    background: #ef4444;
+    border-radius: 2px;
+    transition: left 0.3s;
+    z-index: 2;
+  }
+
+  .meter-limit::after {
+    content: "limit";
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6rem;
+    color: #ef4444;
+    white-space: nowrap;
+  }
+
+  .meter-status {
+    font-size: 0.8rem;
+    color: #888;
+    font-weight: 500;
+  }
+
+  .meter-status.throttled { color: #f59e0b; }
+  .meter-status.oom { color: #ef4444; font-weight: 700; }
+
+  .cgroup-log {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #888;
+    line-height: 1.6;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  /* Overlay Section */
+  .overlay-section {
+    margin-bottom: 50px;
+  }
+
+  .overlay-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .overlay-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .overlay-layer {
+    border-radius: 10px;
+    padding: 14px 18px;
+    transition: all 0.4s;
+    position: relative;
+  }
+
+  .overlay-layer.writable {
+    background: rgba(74, 222, 128, 0.1);
+    border: 2px solid rgba(74, 222, 128, 0.3);
+  }
+
+  .overlay-layer.readonly {
+    background: rgba(96, 165, 250, 0.06);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+  }
+
+  .overlay-layer.searching {
+    border-color: rgba(251, 191, 36, 0.6);
+    background: rgba(251, 191, 36, 0.1);
+  }
+
+  .overlay-layer.found {
+    border-color: rgba(74, 222, 128, 0.6);
+    background: rgba(74, 222, 128, 0.1);
+  }
+
+  .layer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .layer-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .layer-badge {
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .layer-badge.rw {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+  }
+
+  .layer-badge.ro {
+    background: rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+  }
+
+  .layer-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .layer-file {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    color: #aaa;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.3s;
+  }
+
+  .layer-file.highlight {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+  }
+
+  .layer-file.whiteout {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    text-decoration: line-through;
+  }
+
+  .layer-file.cow {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+  }
+
+  .overlay-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .overlay-controls h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .lookup-input-wrap {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .lookup-input-wrap .config-select {
+    flex: 1;
+  }
+
+  .lookup-result {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.7;
+    min-height: 40px;
+  }
+
+  .overlay-write .action-btn {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  /* Lifecycle Section */
+  .lifecycle-section {
+    margin-bottom: 50px;
+  }
+
+  .lifecycle-timeline {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .lc-step {
+    flex: 1;
+    min-width: 100px;
+    padding: 14px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.4s;
+  }
+
+  .lc-step.active {
+    border-color: rgba(6, 182, 212, 0.6);
+    background: rgba(6, 182, 212, 0.1);
+    box-shadow: 0 0 25px rgba(6, 182, 212, 0.15);
+    transform: scale(1.03);
+  }
+
+  .lc-step.done {
+    border-color: rgba(74, 222, 128, 0.4);
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .lc-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .lc-label { font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .lc-sub { font-size: 0.65rem; color: #888; margin-top: 2px; }
+
+  .lifecycle-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .lifecycle-detail {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px;
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.7;
+    min-height: 80px;
+  }
+
+  .lifecycle-detail strong { color: #fff; }
+  .lifecycle-detail code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .log-empty { color: #555; }
+
+  /* Explain sections */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+
+  .explain-card p {
+    font-size: 0.95rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #06b6d4; font-style: normal; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    border-color: rgba(6, 182, 212, 0.3);
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(139, 92, 246, 0.04));
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #06b6d4, #3b82f6);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(6, 182, 212, 0.4);
+  }
+
+  .election-btn {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+  }
+
+  .election-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+  }
+
+  .chaos-btn {
+    background: linear-gradient(135deg, #f472b6, #ef4444);
+    color: white;
+  }
+
+  .chaos-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #06b6d4; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .compare-grid { grid-template-columns: 1fr; }
+    .cgroup-demo { grid-template-columns: 1fr; }
+    .overlay-demo { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .lifecycle-timeline { flex-direction: column; }
+    .ns-tabs { flex-wrap: wrap; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // CONTAINER INTERNALS INTERACTIVE VISUALIZATIONS
+  // ============================================================
+
+  // --- Namespace Data ---
+  var nsData = {
+    pid: {
+      title: "PID Namespace — Process Isolation",
+      desc: 'Each container gets its own <strong>PID numbering</strong>. The first process in the container is <strong>PID 1</strong> (init). The host kernel tracks the real PIDs — the container only sees its own processes. If PID 1 dies, the entire container stops.',
+      example: '<span class="host-label">HOST VIEW:</span>\nPID 1    systemd\nPID 4521 containerd\nPID 4590 nginx        ← container PID 1\nPID 4591 nginx worker  ← container PID 2\n\n<span class="container-label">CONTAINER VIEW:</span>\nPID 1    nginx        ← thinks it is PID 1\nPID 2    nginx worker'
+    },
+    net: {
+      title: "NET Namespace — Network Stack Isolation",
+      desc: 'Each container gets its own <strong>network interfaces</strong>, routing table, iptables rules, and port space. Docker creates a <code>veth</code> pair: one end in the container, one on the host bridge (<code>docker0</code>). Containers can bind to port 80 without conflicting — they each have their own port space.',
+      example: '<span class="host-label">HOST:</span>\neth0: 192.168.1.100\ndocker0: 172.17.0.1 (bridge)\nveth7a3f → container-1\nveth9b2c → container-2\n\n<span class="container-label">CONTAINER-1:</span>\neth0: 172.17.0.2  ← only sees this\nlo: 127.0.0.1'
+    },
+    mnt: {
+      title: "MNT Namespace — Filesystem Isolation",
+      desc: 'Each container gets its own <strong>mount table</strong>. The container sees the overlay filesystem as its root (<code>/</code>). Host mounts are invisible. <code>docker run -v</code> adds bind mounts into the container\'s mount namespace. <code>pivot_root</code> swaps the container\'s root to the overlay.',
+      example: '<span class="host-label">HOST:</span>\n/           ext4 (real root)\n/home       ext4\n/var/lib/docker  overlay layers\n\n<span class="container-label">CONTAINER:</span>\n/           overlay (image layers)\n/app        bind mount from host\n/proc       procfs\n/dev        devtmpfs'
+    },
+    uts: {
+      title: "UTS Namespace — Hostname Isolation",
+      desc: 'Each container gets its own <strong>hostname</strong> and <strong>domain name</strong>. By default, Docker sets the hostname to the short container ID. You can override it with <code>docker run --hostname myapp</code>. This is how containers identify themselves on the network.',
+      example: '<span class="host-label">HOST:</span>\n$ hostname\nprod-server-01\n\n<span class="container-label">CONTAINER (a1b2c3d4):</span>\n$ hostname\na1b2c3d4e5f6\n\n<span class="container-label">CONTAINER (--hostname myapp):</span>\n$ hostname\nmyapp'
+    },
+    ipc: {
+      title: "IPC Namespace — Inter-Process Communication",
+      desc: 'Isolates <strong>System V IPC</strong> objects (shared memory segments, message queues, semaphores) and <strong>POSIX message queues</strong>. Processes in different IPC namespaces cannot see each other\'s IPC resources. Use <code>docker run --ipc=host</code> to share the host\'s IPC namespace (needed for some databases).',
+      example: '<span class="host-label">HOST IPC:</span>\n$ ipcs\nShared Memory: 0x1234 (shmid=100)\nSemaphore:     0x5678 (semid=200)\n\n<span class="container-label">CONTAINER IPC (isolated):</span>\n$ ipcs\n(empty — cannot see host IPC)'
+    },
+    user: {
+      title: "USER Namespace — UID/GID Mapping",
+      desc: 'Maps <strong>user and group IDs</strong> inside the container to different IDs on the host. A process can be <strong>root (UID 0) inside the container</strong> but map to an unprivileged user (e.g., UID 100000) on the host. This is the foundation of <strong>rootless containers</strong> — even if an attacker escapes, they\'re unprivileged on the host.',
+      example: '<span class="host-label">HOST:</span>\nUID 100000 → runs container process\n(unprivileged!)\n\n<span class="container-label">CONTAINER:</span>\nUID 0 (root) → thinks it is root\n  ↳ mapped to host UID 100000\nUID 1000 (app) → mapped to host UID 101000'
+    }
+  };
+
+  // Render namespace info
+  function renderNsInfo(ns) {
+    var data = nsData[ns];
+    var el = document.getElementById("nsDisplay");
+    el.innerHTML = '<div class="ns-info-title">' + data.title + '</div>' +
+      '<div class="ns-info-desc">' + data.desc + '</div>' +
+      '<div class="ns-example">' + data.example + '</div>';
+  }
+
+  // Namespace tabs
+  var nsTabs = document.querySelectorAll(".ns-tab");
+  for (var i = 0; i < nsTabs.length; i++) {
+    nsTabs[i].addEventListener("click", function() {
+      for (var j = 0; j < nsTabs.length; j++) nsTabs[j].classList.remove("active");
+      this.classList.add("active");
+      renderNsInfo(this.getAttribute("data-ns"));
+    });
+  }
+
+  renderNsInfo("pid");
+
+  // --- Process Tree ---
+  var containers = [];
+  var nextHostPid = 100;
+  var currentView = "host";
+
+  var hostProcesses = [
+    { pid: 1, name: "systemd", ns: "host", indent: 0 },
+    { pid: 2, name: "kthreadd", ns: "host", indent: 0 },
+    { pid: 45, name: "sshd", ns: "host", indent: 1 },
+    { pid: 67, name: "containerd", ns: "host", indent: 1 },
+    { pid: 89, name: "dockerd", ns: "host", indent: 2 }
+  ];
+
+  var containerTemplates = [
+    [
+      { name: "nginx", cPid: 1 },
+      { name: "nginx: worker", cPid: 2 },
+      { name: "nginx: worker", cPid: 3 }
+    ],
+    [
+      { name: "node server.js", cPid: 1 },
+      { name: "node worker", cPid: 2 }
+    ],
+    [
+      { name: "python app.py", cPid: 1 },
+      { name: "gunicorn", cPid: 2 },
+      { name: "gunicorn", cPid: 3 },
+      { name: "gunicorn", cPid: 4 }
+    ]
+  ];
+
+  function spawnContainer() {
+    if (containers.length >= 3) return;
+    var idx = containers.length;
+    var template = containerTemplates[idx];
+    var procs = [];
+    for (var p = 0; p < template.length; p++) {
+      procs.push({
+        hostPid: nextHostPid++,
+        cPid: template[p].cPid,
+        name: template[p].name
+      });
+    }
+    containers.push({ id: idx + 1, procs: procs });
+
+    // Enable view button
+    var btnId = "viewC" + (idx + 1) + "Btn";
+    var btn = document.getElementById(btnId);
+    if (btn) btn.disabled = false;
+
+    renderPtree();
+  }
+
+  function renderPtree() {
+    var el = document.getElementById("ptree");
+    var html = "";
+
+    if (currentView === "host") {
+      // Show all host processes + container processes with host PIDs
+      for (var h = 0; h < hostProcesses.length; h++) {
+        var p = hostProcesses[h];
+        var indent = "";
+        for (var d = 0; d < p.indent; d++) indent += "  ";
+        html += '<div class="ptree-line">' + indent +
+          '<span class="pid">PID ' + p.pid + '</span>  <span class="proc">' + p.name + '</span>' +
+          '<span class="ns-badge host-ns">host</span></div>';
+      }
+      for (var c = 0; c < containers.length; c++) {
+        var cont = containers[c];
+        var nsCls = "c" + (c + 1) + "-ns";
+        for (var cp = 0; cp < cont.procs.length; cp++) {
+          var proc = cont.procs[cp];
+          var prefix = cp === 0 ? "    ├── " : "    │   ├── ";
+          html += '<div class="ptree-line highlight">' + prefix +
+            '<span class="pid">PID ' + proc.hostPid + '</span>  <span class="proc">' + proc.name + '</span>' +
+            '<span class="ns-badge ' + nsCls + '">container-' + cont.id + '</span></div>';
+        }
+      }
+    } else {
+      // Container view — show only that container's processes with container PIDs
+      var cIdx = parseInt(currentView.replace("c", "")) - 1;
+      if (cIdx >= 0 && cIdx < containers.length) {
+        var cont2 = containers[cIdx];
+        html += '<div class="ptree-line" style="color:#4ade80;margin-bottom:8px;">Container ' + cont2.id + ' sees only its own processes:</div>';
+        for (var cp2 = 0; cp2 < cont2.procs.length; cp2++) {
+          var proc2 = cont2.procs[cp2];
+          var indent2 = cp2 === 0 ? "" : "  ";
+          html += '<div class="ptree-line highlight">' + indent2 +
+            '<span class="pid">PID ' + proc2.cPid + '</span>  <span class="proc">' + proc2.name + '</span></div>';
+        }
+        html += '<div class="ptree-line" style="margin-top:12px;color:#666;">(' + (hostProcesses.length + containers.reduce(function(s, c2) { return s + c2.procs.length; }, 0) - cont2.procs.length) + ' other processes on the host are completely invisible)</div>';
+      }
+    }
+
+    if (containers.length === 0) {
+      html += '<div class="ptree-line" style="color:#555;margin-top:8px;">Click "Spawn Container" to add containers...</div>';
+    }
+
+    el.innerHTML = html;
+  }
+
+  document.getElementById("spawnContainerBtn").addEventListener("click", function() {
+    spawnContainer();
+    if (containers.length >= 3) this.disabled = true;
+  });
+
+  document.getElementById("ptreeResetBtn").addEventListener("click", function() {
+    containers = [];
+    nextHostPid = 100;
+    currentView = "host";
+    document.getElementById("spawnContainerBtn").disabled = false;
+    document.getElementById("viewC1Btn").disabled = true;
+    document.getElementById("viewC2Btn").disabled = true;
+    document.getElementById("viewC3Btn").disabled = true;
+    document.getElementById("viewHostBtn").classList.add("active");
+    document.getElementById("viewC1Btn").classList.remove("active");
+    document.getElementById("viewC2Btn").classList.remove("active");
+    document.getElementById("viewC3Btn").classList.remove("active");
+    renderPtree();
+  });
+
+  // View buttons
+  var viewBtns = ["viewHostBtn", "viewC1Btn", "viewC2Btn", "viewC3Btn"];
+  var viewMap = { viewHostBtn: "host", viewC1Btn: "c1", viewC2Btn: "c2", viewC3Btn: "c3" };
+
+  for (var v = 0; v < viewBtns.length; v++) {
+    (function(btnId) {
+      document.getElementById(btnId).addEventListener("click", function() {
+        if (this.disabled) return;
+        for (var vv = 0; vv < viewBtns.length; vv++) {
+          document.getElementById(viewBtns[vv]).classList.remove("active");
+        }
+        this.classList.add("active");
+        currentView = viewMap[btnId];
+        renderPtree();
+      });
+    })(viewBtns[v]);
+  }
+
+  renderPtree();
+
+  // --- Cgroups Demo ---
+  var cgStressInterval = null;
+  var cgCpuUsage = 0;
+  var cgMemUsage = 0;
+  var cgIoUsage = 0;
+  var cgTargetCpu = 0;
+  var cgTargetMem = 0;
+  var cgTargetIo = 0;
+
+  function getCgLimits() {
+    return {
+      cpu: parseInt(document.getElementById("cgCpuSlider").value),
+      mem: parseInt(document.getElementById("cgMemSlider").value),
+      io: parseInt(document.getElementById("cgIoSlider").value)
+    };
+  }
+
+  function updateCgLabels() {
+    document.getElementById("cgCpuLabel").textContent = document.getElementById("cgCpuSlider").value + "%";
+    document.getElementById("cgMemLabel").textContent = document.getElementById("cgMemSlider").value + "Mi";
+    document.getElementById("cgIoLabel").textContent = document.getElementById("cgIoSlider").value + "MB/s";
+
+    // Update limit markers
+    var limits = getCgLimits();
+    document.getElementById("cpuMeterLimit").style.left = limits.cpu + "%";
+    document.getElementById("memMeterLimit").style.left = (limits.mem / 1024 * 100) + "%";
+    document.getElementById("ioMeterLimit").style.left = (limits.io / 200 * 100) + "%";
+  }
+
+  document.getElementById("cgCpuSlider").addEventListener("input", updateCgLabels);
+  document.getElementById("cgMemSlider").addEventListener("input", updateCgLabels);
+  document.getElementById("cgIoSlider").addEventListener("input", updateCgLabels);
+  updateCgLabels();
+
+  function addCgLog(msg) {
+    var log = document.getElementById("cgLog");
+    var ts = new Date().toLocaleTimeString();
+    log.innerHTML += "<div>[" + ts + "] " + msg + "</div>";
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function stressTick() {
+    var limits = getCgLimits();
+
+    // Ramp up usage toward targets
+    cgCpuUsage += (cgTargetCpu - cgCpuUsage) * 0.15 + (Math.random() - 0.5) * 3;
+    cgMemUsage += (cgTargetMem - cgMemUsage) * 0.1 + (Math.random() - 0.5) * 5;
+    cgIoUsage += (cgTargetIo - cgIoUsage) * 0.12 + (Math.random() - 0.5) * 4;
+
+    // Apply limits
+    var cpuClamped = Math.min(cgCpuUsage, limits.cpu);
+    var cpuThrottled = cgCpuUsage > limits.cpu;
+    var memClamped = Math.min(cgMemUsage, limits.mem);
+    var memOom = cgMemUsage > limits.mem;
+    var ioClamped = Math.min(cgIoUsage, limits.io);
+    var ioThrottled = cgIoUsage > limits.io;
+
+    // Clamp display values
+    cpuClamped = Math.max(0, Math.min(100, cpuClamped));
+    memClamped = Math.max(0, Math.min(1024, memClamped));
+    ioClamped = Math.max(0, Math.min(200, ioClamped));
+
+    // CPU
+    var cpuPct = cpuClamped;
+    document.getElementById("cpuMeterFill").style.width = cpuPct + "%";
+    document.getElementById("cpuMeterVal").textContent = Math.round(cpuPct) + "%";
+    var cpuFillEl = document.getElementById("cpuMeterFill");
+    var cpuStatusEl = document.getElementById("cpuStatus");
+    cpuFillEl.className = "meter-fill cpu-fill";
+    cpuStatusEl.className = "meter-status";
+    if (cpuThrottled) {
+      cpuFillEl.classList.add("warning");
+      cpuStatusEl.className = "meter-status throttled";
+      cpuStatusEl.textContent = "THROTTLED — cfs_quota exceeded, process slowed to " + limits.cpu + "% of core";
+    } else if (cpuPct > 70) {
+      cpuStatusEl.textContent = "Running at " + Math.round(cpuPct) + "% CPU";
+    } else {
+      cpuStatusEl.textContent = "Normal";
+    }
+
+    // Memory
+    var memPct = (memClamped / 1024) * 100;
+    document.getElementById("memMeterFill").style.width = memPct + "%";
+    document.getElementById("memMeterVal").textContent = Math.round(memClamped) + " Mi";
+    var memFillEl = document.getElementById("memMeterFill");
+    var memStatusEl = document.getElementById("memStatus");
+    memFillEl.className = "meter-fill mem-fill";
+    memStatusEl.className = "meter-status";
+    if (memOom) {
+      memFillEl.classList.add("critical");
+      memStatusEl.className = "meter-status oom";
+      memStatusEl.textContent = "OOM KILLED! memory.max exceeded — kernel sent SIGKILL";
+      addCgLog('<span style="color:#ef4444">OOM Kill! Process exceeded ' + limits.mem + 'Mi memory limit. Container restarting...</span>');
+      // Reset after OOM
+      cgTargetMem = 0;
+      cgMemUsage = 0;
+      cgTargetCpu = cgTargetCpu * 0.3;
+      cgTargetIo = cgTargetIo * 0.3;
+    } else if (memPct > 80) {
+      memFillEl.classList.add("warning");
+      memStatusEl.className = "meter-status throttled";
+      memStatusEl.textContent = "High memory pressure — approaching limit";
+    } else {
+      memStatusEl.textContent = Math.round(memClamped) + "Mi / " + limits.mem + "Mi";
+    }
+
+    // IO
+    var ioPct = (ioClamped / 200) * 100;
+    document.getElementById("ioMeterFill").style.width = ioPct + "%";
+    document.getElementById("ioMeterVal").textContent = Math.round(ioClamped) + " MB/s";
+    var ioFillEl = document.getElementById("ioMeterFill");
+    var ioStatusEl = document.getElementById("ioStatus");
+    ioFillEl.className = "meter-fill io-fill";
+    ioStatusEl.className = "meter-status";
+    if (ioThrottled) {
+      ioFillEl.classList.add("warning");
+      ioStatusEl.className = "meter-status throttled";
+      ioStatusEl.textContent = "IO THROTTLED — blkio.max capping at " + limits.io + " MB/s";
+    } else {
+      ioStatusEl.textContent = Math.round(ioClamped) + " MB/s throughput";
+    }
+  }
+
+  document.getElementById("stressBtn").addEventListener("click", function() {
+    if (cgStressInterval) {
+      clearInterval(cgStressInterval);
+    }
+    cgTargetCpu = 75 + Math.random() * 50;
+    cgTargetMem = 300 + Math.random() * 600;
+    cgTargetIo = 80 + Math.random() * 150;
+    addCgLog('<span style="color:#f59e0b">Starting stress test: CPU target=' + Math.round(cgTargetCpu) + '%, Mem target=' + Math.round(cgTargetMem) + 'Mi, IO target=' + Math.round(cgTargetIo) + 'MB/s</span>');
+    cgStressInterval = setInterval(stressTick, 200);
+  });
+
+  document.getElementById("cgResetBtn").addEventListener("click", function() {
+    if (cgStressInterval) clearInterval(cgStressInterval);
+    cgStressInterval = null;
+    cgCpuUsage = 0; cgMemUsage = 0; cgIoUsage = 0;
+    cgTargetCpu = 0; cgTargetMem = 0; cgTargetIo = 0;
+    document.getElementById("cpuMeterFill").style.width = "0%";
+    document.getElementById("memMeterFill").style.width = "0%";
+    document.getElementById("ioMeterFill").style.width = "0%";
+    document.getElementById("cpuMeterVal").textContent = "0%";
+    document.getElementById("memMeterVal").textContent = "0 Mi";
+    document.getElementById("ioMeterVal").textContent = "0 MB/s";
+    document.getElementById("cpuMeterFill").className = "meter-fill cpu-fill";
+    document.getElementById("memMeterFill").className = "meter-fill mem-fill";
+    document.getElementById("ioMeterFill").className = "meter-fill io-fill";
+    document.getElementById("cpuStatus").textContent = "Idle";
+    document.getElementById("cpuStatus").className = "meter-status";
+    document.getElementById("memStatus").textContent = "Idle";
+    document.getElementById("memStatus").className = "meter-status";
+    document.getElementById("ioStatus").textContent = "Idle";
+    document.getElementById("ioStatus").className = "meter-status";
+    document.getElementById("cgLog").innerHTML = "";
+  });
+
+  // --- Overlay Filesystem ---
+  var overlayState = {
+    layers: [
+      {
+        name: "Container Layer",
+        type: "rw",
+        files: [],
+        instruction: "writable"
+      },
+      {
+        name: "Layer 4: COPY . /app",
+        type: "ro",
+        files: ["/app/server.js", "/app/package.json", "/app/config.json"],
+        instruction: "COPY . /app"
+      },
+      {
+        name: "Layer 3: RUN npm install",
+        type: "ro",
+        files: ["/app/node_modules/express", "/app/node_modules/lodash"],
+        instruction: "RUN npm install"
+      },
+      {
+        name: "Layer 2: RUN apt-get install nginx",
+        type: "ro",
+        files: ["/usr/sbin/nginx", "/etc/nginx/nginx.conf", "/var/log/nginx/"],
+        instruction: "RUN apt-get install"
+      },
+      {
+        name: "Layer 1: Ubuntu 22.04 Base",
+        type: "ro",
+        files: ["/usr/lib/libc.so", "/bin/bash", "/etc/hosts"],
+        instruction: "FROM ubuntu:22.04"
+      }
+    ]
+  };
+
+  var origOverlayState = JSON.parse(JSON.stringify(overlayState));
+
+  function renderOverlay(highlightFile, searchLayer, foundLayer) {
+    var el = document.getElementById("overlayLayers");
+    var html = "";
+    for (var i = 0; i < overlayState.layers.length; i++) {
+      var layer = overlayState.layers[i];
+      var cls = "overlay-layer " + (layer.type === "rw" ? "writable" : "readonly");
+      if (searchLayer === i) cls += " searching";
+      if (foundLayer === i) cls += " found";
+
+      html += '<div class="' + cls + '">';
+      html += '<div class="layer-header">';
+      html += '<span class="layer-name">' + layer.name + '</span>';
+      html += '<span class="layer-badge ' + (layer.type === "rw" ? "rw" : "ro") + '">' + (layer.type === "rw" ? "R/W" : "R/O") + '</span>';
+      html += '</div>';
+      html += '<div class="layer-files">';
+      for (var f = 0; f < layer.files.length; f++) {
+        var fileCls = "layer-file";
+        if (highlightFile && layer.files[f] === highlightFile && foundLayer === i) fileCls += " highlight";
+        if (layer.files[f].indexOf(".wh.") !== -1) fileCls += " whiteout";
+        if (layer.files[f].indexOf("[COW]") !== -1) fileCls += " cow";
+        html += '<span class="' + fileCls + '">' + layer.files[f] + '</span>';
+      }
+      if (layer.files.length === 0 && layer.type === "rw") {
+        html += '<span class="layer-file" style="color:#555;font-style:italic;">empty</span>';
+      }
+      html += '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  // File lookup map
+  var fileLayerMap = {
+    "/app/server.js": 1,
+    "/etc/nginx/nginx.conf": 2,
+    "/var/log/app.log": -1,
+    "/usr/lib/libc.so": 4,
+    "/tmp/session.dat": -1,
+    "/app/config.json": 1
+  };
+
+  function lookupFile() {
+    var file = document.getElementById("fileLookupSelect").value;
+    var resultEl = document.getElementById("lookupResult");
+
+    // Check writable layer first for COW copies
+    var cowIdx = -1;
+    for (var f = 0; f < overlayState.layers[0].files.length; f++) {
+      if (overlayState.layers[0].files[f] === file || overlayState.layers[0].files[f] === file + " [COW]") {
+        cowIdx = 0;
+        break;
+      }
+    }
+    // Check for whiteout
+    var whiteout = false;
+    for (var wf = 0; wf < overlayState.layers[0].files.length; wf++) {
+      if (overlayState.layers[0].files[wf] === ".wh." + file.split("/").pop()) {
+        whiteout = true;
+        break;
+      }
+    }
+
+    if (whiteout) {
+      renderOverlay(null, null, null);
+      resultEl.innerHTML = '<span style="color:#ef4444;">✗ File "' + file + '" has been deleted (whiteout in container layer)</span>';
+      return;
+    }
+
+    var targetLayer = cowIdx >= 0 ? 0 : (fileLayerMap[file] !== undefined ? fileLayerMap[file] : -1);
+
+    // Animate search through layers
+    var currentSearch = 0;
+    resultEl.innerHTML = '<span style="color:#fbbf24;">Searching...</span>';
+
+    function searchStep() {
+      if (currentSearch > Math.min(targetLayer >= 0 ? targetLayer : overlayState.layers.length - 1, overlayState.layers.length - 1)) {
+        if (targetLayer < 0) {
+          renderOverlay(null, null, null);
+          resultEl.innerHTML = '<span style="color:#ef4444;">✗ File "' + file + '" not found in any layer</span>';
+        } else {
+          renderOverlay(file, null, targetLayer);
+          var layerName = overlayState.layers[targetLayer].name;
+          resultEl.innerHTML = '<span style="color:#4ade80;">✓ Found "' + file + '" in ' + layerName + '</span>';
+          if (cowIdx >= 0) {
+            resultEl.innerHTML += '<br><span style="color:#fbbf24;">(copy-on-write version in container layer)</span>';
+          }
+        }
+        return;
+      }
+      renderOverlay(file, currentSearch, null);
+      currentSearch++;
+      setTimeout(searchStep, 400);
+    }
+
+    searchStep();
+  }
+
+  document.getElementById("lookupBtn").addEventListener("click", lookupFile);
+
+  // Copy-on-write demo
+  document.getElementById("cowBtn").addEventListener("click", function() {
+    var file = "/etc/nginx/nginx.conf";
+    // Copy to writable layer
+    var alreadyCopied = false;
+    for (var f = 0; f < overlayState.layers[0].files.length; f++) {
+      if (overlayState.layers[0].files[f].indexOf(file) !== -1) {
+        alreadyCopied = true;
+        break;
+      }
+    }
+    if (!alreadyCopied) {
+      overlayState.layers[0].files.push(file + " [COW]");
+    }
+    renderOverlay(file + " [COW]", null, 0);
+    document.getElementById("lookupResult").innerHTML = '<span style="color:#fbbf24;">✏️ Copy-on-Write: "' + file + '" copied from Layer 2 → Container Layer, then modified. Original in Layer 2 is unchanged.</span>';
+  });
+
+  // Delete demo
+  document.getElementById("deleteBtn").addEventListener("click", function() {
+    var file = "/app/server.js";
+    var alreadyDeleted = false;
+    for (var f = 0; f < overlayState.layers[0].files.length; f++) {
+      if (overlayState.layers[0].files[f] === ".wh.server.js") {
+        alreadyDeleted = true;
+        break;
+      }
+    }
+    if (!alreadyDeleted) {
+      overlayState.layers[0].files.push(".wh.server.js");
+    }
+    renderOverlay(null, null, null);
+    renderOverlay(null, null, null);
+    document.getElementById("lookupResult").innerHTML = '<span style="color:#ef4444;">🗑️ Whiteout: ".wh.server.js" created in container layer. File appears deleted even though it still exists in Layer 4. Image layer is NOT modified.</span>';
+  });
+
+  document.getElementById("overlayResetBtn").addEventListener("click", function() {
+    overlayState = JSON.parse(JSON.stringify(origOverlayState));
+    renderOverlay(null, null, null);
+    document.getElementById("lookupResult").innerHTML = "";
+  });
+
+  renderOverlay(null, null, null);
+
+  // --- Container Lifecycle ---
+  var lcSteps = [
+    {
+      icon: "🖥️",
+      label: "docker run",
+      sub: "CLI → daemon",
+      detail: 'You type <code>docker run -d -p 80:80 nginx</code>. The Docker CLI sends a request to the <strong>Docker daemon</strong> (dockerd) via the Unix socket <code>/var/run/docker.sock</code>. The daemon validates the request and begins orchestrating the container creation.'
+    },
+    {
+      icon: "📥",
+      label: "Pull Image",
+      sub: "Registry → layers",
+      detail: 'The daemon checks if the image exists locally. If not, it <strong>pulls layers</strong> from the registry (e.g., Docker Hub). Each layer is downloaded independently and verified by SHA256 hash. Layers shared with other images are skipped — this is why second pulls are fast.'
+    },
+    {
+      icon: "📦",
+      label: "Create Namespaces",
+      sub: "clone(NEWPID|NEWNET|...)",
+      detail: 'The runtime calls <code>clone()</code> with namespace flags: <strong>CLONE_NEWPID</strong>, <strong>CLONE_NEWNET</strong>, <strong>CLONE_NEWNS</strong>, <strong>CLONE_NEWUTS</strong>, <strong>CLONE_NEWIPC</strong>, <strong>CLONE_NEWUSER</strong>. This creates isolated namespaces. The child process starts in a fresh environment — it cannot see host processes, network, or filesystem.'
+    },
+    {
+      icon: "⚙️",
+      label: "Apply Cgroups",
+      sub: "cpu.max, memory.max",
+      detail: 'The container runtime creates a cgroup under <code>/sys/fs/cgroup/system.slice/docker-&lt;id&gt;.scope/</code> and writes resource limits: <strong>cpu.max</strong> (CPU quota), <strong>memory.max</strong> (memory limit), <strong>io.max</strong> (IO throttle). The container process is moved into this cgroup.'
+    },
+    {
+      icon: "📂",
+      label: "Mount Overlay FS",
+      sub: "pivot_root",
+      detail: 'The overlay filesystem is assembled: image layers as <strong>lowerdir</strong> (read-only), a new directory as <strong>upperdir</strong> (writable), and a <strong>workdir</strong> for atomicity. Then <code>pivot_root()</code> swaps the container\'s root filesystem to this overlay mount. The host root becomes invisible.'
+    },
+    {
+      icon: "🚀",
+      label: "exec",
+      sub: "PID 1 starts",
+      detail: 'Finally, <code>execve()</code> replaces the setup process with the container\'s <strong>entrypoint</strong> (e.g., <code>nginx -g "daemon off;"</code>). This becomes <strong>PID 1</strong> inside the container\'s PID namespace. The container is now running. If PID 1 exits, the container stops.'
+    }
+  ];
+
+  var lcCurrentStep = -1;
+  var lcAutoInterval = null;
+
+  function renderLifecycle() {
+    var el = document.getElementById("lifecycleTimeline");
+    var html = "";
+    for (var i = 0; i < lcSteps.length; i++) {
+      var cls = "lc-step";
+      if (i === lcCurrentStep) cls += " active";
+      else if (i < lcCurrentStep) cls += " done";
+      html += '<div class="' + cls + '">';
+      html += '<div class="lc-icon">' + lcSteps[i].icon + '</div>';
+      html += '<div class="lc-label">' + lcSteps[i].label + '</div>';
+      html += '<div class="lc-sub">' + lcSteps[i].sub + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function showLcDetail() {
+    var el = document.getElementById("lcDetail");
+    if (lcCurrentStep < 0 || lcCurrentStep >= lcSteps.length) {
+      el.innerHTML = '<div class="log-empty">Click "Next Step" to begin the container lifecycle...</div>';
+      return;
+    }
+    el.innerHTML = '<strong>Step ' + (lcCurrentStep + 1) + '/' + lcSteps.length + ': ' + lcSteps[lcCurrentStep].label + '</strong><br><br>' + lcSteps[lcCurrentStep].detail;
+  }
+
+  document.getElementById("lcNextBtn").addEventListener("click", function() {
+    if (lcCurrentStep < lcSteps.length - 1) {
+      lcCurrentStep++;
+      renderLifecycle();
+      showLcDetail();
+    }
+    if (lcCurrentStep >= lcSteps.length - 1) {
+      this.disabled = true;
+    }
+  });
+
+  document.getElementById("lcAutoBtn").addEventListener("click", function() {
+    if (lcAutoInterval) return;
+    var btn = this;
+    btn.disabled = true;
+    lcCurrentStep = -1;
+
+    function autoStep() {
+      if (lcCurrentStep < lcSteps.length - 1) {
+        lcCurrentStep++;
+        renderLifecycle();
+        showLcDetail();
+      } else {
+        clearInterval(lcAutoInterval);
+        lcAutoInterval = null;
+        btn.disabled = false;
+        document.getElementById("lcNextBtn").disabled = true;
+      }
+    }
+
+    lcAutoInterval = setInterval(autoStep, 1800);
+    autoStep();
+  });
+
+  document.getElementById("lcResetBtn").addEventListener("click", function() {
+    if (lcAutoInterval) {
+      clearInterval(lcAutoInterval);
+      lcAutoInterval = null;
+    }
+    lcCurrentStep = -1;
+    renderLifecycle();
+    showLcDetail();
+    document.getElementById("lcNextBtn").disabled = false;
+    document.getElementById("lcAutoBtn").disabled = false;
+  });
+
+  renderLifecycle();
+  showLcDetail();
+</script>

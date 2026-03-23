@@ -1,0 +1,1561 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="RocksDB Compaction Strategies Deep Dive" 
+  description="Interactive visualization of Leveled, Universal, and FIFO compaction in RocksDB with write/read/space amplification tradeoffs"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "RocksDB", href: "/rocksdb/" },
+    { label: "Compaction Strategies", href: "/rocksdb/compaction/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗜️ RocksDB Compaction Strategies</h1>
+      <p class="subtitle">Leveled, Universal &amp; FIFO — See the Tradeoffs in Action</p>
+    </header>
+
+    <!-- Strategy Selector -->
+    <section class="strategy-selector">
+      <div class="strategy-tabs">
+        <button class="strategy-tab active" data-strategy="leveled">
+          <span class="tab-icon">📊</span>
+          <span class="tab-label">Leveled</span>
+          <span class="tab-desc">Default — balanced</span>
+        </button>
+        <button class="strategy-tab" data-strategy="universal">
+          <span class="tab-icon">🌊</span>
+          <span class="tab-label">Universal</span>
+          <span class="tab-desc">Write-optimized</span>
+        </button>
+        <button class="strategy-tab" data-strategy="fifo">
+          <span class="tab-icon">⏳</span>
+          <span class="tab-label">FIFO</span>
+          <span class="tab-desc">TTL data</span>
+        </button>
+      </div>
+      <div class="strategy-description" id="strategyDesc">
+        Leveled compaction: each level is 10x larger. Files with overlapping key ranges are merged into the next level. Best balance of read/write/space amplification.
+      </div>
+    </section>
+
+    <!-- Controls -->
+    <section class="controls-section">
+      <div class="control-group">
+        <button id="writeBtn" class="action-btn write-btn">✏️ Write KV</button>
+        <button id="write10Btn" class="action-btn write-btn-secondary">⚡ Write 10</button>
+        <button id="write50Btn" class="action-btn write-btn-tertiary">🔥 Write 50</button>
+        <button id="readBtn" class="action-btn read-btn">🔍 Read Key</button>
+        <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Amplification Meters -->
+    <section class="amp-meters">
+      <div class="meter">
+        <div class="meter-header">
+          <span class="meter-label">Write Amplification</span>
+          <span class="meter-value" id="writeAmpVal">1.0x</span>
+        </div>
+        <div class="meter-bar">
+          <div class="meter-fill write-amp-fill" id="writeAmpBar" style="width: 5%"></div>
+        </div>
+        <span class="meter-hint">Bytes written to disk / bytes from app</span>
+      </div>
+      <div class="meter">
+        <div class="meter-header">
+          <span class="meter-label">Read Amplification</span>
+          <span class="meter-value" id="readAmpVal">1</span>
+        </div>
+        <div class="meter-bar">
+          <div class="meter-fill read-amp-fill" id="readAmpBar" style="width: 5%"></div>
+        </div>
+        <span class="meter-hint">Locations checked per read</span>
+      </div>
+      <div class="meter">
+        <div class="meter-header">
+          <span class="meter-label">Space Amplification</span>
+          <span class="meter-value" id="spaceAmpVal">1.0x</span>
+        </div>
+        <div class="meter-bar">
+          <div class="meter-fill space-amp-fill" id="spaceAmpBar" style="width: 5%"></div>
+        </div>
+        <span class="meter-hint">Disk used / actual data size</span>
+      </div>
+    </section>
+
+    <!-- Stats Row -->
+    <section class="stats-row">
+      <div class="stat">
+        <span class="stat-label">Writes</span>
+        <span class="stat-value" id="writeCount">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Flushes</span>
+        <span class="stat-value" id="flushCount">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Compactions</span>
+        <span class="stat-value" id="compactionCount">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Unique Keys</span>
+        <span class="stat-value" id="uniqueKeyCount">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Total SSTs</span>
+        <span class="stat-value" id="totalSstCount">0</span>
+      </div>
+    </section>
+
+    <!-- Main LSM Visualization -->
+    <section class="lsm-viz">
+      <!-- WAL -->
+      <div class="component wal-component">
+        <div class="component-header">
+          <h3>📋 WAL (Write-Ahead Log)</h3>
+          <span class="component-info">Append-only for crash recovery</span>
+        </div>
+        <div class="wal-bar" id="walBar">
+          <div class="wal-entries" id="walEntries"></div>
+        </div>
+      </div>
+
+      <!-- MemTable -->
+      <div class="component memtable-component">
+        <div class="component-header">
+          <h3>📝 MemTable (RAM)</h3>
+          <span class="component-info">Sorted skip-list — fast inserts</span>
+        </div>
+        <div class="memtable-bar">
+          <div class="memtable-fill" id="memtableFill"></div>
+          <span class="memtable-label" id="memtableLabel">0 / 6 keys</span>
+        </div>
+        <div class="memtable-keys" id="memtableKeys"></div>
+      </div>
+
+      <!-- Flush Arrow -->
+      <div class="arrow-container" id="flushArrow">
+        <div class="arrow">↓</div>
+        <span class="arrow-label">Flush to L0 (sequential write)</span>
+      </div>
+
+      <!-- Levels -->
+      <div class="levels-container" id="levelsContainer">
+        <!-- Levels are rendered dynamically -->
+      </div>
+    </section>
+
+    <!-- Activity Log -->
+    <section class="log-section">
+      <h3>📜 Activity Log</h3>
+      <div class="log-container" id="activityLog">
+        <div class="log-entry">System ready. Select a compaction strategy and start writing.</div>
+      </div>
+    </section>
+
+    <!-- Column Families -->
+    <section class="cf-section">
+      <h2>🗃️ Column Families</h2>
+      <p class="section-desc">Each column family has its own LSM-tree but shares a single WAL. This lets you tune compaction and compression per data type.</p>
+      <div class="cf-diagram">
+        <div class="cf-wal-shared">
+          <div class="cf-wal-label">Shared WAL</div>
+        </div>
+        <div class="cf-trees">
+          <div class="cf-tree">
+            <div class="cf-name">default</div>
+            <div class="cf-levels">
+              <span class="cf-level">Mem</span>
+              <span class="cf-level">L0</span>
+              <span class="cf-level">L1</span>
+              <span class="cf-level">L2</span>
+            </div>
+            <div class="cf-note">General data</div>
+          </div>
+          <div class="cf-tree">
+            <div class="cf-name">write</div>
+            <div class="cf-levels">
+              <span class="cf-level">Mem</span>
+              <span class="cf-level">L0</span>
+              <span class="cf-level">L1</span>
+              <span class="cf-level">L2</span>
+            </div>
+            <div class="cf-note">MVCC locks &amp; writes</div>
+          </div>
+          <div class="cf-tree">
+            <div class="cf-name">lock</div>
+            <div class="cf-levels">
+              <span class="cf-level">Mem</span>
+              <span class="cf-level">L0</span>
+              <span class="cf-level">L1</span>
+            </div>
+            <div class="cf-note">Transaction locks (small)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bloom Filter Calculator -->
+    <section class="bloom-section">
+      <h2>🌸 Bloom Filter Calculator</h2>
+      <p class="section-desc">Bloom filters let RocksDB skip SST files that definitely don't contain a key. More bits per key = fewer false positives = fewer wasted reads.</p>
+      <div class="bloom-calc">
+        <div class="bloom-input-group">
+          <label for="bloomBits">Bits per key:</label>
+          <input type="range" id="bloomBits" min="1" max="20" value="10" />
+          <span id="bloomBitsVal">10</span>
+        </div>
+        <div class="bloom-input-group">
+          <label for="bloomKeys">Keys in SST:</label>
+          <input type="range" id="bloomKeys" min="100" max="100000" value="10000" step="100" />
+          <span id="bloomKeysVal">10,000</span>
+        </div>
+        <div class="bloom-results">
+          <div class="bloom-result">
+            <span class="bloom-result-label">False positive rate</span>
+            <span class="bloom-result-value" id="bloomFPR">0.82%</span>
+          </div>
+          <div class="bloom-result">
+            <span class="bloom-result-label">Filter size</span>
+            <span class="bloom-result-value" id="bloomSize">12.2 KB</span>
+          </div>
+          <div class="bloom-result">
+            <span class="bloom-result-label">Reads saved per miss</span>
+            <span class="bloom-result-value" id="bloomSaved">~99.2%</span>
+          </div>
+        </div>
+        <div class="bloom-visual" id="bloomVisual"></div>
+      </div>
+    </section>
+
+    <!-- Block Cache -->
+    <section class="cache-section">
+      <h2>💾 Block Cache</h2>
+      <p class="section-desc">RocksDB caches hot data blocks in memory. Choose between LRU (simple, predictable) and Clock (lower lock contention, better for multi-threaded reads).</p>
+      <div class="cache-comparison">
+        <div class="cache-card">
+          <h4>LRU Cache</h4>
+          <div class="cache-detail">Mutex-protected doubly linked list</div>
+          <div class="cache-pros">
+            <div class="pro">✓ Predictable eviction</div>
+            <div class="pro">✓ Well understood</div>
+            <div class="pro">✓ Strict LRU ordering</div>
+          </div>
+          <div class="cache-cons">
+            <div class="con">✗ Lock contention at high QPS</div>
+            <div class="con">✗ Per-shard mutex</div>
+          </div>
+          <code>block_cache = NewLRUCache(8 &lt;&lt; 30);</code>
+        </div>
+        <div class="cache-card">
+          <h4>Clock Cache</h4>
+          <div class="cache-detail">Lock-free clock eviction algorithm</div>
+          <div class="cache-pros">
+            <div class="pro">✓ Better multi-thread scaling</div>
+            <div class="pro">✓ Lower tail latency</div>
+            <div class="pro">✓ Less lock contention</div>
+          </div>
+          <div class="cache-cons">
+            <div class="con">✗ Approximate LRU</div>
+            <div class="con">✗ Slightly more memory</div>
+          </div>
+          <code>block_cache = NewClockCache(8 &lt;&lt; 30);</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanation Cards -->
+    <section class="explanation-section">
+      <div class="explain-card">
+        <h3>📊 Leveled Compaction (Default)</h3>
+        <p>
+          Each level is <strong>10x larger</strong> than the previous. When L(n) fills up, 
+          RocksDB picks a file and merges it with overlapping files in L(n+1).
+          Files within each level (except L0) have <strong>non-overlapping key ranges</strong>.
+          Best for read-heavy workloads: point lookups only need to check one file per level.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🌊 Universal Compaction</h3>
+        <p>
+          All SSTs can have <strong>overlapping key ranges</strong>. Compaction picks sorted runs
+          based on size ratio. Fewer compactions means <strong>lower write amplification</strong>
+          (often 2-3x less than leveled), but reads may need to check more files.
+          Ideal for write-heavy workloads where write throughput matters most.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>⏳ FIFO Compaction</h3>
+        <p>
+          The simplest strategy: when total data exceeds a size limit, the
+          <strong>oldest SST files are dropped</strong>. No merging, no rewriting.
+          Zero write amplification beyond the initial flush. Perfect for
+          <strong>time-series / TTL data</strong> where old data can be discarded.
+        </p>
+      </div>
+    </section>
+
+    <!-- Tradeoffs Table -->
+    <section class="tradeoffs-section">
+      <h2>⚖️ Amplification Tradeoffs</h2>
+      <div class="tradeoffs-cards">
+        <div class="tradeoff-card">
+          <div class="tradeoff-header leveled-header">Leveled</div>
+          <div class="tradeoff-row">
+            <span>Write Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar high-bar" style="width:80%"></div>
+            </div>
+            <span class="tradeoff-rating">High (10-30x)</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Read Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar low-bar" style="width:25%"></div>
+            </div>
+            <span class="tradeoff-rating">Low</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Space Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar low-bar" style="width:20%"></div>
+            </div>
+            <span class="tradeoff-rating">Low (1.1x)</span>
+          </div>
+        </div>
+        <div class="tradeoff-card">
+          <div class="tradeoff-header universal-header">Universal</div>
+          <div class="tradeoff-row">
+            <span>Write Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar low-bar" style="width:30%"></div>
+            </div>
+            <span class="tradeoff-rating">Low</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Read Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar medium-bar" style="width:55%"></div>
+            </div>
+            <span class="tradeoff-rating">Medium</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Space Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar high-bar" style="width:70%"></div>
+            </div>
+            <span class="tradeoff-rating">High (2x)</span>
+          </div>
+        </div>
+        <div class="tradeoff-card">
+          <div class="tradeoff-header fifo-header">FIFO</div>
+          <div class="tradeoff-row">
+            <span>Write Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar lowest-bar" style="width:10%"></div>
+            </div>
+            <span class="tradeoff-rating">Minimal (1x)</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Read Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar high-bar" style="width:85%"></div>
+            </div>
+            <span class="tradeoff-rating">High</span>
+          </div>
+          <div class="tradeoff-row">
+            <span>Space Amp</span>
+            <div class="tradeoff-bar-container">
+              <div class="tradeoff-bar medium-bar" style="width:50%"></div>
+            </div>
+            <span class="tradeoff-rating">Medium</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on the <a href="https://github.com/facebook/rocksdb/wiki/Compaction" target="_blank">RocksDB Wiki</a> and <a href="https://arxiv.org/abs/2202.04522" target="_blank">LSM-tree compaction research</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20RocksDB%20compaction%20visualization%20-%20Leveled%20vs%20Universal%20vs%20FIFO&url=https://systeminternals.dev/rocksdb/compaction/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/rocksdb/compaction/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #f59e0b, #ef4444, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  /* Strategy Selector */
+  .strategy-selector {
+    margin-bottom: 30px;
+  }
+
+  .strategy-tabs {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .strategy-tab {
+    flex: 1;
+    min-width: 140px;
+    padding: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-align: center;
+    color: #888;
+  }
+
+  .strategy-tab:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  .strategy-tab.active {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+    color: #fff;
+  }
+
+  .strategy-tab.active[data-strategy="universal"] {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+  }
+
+  .strategy-tab.active[data-strategy="fifo"] {
+    border-color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.1);
+  }
+
+  .tab-icon {
+    display: block;
+    font-size: 1.5rem;
+    margin-bottom: 4px;
+  }
+
+  .tab-label {
+    display: block;
+    font-weight: 700;
+    font-size: 1rem;
+    color: inherit;
+  }
+
+  .tab-desc {
+    display: block;
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 2px;
+  }
+
+  .strategy-description {
+    background: rgba(255,255,255,0.03);
+    padding: 16px 20px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.6;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Controls */
+  .controls-section {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .control-group {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .action-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .write-btn {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: white;
+  }
+  .write-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+  }
+  .write-btn-secondary {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: white;
+  }
+  .write-btn-tertiary {
+    background: linear-gradient(135deg, #15803d, #166534);
+    color: white;
+  }
+  .read-btn {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+  }
+  .read-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
+  }
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+  .reset-btn:hover {
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+  }
+
+  /* Amplification Meters */
+  .amp-meters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .meter {
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .meter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+
+  .meter-label {
+    font-size: 0.85rem;
+    color: #888;
+    font-weight: 600;
+  }
+
+  .meter-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .meter-bar {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+
+  .meter-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+
+  .write-amp-fill { background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); }
+  .read-amp-fill { background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ef4444); }
+  .space-amp-fill { background: linear-gradient(90deg, #06b6d4, #f59e0b, #ef4444); }
+
+  .meter-hint {
+    font-size: 0.7rem;
+    color: #555;
+  }
+
+  /* Stats Row */
+  .stats-row {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    padding: 16px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .stat { text-align: center; }
+  .stat-label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 2px; }
+  .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
+
+  /* LSM Visualization */
+  .lsm-viz {
+    background: rgba(255,255,255,0.02);
+    border-radius: 20px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .component { margin-bottom: 16px; }
+  .component-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .component-header h3 { font-size: 1.05rem; color: #fff; }
+  .component-info { font-size: 0.8rem; color: #666; }
+
+  /* WAL */
+  .wal-component {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.03));
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+  }
+
+  .wal-bar {
+    height: 28px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    overflow: hidden;
+  }
+
+  .memtable-component {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.05));
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .memtable-bar {
+    height: 24px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .memtable-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #fbbf24, #f59e0b);
+    border-radius: 12px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+
+  .memtable-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.8rem;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .memtable-keys {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 28px;
+  }
+
+  .arrow-container, .compact-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    opacity: 0.3;
+    transition: opacity 0.3s;
+  }
+
+  .arrow { font-size: 1.3rem; color: #00d4ff; }
+  .arrow-label { font-size: 0.7rem; color: #666; }
+
+  /* Levels */
+  .levels-container { margin-top: 8px; }
+
+  .section-desc {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+
+  /* Column Families */
+  .cf-section, .bloom-section, .cache-section, .tradeoffs-section {
+    margin-bottom: 40px;
+  }
+
+  .cf-section h2, .bloom-section h2, .cache-section h2, .tradeoffs-section h2 {
+    font-size: 1.3rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .cf-diagram {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .cf-wal-shared {
+    background: linear-gradient(90deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.05));
+    border: 1px dashed rgba(139, 92, 246, 0.5);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+
+  .cf-wal-label {
+    font-weight: 700;
+    color: #8b5cf6;
+    font-size: 0.9rem;
+  }
+
+  .cf-trees {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+
+  .cf-tree {
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+    text-align: center;
+  }
+
+  .cf-name {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+  }
+
+  .cf-levels {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .cf-level {
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    color: #93c5fd;
+  }
+
+  .cf-note {
+    font-size: 0.7rem;
+    color: #666;
+  }
+
+  /* Bloom Filter */
+  .bloom-calc {
+    background: rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .bloom-input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .bloom-input-group label {
+    min-width: 100px;
+    font-size: 0.9rem;
+    color: #aaa;
+  }
+
+  .bloom-input-group input[type="range"] {
+    flex: 1;
+    accent-color: #f472b6;
+  }
+
+  .bloom-input-group span {
+    min-width: 60px;
+    text-align: right;
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+
+  .bloom-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .bloom-result {
+    background: rgba(244, 114, 182, 0.1);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    border: 1px solid rgba(244, 114, 182, 0.2);
+  }
+
+  .bloom-result-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 4px;
+  }
+
+  .bloom-result-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #f472b6;
+  }
+
+  .bloom-visual {
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+    min-height: 20px;
+  }
+
+  /* Block Cache */
+  .cache-comparison {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .cache-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .cache-card h4 {
+    font-size: 1.05rem;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .cache-detail {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 12px;
+  }
+
+  .cache-pros, .cache-cons {
+    margin-bottom: 10px;
+  }
+
+  .pro { font-size: 0.85rem; color: #22c55e; padding: 2px 0; }
+  .con { font-size: 0.85rem; color: #ef4444; padding: 2px 0; }
+
+  .cache-card code {
+    display: block;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #22c55e;
+    margin-top: 8px;
+  }
+
+  /* Explanation Cards */
+  .explanation-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .explain-card h3 { font-size: 1rem; margin-bottom: 12px; color: #fff; }
+  .explain-card p { font-size: 0.9rem; color: #888; line-height: 1.6; }
+  .explain-card strong { color: #00d4ff; }
+
+  /* Tradeoffs */
+  .tradeoffs-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+
+  .tradeoff-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .tradeoff-header {
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 8px 14px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .leveled-header { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+  .universal-header { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+  .fifo-header { background: rgba(139, 92, 246, 0.2); color: #c4b5fd; }
+
+  .tradeoff-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+
+  .tradeoff-row > span:first-child {
+    min-width: 72px;
+  }
+
+  .tradeoff-bar-container {
+    flex: 1;
+    height: 8px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .tradeoff-bar {
+    height: 100%;
+    border-radius: 4px;
+  }
+
+  .high-bar { background: #ef4444; }
+  .medium-bar { background: #f59e0b; }
+  .low-bar { background: #22c55e; }
+  .lowest-bar { background: #06b6d4; }
+
+  .tradeoff-rating {
+    min-width: 80px;
+    text-align: right;
+    font-size: 0.75rem;
+  }
+
+  /* Log */
+  .log-section {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 30px;
+  }
+
+  .log-section h3 { font-size: 1rem; margin-bottom: 12px; color: #888; }
+
+  .log-container {
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+  }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #00d4ff; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .stats-row { gap: 16px; }
+    .stat-value { font-size: 1.1rem; }
+    .strategy-tabs { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  (function() {
+    // === State ===
+    var strategy = 'leveled';
+    var memtable = [];
+    var levels = [[], [], [], []]; // L0=array of SSTs, L1-L3=array of SSTs
+    var writeCount = 0;
+    var flushCountVal = 0;
+    var compactionCountVal = 0;
+    var totalBytesWritten = 0;
+    var keyCounter = 0;
+    var allKeysEver = {};
+    var isProcessing = false;
+
+    var MEMTABLE_SIZE = 6;
+    var L0_TRIGGER = { leveled: 4, universal: 6, fifo: 999 };
+    var LEVEL_MAX = { leveled: [4, 6, 20], universal: [6, 10, 30], fifo: [999, 999, 999] };
+
+    var STRATEGY_DESCS = {
+      leveled: 'Leveled compaction: each level is 10x larger. Files with overlapping key ranges are merged into the next level. Best balance of read/write/space amplification.',
+      universal: 'Universal compaction: sorted runs are merged based on size ratio. Fewer, larger compactions reduce write amplification at the cost of more space and read overhead.',
+      fifo: 'FIFO compaction: oldest SST files are simply dropped when space is needed. No merge overhead. Ideal for TTL / time-series data that expires naturally.'
+    };
+
+    // === DOM ===
+    var memtableFillEl = document.getElementById('memtableFill');
+    var memtableLabelEl = document.getElementById('memtableLabel');
+    var memtableKeysEl = document.getElementById('memtableKeys');
+    var walEntriesEl = document.getElementById('walEntries');
+    var levelsContainerEl = document.getElementById('levelsContainer');
+    var activityLogEl = document.getElementById('activityLog');
+    var flushArrowEl = document.getElementById('flushArrow');
+    var strategyDescEl = document.getElementById('strategyDesc');
+
+    function $(id) { return document.getElementById(id); }
+
+    function log(msg, type) {
+      var entry = document.createElement('div');
+      entry.className = 'log-entry' + (type ? ' ' + type : '');
+      var now = new Date();
+      entry.textContent = '[' + now.toLocaleTimeString() + '] ' + msg;
+      activityLogEl.insertBefore(entry, activityLogEl.firstChild);
+      while (activityLogEl.children.length > 30) {
+        activityLogEl.removeChild(activityLogEl.lastChild);
+      }
+    }
+
+    function generateKey() {
+      var k = 'k' + String(keyCounter).padStart(3, '0');
+      keyCounter++;
+      return k;
+    }
+
+    function uniqueKeyCount() {
+      return Object.keys(allKeysEver).length;
+    }
+
+    function totalSSTFiles() {
+      var count = 0;
+      for (var i = 0; i < levels.length; i++) {
+        count += levels[i].length;
+      }
+      return count;
+    }
+
+    function totalKeysOnDisk() {
+      var count = 0;
+      for (var i = 0; i < levels.length; i++) {
+        for (var j = 0; j < levels[i].length; j++) {
+          count += levels[i][j].length;
+        }
+      }
+      return count;
+    }
+
+    function updateStats() {
+      $('writeCount').textContent = writeCount;
+      $('flushCount').textContent = flushCountVal;
+      $('compactionCount').textContent = compactionCountVal;
+      $('uniqueKeyCount').textContent = uniqueKeyCount();
+      $('totalSstCount').textContent = totalSSTFiles();
+
+      // Write amp
+      var wAmp = writeCount > 0 ? (totalBytesWritten / writeCount) : 1;
+      $('writeAmpVal').textContent = wAmp.toFixed(1) + 'x';
+      var wPct = Math.min(100, (wAmp / 30) * 100);
+      $('writeAmpBar').style.width = Math.max(5, wPct) + '%';
+
+      // Read amp (worst case: memtable + all SSTs in L0 + 1 per L1+)
+      var rAmp = 1 + levels[0].length;
+      for (var i = 1; i < levels.length; i++) {
+        if (levels[i].length > 0) rAmp++;
+      }
+      $('readAmpVal').textContent = rAmp;
+      var rPct = Math.min(100, (rAmp / 15) * 100);
+      $('readAmpBar').style.width = Math.max(5, rPct) + '%';
+
+      // Space amp
+      var actual = uniqueKeyCount();
+      var disk = totalKeysOnDisk() + memtable.length;
+      var sAmp = actual > 0 ? (disk / actual) : 1;
+      $('spaceAmpVal').textContent = sAmp.toFixed(1) + 'x';
+      var sPct = Math.min(100, (sAmp / 5) * 100);
+      $('spaceAmpBar').style.width = Math.max(5, sPct) + '%';
+    }
+
+    function renderWAL() {
+      walEntriesEl.innerHTML = '';
+      var show = memtable.slice(-20);
+      for (var i = 0; i < show.length; i++) {
+        var el = document.createElement('div');
+        el.style.cssText = 'display:inline-block;background:rgba(139,92,246,0.3);border-radius:3px;padding:2px 6px;font-size:0.7rem;color:#c4b5fd;';
+        el.textContent = show[i];
+        walEntriesEl.appendChild(el);
+      }
+    }
+
+    function renderMemtable() {
+      var pct = (memtable.length / MEMTABLE_SIZE) * 100;
+      memtableFillEl.style.width = pct + '%';
+      memtableLabelEl.textContent = memtable.length + ' / ' + MEMTABLE_SIZE + ' keys';
+
+      memtableKeysEl.innerHTML = '';
+      var sorted = memtable.slice().sort();
+      for (var i = 0; i < sorted.length; i++) {
+        var badge = document.createElement('span');
+        badge.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#000;padding:3px 10px;border-radius:6px;font-size:0.8rem;font-weight:600;animation:keyAppear 0.3s ease-out;';
+        badge.textContent = sorted[i];
+        memtableKeysEl.appendChild(badge);
+      }
+    }
+
+    var LEVEL_COLORS = [
+      { bg: 'rgba(239,68,68,0.05)', border: 'rgba(239,68,68,0.3)', sst: 'rgba(239,68,68,0.2)', sstBorder: 'rgba(239,68,68,0.4)', label: 'Unsorted SSTs (overlapping)' },
+      { bg: 'rgba(59,130,246,0.05)', border: 'rgba(59,130,246,0.3)', sst: 'rgba(59,130,246,0.2)', sstBorder: 'rgba(59,130,246,0.4)', label: 'Sorted, non-overlapping' },
+      { bg: 'rgba(34,197,94,0.05)', border: 'rgba(34,197,94,0.3)', sst: 'rgba(34,197,94,0.2)', sstBorder: 'rgba(34,197,94,0.4)', label: '10x larger, sorted' },
+      { bg: 'rgba(139,92,246,0.05)', border: 'rgba(139,92,246,0.3)', sst: 'rgba(139,92,246,0.2)', sstBorder: 'rgba(139,92,246,0.4)', label: '100x larger (cold data)' }
+    ];
+
+    function renderLevels() {
+      levelsContainerEl.innerHTML = '';
+      var numLevels = strategy === 'fifo' ? 1 : (strategy === 'universal' ? 3 : 4);
+
+      for (var lvl = 0; lvl < numLevels; lvl++) {
+        // Compact arrow
+        if (lvl > 0) {
+          var arrowDiv = document.createElement('div');
+          arrowDiv.className = 'compact-arrow';
+          arrowDiv.id = 'compact' + (lvl - 1) + '' + lvl;
+          arrowDiv.innerHTML = '<div class="arrow">\u2193</div><span class="arrow-label">' +
+            (strategy === 'fifo' ? 'Drop oldest' : 'Compact') + '</span>';
+          levelsContainerEl.appendChild(arrowDiv);
+        }
+
+        var c = LEVEL_COLORS[lvl] || LEVEL_COLORS[3];
+        var levelDiv = document.createElement('div');
+        levelDiv.style.cssText = 'background:' + c.bg + ';border-radius:12px;padding:16px;border:1px solid ' + c.border + ';margin-bottom:4px;';
+
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:baseline;gap:12px;margin-bottom:10px;';
+
+        var info = lvl === 0 ? c.label : c.label;
+        if (strategy === 'universal') {
+          info = lvl === 0 ? 'Sorted runs (may overlap)' : 'Merged runs (size-tiered)';
+        }
+        if (strategy === 'fifo') {
+          info = 'SSTs dropped when oldest expires';
+        }
+
+        header.innerHTML = '<h3 style="font-size:1rem;font-weight:700;color:#fff;">L' + lvl + '</h3>' +
+          '<span style="font-size:0.8rem;color:#666;">' + info + '</span>' +
+          '<span style="font-size:0.75rem;color:#555;margin-left:auto;">' + levels[lvl].length + ' / ' + LEVEL_MAX[strategy][lvl] + ' SSTs</span>';
+
+        levelDiv.appendChild(header);
+
+        var sstArea = document.createElement('div');
+        sstArea.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;min-height:40px;align-items:flex-start;';
+
+        if (levels[lvl].length === 0) {
+          var empty = document.createElement('span');
+          empty.style.cssText = 'font-size:0.75rem;color:#444;font-style:italic;';
+          empty.textContent = 'empty';
+          sstArea.appendChild(empty);
+        } else {
+          for (var s = 0; s < levels[lvl].length; s++) {
+            var sst = levels[lvl][s];
+            var sstEl = document.createElement('div');
+            sstEl.style.cssText = 'background:' + c.sst + ';border:1px solid ' + c.sstBorder + ';border-radius:8px;padding:6px 10px;';
+
+            var keysText = '';
+            if (sst.length <= 3) {
+              keysText = sst.join(', ');
+            } else {
+              keysText = sst[0] + '..' + sst[sst.length - 1] + ' (' + sst.length + ')';
+            }
+
+            var keysSpan = document.createElement('div');
+            keysSpan.style.cssText = 'font-size:0.7rem;color:#aaa;white-space:nowrap;';
+            keysSpan.textContent = keysText;
+            sstEl.appendChild(keysSpan);
+            sstArea.appendChild(sstEl);
+          }
+        }
+
+        levelDiv.appendChild(sstArea);
+        levelsContainerEl.appendChild(levelDiv);
+      }
+    }
+
+    function render() {
+      renderWAL();
+      renderMemtable();
+      renderLevels();
+      updateStats();
+    }
+
+    function sleep(ms) {
+      return new Promise(function(resolve) { setTimeout(resolve, ms); });
+    }
+
+    function animateArrow(id) {
+      var el = document.getElementById(id);
+      if (!el) return sleep(100);
+      el.style.opacity = '1';
+      return sleep(400).then(function() { el.style.opacity = '0.3'; });
+    }
+
+    function mergeAndDedupe(arrays) {
+      var all = [];
+      for (var i = 0; i < arrays.length; i++) {
+        for (var j = 0; j < arrays[i].length; j++) {
+          all.push(arrays[i][j]);
+        }
+      }
+      var unique = [];
+      var seen = {};
+      all.sort();
+      for (var k = 0; k < all.length; k++) {
+        if (!seen[all[k]]) {
+          seen[all[k]] = true;
+          unique.push(all[k]);
+        }
+      }
+      return unique;
+    }
+
+    function chunkArray(arr, size) {
+      var chunks = [];
+      for (var i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    }
+
+    function doFlush() {
+      if (memtable.length === 0) return Promise.resolve();
+      var sorted = memtable.slice().sort();
+      flushCountVal++;
+      totalBytesWritten += sorted.length;
+      log('Flush: memtable (' + sorted.length + ' keys) \u2192 L0', 'flush');
+
+      levels[0].push(sorted);
+      memtable = [];
+      render();
+
+      return animateArrow('flushArrow').then(function() {
+        return checkCompaction(0);
+      });
+    }
+
+    function checkCompaction(fromLevel) {
+      var trigger = fromLevel === 0 ? L0_TRIGGER[strategy] : LEVEL_MAX[strategy][fromLevel];
+      if (levels[fromLevel].length < trigger) return Promise.resolve();
+
+      if (strategy === 'fifo') {
+        // FIFO: just drop oldest
+        var dropped = levels[0].shift();
+        log('FIFO: dropped oldest SST (' + dropped.length + ' keys expired)', 'compact');
+        compactionCountVal++;
+        render();
+        return Promise.resolve();
+      }
+
+      var nextLevel = fromLevel + 1;
+      if (nextLevel >= levels.length) return Promise.resolve();
+
+      compactionCountVal++;
+
+      if (strategy === 'leveled') {
+        // Merge all SSTs from fromLevel into nextLevel
+        var allFrom = levels[fromLevel];
+        var allNext = levels[nextLevel];
+        var merged = mergeAndDedupe(allFrom.concat(allNext));
+        totalBytesWritten += merged.length;
+
+        log('Leveled compact: L' + fromLevel + ' (' + allFrom.length + ' SSTs) \u2192 L' + nextLevel, 'compact');
+        levels[fromLevel] = [];
+        levels[nextLevel] = chunkArray(merged, Math.max(4, Math.floor(merged.length / 3)));
+        render();
+
+        return animateArrow('compact' + fromLevel + '' + nextLevel).then(function() {
+          return checkCompaction(nextLevel);
+        });
+      }
+
+      if (strategy === 'universal') {
+        // Merge adjacent runs by size ratio
+        var runs = levels[fromLevel];
+        if (runs.length < 2) return Promise.resolve();
+        var merged2 = mergeAndDedupe(runs);
+        totalBytesWritten += merged2.length;
+
+        log('Universal compact: merge ' + runs.length + ' runs in L' + fromLevel + ' (' + merged2.length + ' keys)', 'compact');
+
+        // If too big, push merged to next level
+        if (merged2.length > LEVEL_MAX[strategy][fromLevel] * 4 && nextLevel < levels.length) {
+          levels[fromLevel] = [];
+          levels[nextLevel].push(merged2);
+          render();
+          return animateArrow('compact' + fromLevel + '' + nextLevel).then(function() {
+            return checkCompaction(nextLevel);
+          });
+        } else {
+          levels[fromLevel] = [merged2];
+          render();
+          return Promise.resolve();
+        }
+      }
+
+      return Promise.resolve();
+    }
+
+    function doWrite() {
+      var key = generateKey();
+      writeCount++;
+      totalBytesWritten++;
+      allKeysEver[key] = true;
+      memtable.push(key);
+      log('Write: ' + key + ' \u2192 MemTable', 'write');
+      render();
+
+      if (memtable.length >= MEMTABLE_SIZE) {
+        return doFlush();
+      }
+      return Promise.resolve();
+    }
+
+    function doWriteN(n) {
+      if (isProcessing) return;
+      isProcessing = true;
+      var i = 0;
+      function next() {
+        if (i >= n) { isProcessing = false; return; }
+        i++;
+        doWrite().then(function() {
+          return sleep(80);
+        }).then(next);
+      }
+      next();
+    }
+
+    function doRead() {
+      // Collect all keys
+      var allKeys = memtable.slice();
+      for (var i = 0; i < levels.length; i++) {
+        for (var j = 0; j < levels[i].length; j++) {
+          for (var k = 0; k < levels[i][j].length; k++) {
+            allKeys.push(levels[i][j][k]);
+          }
+        }
+      }
+      if (allKeys.length === 0) {
+        log('Read: no keys in storage', 'read');
+        return;
+      }
+
+      var key = allKeys[Math.floor(Math.random() * allKeys.length)];
+      var checks = 0;
+      var found = '';
+
+      // Check memtable
+      checks++;
+      if (memtable.indexOf(key) !== -1) {
+        found = 'MemTable';
+      }
+
+      if (!found) {
+        // Check L0 (each SST)
+        for (var li = 0; li < levels[0].length && !found; li++) {
+          checks++;
+          if (levels[0][li].indexOf(key) !== -1) {
+            found = 'L0[' + li + ']';
+          }
+        }
+      }
+
+      // Check L1+
+      for (var lv = 1; lv < levels.length && !found; lv++) {
+        if (levels[lv].length > 0) {
+          checks++;
+          for (var si = 0; si < levels[lv].length; si++) {
+            if (levels[lv][si].indexOf(key) !== -1) {
+              found = 'L' + lv;
+              break;
+            }
+          }
+        }
+      }
+
+      log('Read: ' + key + ' \u2192 found in ' + found + ' (checked ' + checks + ' locations)', 'read');
+    }
+
+    function doReset() {
+      memtable = [];
+      levels = [[], [], [], []];
+      writeCount = 0;
+      flushCountVal = 0;
+      compactionCountVal = 0;
+      totalBytesWritten = 0;
+      keyCounter = 0;
+      allKeysEver = {};
+      isProcessing = false;
+      render();
+      activityLogEl.innerHTML = '<div class="log-entry">System reset. Ready.</div>';
+    }
+
+    // === Bloom Filter Calculator ===
+    function updateBloom() {
+      var bits = parseInt(document.getElementById('bloomBits').value);
+      var keys = parseInt(document.getElementById('bloomKeys').value);
+
+      document.getElementById('bloomBitsVal').textContent = bits;
+      document.getElementById('bloomKeysVal').textContent = keys.toLocaleString();
+
+      // FPR formula: (1 - e^(-k*n/m))^k where k = bits * ln(2), m = bits * n
+      var k = Math.round(bits * 0.6931); // ln(2) ≈ 0.6931
+      if (k < 1) k = 1;
+      var m = bits * keys;
+      var fpr = Math.pow(1 - Math.exp(-k * keys / m), k);
+      var fprPct = (fpr * 100);
+
+      document.getElementById('bloomFPR').textContent = fprPct < 0.01 ? fprPct.toExponential(1) + '%' : fprPct.toFixed(2) + '%';
+      document.getElementById('bloomSize').textContent = ((bits * keys) / 8 / 1024).toFixed(1) + ' KB';
+      document.getElementById('bloomSaved').textContent = '~' + ((1 - fpr) * 100).toFixed(1) + '%';
+
+      // Visual: 100 cells showing FP rate
+      var visual = document.getElementById('bloomVisual');
+      visual.innerHTML = '';
+      var numFP = Math.round(fpr * 100);
+      for (var i = 0; i < 100; i++) {
+        var cell = document.createElement('div');
+        var isFP = i < numFP;
+        cell.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:2px;margin:1px;background:' +
+          (isFP ? '#ef4444' : 'rgba(34,197,94,0.4)') + ';';
+        cell.title = isFP ? 'False positive' : 'Correct negative';
+        visual.appendChild(cell);
+      }
+    }
+
+    // === Event Listeners ===
+    document.getElementById('writeBtn').addEventListener('click', function() {
+      if (!isProcessing) {
+        isProcessing = true;
+        doWrite().then(function() { isProcessing = false; });
+      }
+    });
+
+    document.getElementById('write10Btn').addEventListener('click', function() {
+      doWriteN(10);
+    });
+
+    document.getElementById('write50Btn').addEventListener('click', function() {
+      doWriteN(50);
+    });
+
+    document.getElementById('readBtn').addEventListener('click', doRead);
+    document.getElementById('resetBtn').addEventListener('click', doReset);
+
+    // Strategy tabs
+    var tabs = document.querySelectorAll('.strategy-tab');
+    for (var t = 0; t < tabs.length; t++) {
+      tabs[t].addEventListener('click', function() {
+        var newStrategy = this.getAttribute('data-strategy');
+        if (newStrategy === strategy) return;
+        strategy = newStrategy;
+        for (var i = 0; i < tabs.length; i++) {
+          tabs[i].classList.remove('active');
+        }
+        this.classList.add('active');
+        strategyDescEl.textContent = STRATEGY_DESCS[strategy];
+        doReset();
+        log('Switched to ' + strategy + ' compaction', '');
+      });
+    }
+
+    // Bloom filter
+    document.getElementById('bloomBits').addEventListener('input', updateBloom);
+    document.getElementById('bloomKeys').addEventListener('input', updateBloom);
+
+    // Init
+    render();
+    updateBloom();
+  })();
+</script>
+</BaseLayout>
