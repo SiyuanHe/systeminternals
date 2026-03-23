@@ -1,0 +1,1796 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Linux I/O Models: From Blocking to io_uring" 
+  description="Interactive visualization of Linux I/O models — blocking, non-blocking, epoll, io_uring, and the reactor pattern"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Linux", href: "/linux/" },
+    { label: "I/O Models", href: "/linux/io-models/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐧 Linux I/O Models</h1>
+      <p class="subtitle">From Blocking Sockets to io_uring — How Linux Handles Concurrent Connections</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Every network server must answer one question: <strong>how do you handle thousands of
+          connections simultaneously?</strong> Linux has evolved through four generations of I/O models.
+          <em>Blocking I/O</em> dedicates a thread per connection — simple but wasteful.
+          <em>Non-blocking I/O</em> with poll/select avoids threads but burns CPU.
+          <em>epoll</em> gives O(1) event notification — the foundation of Redis, Nginx, and Node.js.
+          <em>io_uring</em> goes further: zero-copy, kernel-side polling, and shared ring buffers
+          that eliminate syscall overhead entirely.
+        </p>
+      </div>
+    </section>
+
+    <!-- Scalability Comparison -->
+    <section class="compare-section">
+      <h2>📊 Scalability Comparison</h2>
+      <p class="section-desc">Drag the slider to see how each I/O model handles increasing connection counts.</p>
+
+      <div class="slider-control">
+        <label>Concurrent Connections: <strong id="connLabel">100</strong></label>
+        <input type="range" id="connSlider" min="10" max="10000" value="100" step="10" class="slider">
+        <div class="slider-marks">
+          <span>10</span><span>1K</span><span>5K</span><span>10K</span>
+        </div>
+      </div>
+
+      <div class="compare-grid">
+        <div class="model-card" id="blockingCard">
+          <h3>🧵 Blocking I/O</h3>
+          <div class="model-metric">
+            <span class="metric-label">Threads needed</span>
+            <span class="metric-value" id="blockingThreads">100</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Memory overhead</span>
+            <span class="metric-value" id="blockingMem">100 MB</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Context switches/s</span>
+            <span class="metric-value" id="blockingSwitches">~5,000</span>
+          </div>
+          <div class="model-bar">
+            <div class="bar-fill blocking-fill" id="blockingBar" style="width: 10%"></div>
+          </div>
+          <div class="model-verdict" id="blockingVerdict">Works fine</div>
+        </div>
+
+        <div class="model-card" id="epollCard">
+          <h3>⚡ epoll</h3>
+          <div class="model-metric">
+            <span class="metric-label">Threads needed</span>
+            <span class="metric-value" id="epollThreads">1-4</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Memory overhead</span>
+            <span class="metric-value" id="epollMem">~1 MB</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Syscalls/event</span>
+            <span class="metric-value" id="epollSyscalls">1</span>
+          </div>
+          <div class="model-bar">
+            <div class="bar-fill epoll-fill" id="epollBar" style="width: 5%"></div>
+          </div>
+          <div class="model-verdict" id="epollVerdict">Excellent</div>
+        </div>
+
+        <div class="model-card" id="iouringCard">
+          <h3>💎 io_uring</h3>
+          <div class="model-metric">
+            <span class="metric-label">Threads needed</span>
+            <span class="metric-value" id="iouringThreads">1</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Memory overhead</span>
+            <span class="metric-value" id="iouringMem">~0.5 MB</span>
+          </div>
+          <div class="model-metric">
+            <span class="metric-label">Syscalls/event</span>
+            <span class="metric-value" id="iouringSyscalls">0 (polled)</span>
+          </div>
+          <div class="model-bar">
+            <div class="bar-fill iouring-fill" id="iouringBar" style="width: 3%"></div>
+          </div>
+          <div class="model-verdict" id="iouringVerdict">Optimal</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Blocking I/O -->
+    <section class="detail-section">
+      <h2>🧵 Blocking I/O: Thread Per Connection</h2>
+      <p class="section-desc">The simplest model: one thread waits on each connection. When data arrives, the thread wakes up. Simple, but each thread costs ~1MB stack + kernel scheduling overhead.</p>
+
+      <div class="blocking-viz" id="blockingViz">
+        <div class="blocking-server">
+          <div class="server-label">Server Process</div>
+          <div class="thread-pool" id="threadPool">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+        <div class="blocking-clients">
+          <div class="client-label">Clients</div>
+          <div class="client-list" id="blockingClients">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+      </div>
+
+      <div class="blocking-controls">
+        <button class="action-btn primary-btn" id="addClientBtn">+ Add Connection</button>
+        <button class="action-btn chaos-btn" id="floodBtn">🌊 Flood (20 connections)</button>
+        <button class="action-btn reset-btn" id="blockingResetBtn">🔄 Reset</button>
+      </div>
+
+      <div class="code-block">
+        <div class="code-title">Thread-per-connection server (simplified)</div>
+        <pre><code set:html={`while (true) {
+    int client_fd = accept(server_fd, ...);  // blocks until new connection
+    pthread_create(&thread, NULL, handle_client, client_fd);
+}
+
+void* handle_client(int fd) {
+    char buf[4096];
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {  // blocks until data
+        write(fd, response, resp_len);                // blocks until sent
+    }
+    close(fd);
+}`} /></pre>
+      </div>
+    </section>
+
+    <!-- epoll -->
+    <section class="detail-section">
+      <h2>⚡ epoll: Event-Driven I/O Multiplexing</h2>
+      <p class="section-desc">A single thread monitors thousands of file descriptors. The kernel tells you exactly which ones are ready — no polling, no wasted threads.</p>
+
+      <div class="epoll-viz">
+        <div class="epoll-components">
+          <div class="epoll-instance">
+            <div class="epoll-header">epoll instance (kernel)</div>
+            <div class="epoll-interest" id="epollInterest">
+              <div class="interest-label">Interest List (red-black tree)</div>
+              <div class="interest-fds" id="interestFds">
+                <!-- rendered by JS -->
+              </div>
+            </div>
+            <div class="epoll-ready" id="epollReady">
+              <div class="ready-label">Ready List (linked list)</div>
+              <div class="ready-fds" id="readyFds">
+                <!-- rendered by JS -->
+              </div>
+            </div>
+          </div>
+
+          <div class="epoll-thread">
+            <div class="thread-label">Event Loop Thread</div>
+            <div class="epoll-loop" id="epollLoop">
+              <div class="loop-step" id="loopWait">epoll_wait() — sleeping</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="epoll-controls">
+          <button class="action-btn primary-btn" id="epollAddBtn">+ Register FD</button>
+          <button class="action-btn election-btn" id="epollDataBtn">📨 Data Arrives</button>
+          <button class="action-btn election-btn" id="epollWaitBtn">⏰ epoll_wait()</button>
+          <button class="action-btn reset-btn" id="epollResetBtn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="et-lt-section">
+        <h3>Edge-Triggered vs Level-Triggered</h3>
+        <div class="et-lt-grid">
+          <div class="et-lt-card">
+            <h4>Level-Triggered (default)</h4>
+            <p>epoll_wait() returns <strong>every time</strong> you call it while the fd is ready. Like checking "is the buffer non-empty?" each time. Safer but can cause redundant wake-ups.</p>
+            <div class="trigger-viz" id="ltViz">
+              <div class="trigger-signal">Buffer: ████░░░░</div>
+              <div class="trigger-events">
+                <span class="trigger-event active">wake</span>
+                <span class="trigger-event active">wake</span>
+                <span class="trigger-event active">wake</span>
+              </div>
+              <div class="trigger-note">Keeps notifying while data present</div>
+            </div>
+          </div>
+          <div class="et-lt-card highlight-card">
+            <h4>Edge-Triggered (EPOLLET)</h4>
+            <p>epoll_wait() returns <strong>only once</strong> when state changes (new data arrives). You must drain the buffer completely with non-blocking reads. Used by Nginx for performance.</p>
+            <div class="trigger-viz" id="etViz">
+              <div class="trigger-signal">Buffer: ████░░░░</div>
+              <div class="trigger-events">
+                <span class="trigger-event active">wake</span>
+                <span class="trigger-event dim">—</span>
+                <span class="trigger-event dim">—</span>
+              </div>
+              <div class="trigger-note">Notifies once per state change</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-title">epoll event loop</div>
+        <pre><code set:html={`int epfd = epoll_create1(0);                    // create epoll instance
+struct epoll_event ev = { .events = EPOLLIN };
+ev.data.fd = server_fd;
+epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev); // register interest
+
+struct epoll_event events[1024];
+while (true) {
+    int n = epoll_wait(epfd, events, 1024, -1);  // block until ready
+    for (int i = 0; i < n; i++) {
+        if (events[i].data.fd == server_fd)
+            accept_new_client(epfd);              // register new fd
+        else
+            handle_data(events[i].data.fd);       // read/write ready fd
+    }
+}`} /></pre>
+      </div>
+    </section>
+
+    <!-- io_uring -->
+    <section class="detail-section">
+      <h2>💎 io_uring: Zero-Syscall Async I/O</h2>
+      <p class="section-desc">Introduced in Linux 5.1. Two shared ring buffers between user and kernel space — submit operations without syscalls, reap completions without context switches.</p>
+
+      <div class="iouring-viz">
+        <div class="ring-container">
+          <div class="ring-side">
+            <div class="ring-label">Submission Queue (SQ)</div>
+            <div class="ring-visual" id="sqRing">
+              <!-- rendered by JS -->
+            </div>
+            <div class="ring-info">
+              <span class="ring-stat">Head: <strong id="sqHead">0</strong></span>
+              <span class="ring-stat">Tail: <strong id="sqTail">0</strong></span>
+              <span class="ring-stat">Entries: <strong id="sqCount">0</strong>/8</span>
+            </div>
+          </div>
+
+          <div class="ring-arrow">
+            <div class="arrow-label">Kernel processes SQEs</div>
+            <div class="arrow-body">→→→</div>
+          </div>
+
+          <div class="ring-side">
+            <div class="ring-label">Completion Queue (CQ)</div>
+            <div class="ring-visual" id="cqRing">
+              <!-- rendered by JS -->
+            </div>
+            <div class="ring-info">
+              <span class="ring-stat">Head: <strong id="cqHead">0</strong></span>
+              <span class="ring-stat">Tail: <strong id="cqTail">0</strong></span>
+              <span class="ring-stat">Entries: <strong id="cqCount">0</strong>/8</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="iouring-flow">
+          <div class="flow-step">
+            <span class="flow-num">1</span>
+            <span class="flow-text">App writes SQE to submission ring (no syscall)</span>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">2</span>
+            <span class="flow-text">Kernel polls SQ or app calls io_uring_enter()</span>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">3</span>
+            <span class="flow-text">Kernel executes I/O and writes CQE to completion ring</span>
+          </div>
+          <div class="flow-step">
+            <span class="flow-num">4</span>
+            <span class="flow-text">App reads CQE from completion ring (no syscall)</span>
+          </div>
+        </div>
+
+        <div class="iouring-controls">
+          <button class="action-btn primary-btn" id="sqSubmitBtn">📤 Submit SQE</button>
+          <button class="action-btn election-btn" id="kernelProcessBtn">⚙️ Kernel Process</button>
+          <button class="action-btn election-btn" id="cqReapBtn">📥 Reap CQE</button>
+          <button class="action-btn reset-btn" id="iouringResetBtn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-title">io_uring basics</div>
+        <pre><code set:html={`struct io_uring ring;
+io_uring_queue_init(256, &ring, 0);           // setup rings
+
+// Submit a read operation (no syscall!)
+struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+io_uring_prep_read(sqe, fd, buf, len, 0);
+sqe->user_data = (uint64_t)fd;               // tag for completion
+io_uring_submit(&ring);                       // one syscall for N ops
+
+// Reap completions
+struct io_uring_cqe *cqe;
+io_uring_wait_cqe(&ring, &cqe);              // wait for completion
+int result = cqe->res;                        // bytes read or error
+io_uring_cqe_seen(&ring, cqe);               // advance CQ head`} /></pre>
+      </div>
+    </section>
+
+    <!-- Reactor Pattern -->
+    <section class="detail-section">
+      <h2>🔄 The Reactor Pattern</h2>
+      <p class="section-desc">The design pattern behind Redis, Nginx, Node.js, and most high-performance servers. One event loop, many handlers.</p>
+
+      <div class="reactor-viz">
+        <div class="reactor-diagram">
+          <div class="reactor-demux">
+            <div class="demux-label">Event Demultiplexer</div>
+            <div class="demux-sub">(epoll / kqueue / io_uring)</div>
+          </div>
+
+          <div class="reactor-loop-box">
+            <div class="loop-label">Event Loop</div>
+            <div class="reactor-events" id="reactorEvents">
+              <div class="reactor-event idle">Waiting for events...</div>
+            </div>
+          </div>
+
+          <div class="reactor-handlers">
+            <div class="handler-card" id="handlerAccept">
+              <span class="handler-icon">🔌</span>
+              <span class="handler-name">Accept Handler</span>
+            </div>
+            <div class="handler-card" id="handlerRead">
+              <span class="handler-icon">📖</span>
+              <span class="handler-name">Read Handler</span>
+            </div>
+            <div class="handler-card" id="handlerWrite">
+              <span class="handler-icon">✏️</span>
+              <span class="handler-name">Write Handler</span>
+            </div>
+            <div class="handler-card" id="handlerTimer">
+              <span class="handler-icon">⏰</span>
+              <span class="handler-name">Timer Handler</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="reactor-controls">
+          <button class="action-btn primary-btn" id="reactorConnBtn">🔌 New Connection</button>
+          <button class="action-btn election-btn" id="reactorDataBtn">📨 Incoming Data</button>
+          <button class="action-btn election-btn" id="reactorTimerBtn">⏰ Timer Fires</button>
+          <button class="action-btn reset-btn" id="reactorResetBtn">🔄 Reset</button>
+        </div>
+
+        <div class="reactor-users">
+          <h3>Who Uses This?</h3>
+          <div class="users-grid">
+            <div class="user-badge"><strong>Redis</strong> — single-threaded event loop, epoll</div>
+            <div class="user-badge"><strong>Nginx</strong> — worker processes, epoll + edge-triggered</div>
+            <div class="user-badge"><strong>Node.js</strong> — libuv event loop, epoll/kqueue</div>
+            <div class="user-badge"><strong>Tokio</strong> — Rust async runtime, epoll/io_uring</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Epoll Event Loop Animation -->
+    <section class="detail-section">
+      <h2>🎬 epoll Event Loop Animation</h2>
+      <p class="section-desc">Watch how a single thread handles multiple connections through the epoll event loop cycle.</p>
+
+      <div class="anim-container">
+        <div class="anim-timeline" id="animTimeline">
+          <!-- rendered by JS -->
+        </div>
+        <div class="anim-controls">
+          <button class="action-btn primary-btn" id="animStartBtn">▶ Start Animation</button>
+          <button class="action-btn reset-btn" id="animResetBtn">🔄 Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Summary -->
+    <section class="explain-section">
+      <h2>🏗️ Choosing the Right I/O Model</h2>
+      <p class="section-desc">Each model has its place. The right choice depends on your concurrency requirements and complexity budget.</p>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>🧵 Blocking I/O</h3>
+          <p>
+            Best for <strong>low-concurrency</strong> servers (&lt;100 connections) or CLI tools.
+            Dead simple to write and debug. Each connection gets its own thread with its own stack.
+            Falls apart above ~10K connections due to memory and scheduling overhead.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ epoll</h3>
+          <p>
+            The <strong>production workhorse</strong>. Handles 100K+ connections on a single thread.
+            O(1) for ready notification (unlike poll/select which are O(n)). Edge-triggered mode
+            with non-blocking sockets is the gold standard for high-performance servers.
+          </p>
+        </div>
+        <div class="explain-card highlight-card">
+          <h3>💎 io_uring</h3>
+          <p>
+            The <strong>future of Linux I/O</strong>. Eliminates syscall overhead with shared ring buffers.
+            Supports <em>any</em> I/O operation (not just sockets). Kernel-side polling mode
+            achieves true zero-syscall I/O. Still maturing but already used in production databases.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://man7.org/linux/man-pages/man7/epoll.7.html" target="_blank">epoll(7)</a>, <a href="https://man7.org/linux/man-pages/man2/io_uring_enter.2.html" target="_blank">io_uring_enter(2)</a>, and <a href="https://unixism.net/loti/" target="_blank">Lord of the io_uring</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Linux%20I/O%20Models%20visualizer%20—%20blocking%2C%20epoll%2C%20io_uring&url=https://systeminternals.dev/linux/io-models/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/linux/io-models/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/linux/io-models/&t=Interactive%20Linux%20I/O%20Models%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #22c55e, #06b6d4, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  .section-desc code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  /* Overview */
+  .overview-section { margin-bottom: 50px; }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(139, 92, 246, 0.05));
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #22c55e; font-style: normal; font-weight: 500; }
+
+  /* Slider */
+  .slider-control {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+
+  .slider-control label {
+    display: block;
+    font-size: 0.95rem;
+    color: #aaa;
+    margin-bottom: 10px;
+  }
+
+  .slider-control label strong { color: #06b6d4; font-size: 1.2rem; }
+
+  .slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    background: rgba(255,255,255,0.15);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #06b6d4;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(6,182,212,0.4);
+  }
+
+  .slider-marks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 6px;
+  }
+
+  /* Compare grid */
+  .compare-section { margin-bottom: 50px; }
+
+  .compare-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .model-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+    transition: all 0.3s;
+  }
+
+  .model-card h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .model-metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .metric-label { font-size: 0.8rem; color: #888; }
+  .metric-value { font-size: 0.85rem; color: #06b6d4; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+  .model-bar {
+    height: 8px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    margin: 12px 0 8px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+
+  .blocking-fill { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .epoll-fill { background: linear-gradient(90deg, #06b6d4, #3b82f6); }
+  .iouring-fill { background: linear-gradient(90deg, #8b5cf6, #a855f7); }
+
+  .model-verdict {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    padding: 4px;
+    border-radius: 6px;
+  }
+
+  .model-verdict.good { color: #4ade80; }
+  .model-verdict.warning { color: #fbbf24; }
+  .model-verdict.danger { color: #ef4444; }
+  .model-verdict.excellent { color: #06b6d4; }
+
+  /* Blocking I/O viz */
+  .detail-section { margin-bottom: 50px; }
+
+  .blocking-viz {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 16px;
+  }
+
+  .blocking-server, .blocking-clients {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .server-label, .client-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .thread-pool {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 60px;
+  }
+
+  .thread-box {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    transition: all 0.3s;
+  }
+
+  .thread-box.idle {
+    background: rgba(107,114,128,0.2);
+    border: 1px solid rgba(107,114,128,0.3);
+    color: #9ca3af;
+  }
+
+  .thread-box.busy {
+    background: rgba(34,197,94,0.2);
+    border: 1px solid rgba(34,197,94,0.4);
+    color: #4ade80;
+    animation: threadPulse 1.5s infinite;
+  }
+
+  .thread-box.blocked {
+    background: rgba(239,68,68,0.2);
+    border: 1px solid rgba(239,68,68,0.4);
+    color: #fca5a5;
+  }
+
+  @keyframes threadPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .client-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 60px;
+  }
+
+  .client-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(6,182,212,0.2);
+    border: 1px solid rgba(6,182,212,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: #67e8f9;
+    transition: all 0.3s;
+  }
+
+  .client-dot.waiting {
+    background: rgba(251,191,36,0.2);
+    border-color: rgba(251,191,36,0.4);
+    color: #fbbf24;
+  }
+
+  .blocking-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  /* Code blocks */
+  .code-block {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .code-title {
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.05);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #888;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .code-block pre {
+    padding: 16px;
+    margin: 0;
+    overflow-x: auto;
+  }
+
+  .code-block code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  /* epoll viz */
+  .epoll-viz { margin-bottom: 20px; }
+
+  .epoll-components {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+
+  .epoll-instance {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .epoll-header {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .epoll-interest, .epoll-ready {
+    margin-bottom: 16px;
+  }
+
+  .interest-label, .ready-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #888;
+    margin-bottom: 8px;
+  }
+
+  .interest-fds, .ready-fds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 36px;
+    padding: 10px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+  }
+
+  .fd-chip {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.3s;
+  }
+
+  .fd-chip.interest {
+    background: rgba(96,165,250,0.2);
+    border: 1px solid rgba(96,165,250,0.3);
+    color: #93c5fd;
+  }
+
+  .fd-chip.ready {
+    background: rgba(74,222,128,0.2);
+    border: 1px solid rgba(74,222,128,0.4);
+    color: #4ade80;
+    animation: readyPulse 1s infinite;
+  }
+
+  @keyframes readyPulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(74,222,128,0); }
+    50% { box-shadow: 0 0 10px rgba(74,222,128,0.3); }
+  }
+
+  .epoll-thread {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+    min-width: 220px;
+  }
+
+  .thread-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .epoll-loop {
+    padding: 12px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    min-height: 80px;
+  }
+
+  .loop-step {
+    font-size: 0.8rem;
+    color: #888;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 4px 0;
+    transition: all 0.3s;
+  }
+
+  .loop-step.active {
+    color: #4ade80;
+    font-weight: 600;
+  }
+
+  .epoll-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  /* ET vs LT */
+  .et-lt-section { margin: 30px 0; }
+
+  .et-lt-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .et-lt-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .et-lt-card h4 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .et-lt-card p {
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .et-lt-card strong { color: #fff; }
+
+  .trigger-viz {
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .trigger-signal {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: #06b6d4;
+    margin-bottom: 8px;
+  }
+
+  .trigger-events {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+
+  .trigger-event {
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .trigger-event.active {
+    background: rgba(74,222,128,0.2);
+    color: #4ade80;
+  }
+
+  .trigger-event.dim {
+    background: rgba(107,114,128,0.2);
+    color: #6b7280;
+  }
+
+  .trigger-note {
+    font-size: 0.7rem;
+    color: #666;
+  }
+
+  /* io_uring viz */
+  .iouring-viz { margin-bottom: 20px; }
+
+  .ring-container {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+
+  .ring-side {
+    flex: 1;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .ring-label {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .ring-visual {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    margin-bottom: 12px;
+    min-height: 48px;
+    flex-wrap: wrap;
+  }
+
+  .ring-slot {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.3s;
+  }
+
+  .ring-slot.empty {
+    background: rgba(107,114,128,0.1);
+    border: 1px dashed rgba(107,114,128,0.3);
+    color: #4b5563;
+  }
+
+  .ring-slot.filled {
+    background: rgba(6,182,212,0.2);
+    border: 1px solid rgba(6,182,212,0.4);
+    color: #67e8f9;
+    animation: slotPulse 2s infinite;
+  }
+
+  .ring-slot.completed {
+    background: rgba(74,222,128,0.2);
+    border: 1px solid rgba(74,222,128,0.4);
+    color: #4ade80;
+  }
+
+  .ring-slot.processing {
+    background: rgba(251,191,36,0.2);
+    border: 1px solid rgba(251,191,36,0.4);
+    color: #fbbf24;
+    animation: processPulse 0.5s infinite;
+  }
+
+  @keyframes slotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  @keyframes processPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .ring-info {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    font-size: 0.75rem;
+    color: #888;
+  }
+
+  .ring-stat strong { color: #06b6d4; }
+
+  .ring-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: #666;
+    flex-shrink: 0;
+  }
+
+  .arrow-label { font-size: 0.7rem; white-space: nowrap; }
+  .arrow-body { font-size: 1.2rem; letter-spacing: -2px; }
+
+  .iouring-flow {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .flow-step {
+    flex: 1;
+    min-width: 180px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .flow-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(139,92,246,0.2);
+    border: 1px solid rgba(139,92,246,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #c4b5fd;
+    flex-shrink: 0;
+  }
+
+  .flow-text { font-size: 0.8rem; color: #aaa; line-height: 1.4; }
+
+  .iouring-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* Reactor pattern */
+  .reactor-viz { margin-bottom: 20px; }
+
+  .reactor-diagram {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 20px;
+    align-items: start;
+    margin-bottom: 20px;
+  }
+
+  .reactor-demux {
+    background: rgba(139,92,246,0.1);
+    border: 1px solid rgba(139,92,246,0.3);
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    min-width: 160px;
+  }
+
+  .demux-label { font-size: 0.9rem; font-weight: 700; color: #c4b5fd; }
+  .demux-sub { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+  .reactor-loop-box {
+    background: rgba(6,182,212,0.05);
+    border: 1px solid rgba(6,182,212,0.2);
+    border-radius: 16px;
+    padding: 20px;
+  }
+
+  .loop-label {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #67e8f9;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+
+  .reactor-events {
+    min-height: 60px;
+    padding: 10px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+  }
+
+  .reactor-event {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .reactor-event.idle { color: #555; }
+  .reactor-event.accept { color: #c4b5fd; background: rgba(139,92,246,0.1); }
+  .reactor-event.read { color: #4ade80; background: rgba(74,222,128,0.1); }
+  .reactor-event.write { color: #60a5fa; background: rgba(96,165,250,0.1); }
+  .reactor-event.timer { color: #fbbf24; background: rgba(251,191,36,0.1); }
+
+  .reactor-handlers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .handler-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s;
+    min-width: 160px;
+  }
+
+  .handler-card.active {
+    border-color: rgba(74,222,128,0.5);
+    background: rgba(74,222,128,0.1);
+    box-shadow: 0 0 15px rgba(74,222,128,0.15);
+  }
+
+  .handler-icon { font-size: 1.1rem; }
+  .handler-name { font-size: 0.8rem; color: #aaa; font-weight: 600; }
+
+  .reactor-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .reactor-users { margin-top: 20px; }
+
+  .reactor-users h3 {
+    margin-bottom: 12px;
+  }
+
+  .users-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .user-badge {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    color: #aaa;
+    line-height: 1.5;
+  }
+
+  .user-badge strong { color: #fff; }
+
+  /* Animation section */
+  .anim-container {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  .anim-timeline {
+    min-height: 200px;
+    padding: 12px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.8;
+    overflow-y: auto;
+    max-height: 300px;
+  }
+
+  .anim-line { color: #888; }
+  .anim-line.highlight { color: #4ade80; }
+  .anim-line.syscall { color: #06b6d4; }
+  .anim-line.event { color: #fbbf24; }
+
+  .anim-controls {
+    display: flex;
+    gap: 12px;
+  }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .explain-card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 10px; color: #fff; }
+  .explain-card p { font-size: 0.95rem; color: #aaa; line-height: 1.7; }
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #22c55e; font-style: normal; }
+
+  .highlight-card {
+    border-color: rgba(139,92,246,0.3);
+    background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(6,182,212,0.04));
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #06b6d4, #3b82f6);
+    color: white;
+  }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(6,182,212,0.4); }
+
+  .election-btn {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+  }
+  .election-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+
+  .chaos-btn {
+    background: linear-gradient(135deg, #f472b6, #ef4444);
+    color: white;
+  }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #06b6d4; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .compare-grid { grid-template-columns: 1fr; }
+    .blocking-viz { grid-template-columns: 1fr; }
+    .epoll-components { grid-template-columns: 1fr; }
+    .et-lt-grid { grid-template-columns: 1fr; }
+    .ring-container { flex-direction: column; }
+    .reactor-diagram { grid-template-columns: 1fr; }
+    .users-grid { grid-template-columns: 1fr; }
+    .iouring-flow { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // LINUX I/O MODELS — INTERACTIVE VISUALIZATIONS
+  // ============================================================
+
+  // --- Scalability Comparison ---
+  var connSlider = document.getElementById("connSlider");
+  var connLabel = document.getElementById("connLabel");
+
+  function formatNum(n) {
+    if (n >= 1000) return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "K";
+    return String(n);
+  }
+
+  function updateScalability() {
+    var conns = parseInt(connSlider.value);
+    connLabel.textContent = formatNum(conns);
+
+    // Blocking I/O
+    var bThreads = conns;
+    var bMem = conns; // ~1MB per thread
+    var bSwitches = conns * 50;
+    document.getElementById("blockingThreads").textContent = formatNum(bThreads);
+    document.getElementById("blockingMem").textContent = formatNum(bMem) + " MB";
+    document.getElementById("blockingSwitches").textContent = "~" + formatNum(bSwitches);
+
+    var bLoad = Math.min(100, (conns / 100) * 10);
+    document.getElementById("blockingBar").style.width = bLoad + "%";
+    var bVerdict = document.getElementById("blockingVerdict");
+    if (conns <= 100) {
+      bVerdict.textContent = "Works fine";
+      bVerdict.className = "model-verdict good";
+    } else if (conns <= 1000) {
+      bVerdict.textContent = "Getting heavy";
+      bVerdict.className = "model-verdict warning";
+    } else {
+      bVerdict.textContent = "UNUSABLE — " + formatNum(bMem) + " MB RAM, scheduling collapse";
+      bVerdict.className = "model-verdict danger";
+    }
+
+    // epoll
+    var eThreads = Math.min(Math.max(1, Math.ceil(conns / 5000)), navigator.hardwareConcurrency || 8);
+    document.getElementById("epollThreads").textContent = eThreads <= 4 ? "1-" + eThreads : String(eThreads);
+    document.getElementById("epollMem").textContent = "~" + Math.max(1, Math.round(conns * 0.001 + 0.5)) + " MB";
+    document.getElementById("epollSyscalls").textContent = "1";
+    var eLoad = Math.min(60, conns / 200);
+    document.getElementById("epollBar").style.width = eLoad + "%";
+    var eVerdict = document.getElementById("epollVerdict");
+    eVerdict.textContent = conns <= 5000 ? "Excellent" : "Good — consider multi-worker";
+    eVerdict.className = "model-verdict excellent";
+
+    // io_uring
+    document.getElementById("iouringThreads").textContent = "1";
+    document.getElementById("iouringMem").textContent = "~" + Math.max(0.5, Math.round(conns * 0.0005 * 10) / 10) + " MB";
+    document.getElementById("iouringSyscalls").textContent = "0 (polled)";
+    var uLoad = Math.min(40, conns / 300);
+    document.getElementById("iouringBar").style.width = uLoad + "%";
+    var uVerdict = document.getElementById("iouringVerdict");
+    uVerdict.textContent = "Optimal";
+    uVerdict.className = "model-verdict excellent";
+  }
+
+  connSlider.addEventListener("input", updateScalability);
+  updateScalability();
+
+  // --- Blocking I/O Visualization ---
+  var blockingConns = [];
+  var maxBlockingConns = 30;
+
+  function renderBlocking() {
+    var threadPool = document.getElementById("threadPool");
+    var clientList = document.getElementById("blockingClients");
+    var tHtml = "";
+    var cHtml = "";
+
+    for (var i = 0; i < blockingConns.length; i++) {
+      var state = blockingConns[i];
+      tHtml += '<div class="thread-box ' + state + '">T' + (i + 1) + '</div>';
+      var cCls = "client-dot" + (state === "blocked" ? " waiting" : "");
+      cHtml += '<div class="' + cCls + '">C' + (i + 1) + '</div>';
+    }
+
+    if (blockingConns.length === 0) {
+      tHtml = '<div style="color:#555;font-size:0.8rem;padding:10px;">No threads spawned yet...</div>';
+      cHtml = '<div style="color:#555;font-size:0.8rem;padding:10px;">No clients connected...</div>';
+    }
+
+    threadPool.innerHTML = tHtml;
+    clientList.innerHTML = cHtml;
+  }
+
+  function addBlockingClient() {
+    if (blockingConns.length >= maxBlockingConns) return;
+    var states = ["busy", "idle", "blocked"];
+    var state = states[Math.floor(Math.random() * states.length)];
+    blockingConns.push(state);
+    renderBlocking();
+
+    // Randomly toggle states
+    var idx = blockingConns.length - 1;
+    setInterval(function() {
+      if (idx < blockingConns.length) {
+        var s = ["busy", "idle", "blocked"];
+        blockingConns[idx] = s[Math.floor(Math.random() * s.length)];
+        renderBlocking();
+      }
+    }, 1000 + Math.random() * 2000);
+  }
+
+  document.getElementById("addClientBtn").addEventListener("click", addBlockingClient);
+
+  document.getElementById("floodBtn").addEventListener("click", function() {
+    for (var i = 0; i < 20 && blockingConns.length < maxBlockingConns; i++) {
+      addBlockingClient();
+    }
+  });
+
+  document.getElementById("blockingResetBtn").addEventListener("click", function() {
+    blockingConns = [];
+    renderBlocking();
+  });
+
+  renderBlocking();
+
+  // --- epoll Visualization ---
+  var epollFds = [];
+  var epollReadyList = [];
+  var nextFd = 4;
+
+  function renderEpoll() {
+    var interestHtml = "";
+    for (var i = 0; i < epollFds.length; i++) {
+      interestHtml += '<span class="fd-chip interest">fd:' + epollFds[i] + '</span>';
+    }
+    if (epollFds.length === 0) {
+      interestHtml = '<span style="color:#555;font-size:0.75rem;">No fds registered</span>';
+    }
+    document.getElementById("interestFds").innerHTML = interestHtml;
+
+    var readyHtml = "";
+    for (var r = 0; r < epollReadyList.length; r++) {
+      readyHtml += '<span class="fd-chip ready">fd:' + epollReadyList[r] + ' EPOLLIN</span>';
+    }
+    if (epollReadyList.length === 0) {
+      readyHtml = '<span style="color:#555;font-size:0.75rem;">Empty</span>';
+    }
+    document.getElementById("readyFds").innerHTML = readyHtml;
+  }
+
+  document.getElementById("epollAddBtn").addEventListener("click", function() {
+    if (epollFds.length >= 12) return;
+    epollFds.push(nextFd++);
+    renderEpoll();
+    var loopEl = document.getElementById("loopWait");
+    loopEl.textContent = "epoll_ctl(EPOLL_CTL_ADD, fd:" + (nextFd - 1) + ")";
+    loopEl.className = "loop-step active";
+    setTimeout(function() {
+      loopEl.textContent = "epoll_wait() — sleeping";
+      loopEl.className = "loop-step";
+    }, 1200);
+  });
+
+  document.getElementById("epollDataBtn").addEventListener("click", function() {
+    if (epollFds.length === 0) return;
+    // Random fd becomes ready
+    var readyFd = epollFds[Math.floor(Math.random() * epollFds.length)];
+    if (epollReadyList.indexOf(readyFd) === -1) {
+      epollReadyList.push(readyFd);
+    }
+    renderEpoll();
+    var loopEl = document.getElementById("loopWait");
+    loopEl.textContent = "← IRQ: data on fd:" + readyFd;
+    loopEl.className = "loop-step active";
+    setTimeout(function() {
+      loopEl.textContent = "epoll_wait() — " + epollReadyList.length + " fd(s) ready";
+      loopEl.className = "loop-step";
+    }, 800);
+  });
+
+  document.getElementById("epollWaitBtn").addEventListener("click", function() {
+    var loopEl = document.getElementById("loopWait");
+    if (epollReadyList.length === 0) {
+      loopEl.textContent = "epoll_wait() returned 0 — no events";
+      loopEl.className = "loop-step";
+      return;
+    }
+    var count = epollReadyList.length;
+    loopEl.textContent = "epoll_wait() → " + count + " events! Dispatching...";
+    loopEl.className = "loop-step active";
+
+    var processed = epollReadyList.slice();
+    epollReadyList = [];
+    renderEpoll();
+
+    setTimeout(function() {
+      loopEl.textContent = "Handled fds: [" + processed.join(", ") + "] — back to sleep";
+      loopEl.className = "loop-step";
+      setTimeout(function() {
+        loopEl.textContent = "epoll_wait() — sleeping";
+        loopEl.className = "loop-step";
+      }, 1500);
+    }, 1000);
+  });
+
+  document.getElementById("epollResetBtn").addEventListener("click", function() {
+    epollFds = [];
+    epollReadyList = [];
+    nextFd = 4;
+    renderEpoll();
+    document.getElementById("loopWait").textContent = "epoll_wait() — sleeping";
+    document.getElementById("loopWait").className = "loop-step";
+  });
+
+  renderEpoll();
+
+  // --- io_uring Ring Buffer Visualization ---
+  var RING_SIZE = 8;
+  var sqEntries = [];
+  var cqEntries = [];
+  var sqHeadIdx = 0;
+  var sqTailIdx = 0;
+  var cqHeadIdx = 0;
+  var cqTailIdx = 0;
+  var opCounter = 0;
+
+  var opTypes = ["read", "write", "accept", "send", "recv", "fsync", "poll"];
+
+  function renderRings() {
+    var sqHtml = "";
+    var cqHtml = "";
+
+    for (var i = 0; i < RING_SIZE; i++) {
+      var sqEntry = sqEntries[i];
+      if (sqEntry) {
+        var cls = sqEntry.processing ? "ring-slot processing" : "ring-slot filled";
+        sqHtml += '<div class="' + cls + '">' + sqEntry.op + '</div>';
+      } else {
+        sqHtml += '<div class="ring-slot empty">—</div>';
+      }
+
+      var cqEntry = cqEntries[i];
+      if (cqEntry) {
+        cqHtml += '<div class="ring-slot completed">' + cqEntry.op + ' ✓</div>';
+      } else {
+        cqHtml += '<div class="ring-slot empty">—</div>';
+      }
+    }
+
+    document.getElementById("sqRing").innerHTML = sqHtml;
+    document.getElementById("cqRing").innerHTML = cqHtml;
+
+    var sqCount = sqEntries.filter(function(e) { return e; }).length;
+    var cqCount = cqEntries.filter(function(e) { return e; }).length;
+
+    document.getElementById("sqHead").textContent = String(sqHeadIdx);
+    document.getElementById("sqTail").textContent = String(sqTailIdx);
+    document.getElementById("sqCount").textContent = String(sqCount);
+    document.getElementById("cqHead").textContent = String(cqHeadIdx);
+    document.getElementById("cqTail").textContent = String(cqTailIdx);
+    document.getElementById("cqCount").textContent = String(cqCount);
+  }
+
+  document.getElementById("sqSubmitBtn").addEventListener("click", function() {
+    // Find empty slot in SQ
+    var sqCount = sqEntries.filter(function(e) { return e; }).length;
+    if (sqCount >= RING_SIZE) return;
+
+    var op = opTypes[opCounter % opTypes.length];
+    opCounter++;
+    sqEntries[sqTailIdx % RING_SIZE] = { op: op, processing: false };
+    sqTailIdx = (sqTailIdx + 1) % RING_SIZE;
+    renderRings();
+  });
+
+  document.getElementById("kernelProcessBtn").addEventListener("click", function() {
+    // Process one SQ entry
+    var found = false;
+    for (var i = 0; i < RING_SIZE; i++) {
+      if (sqEntries[i] && !sqEntries[i].processing) {
+        sqEntries[i].processing = true;
+        renderRings();
+
+        (function(idx) {
+          setTimeout(function() {
+            var entry = sqEntries[idx];
+            sqEntries[idx] = null;
+            sqHeadIdx = (sqHeadIdx + 1) % RING_SIZE;
+
+            // Add to CQ
+            cqEntries[cqTailIdx % RING_SIZE] = { op: entry.op };
+            cqTailIdx = (cqTailIdx + 1) % RING_SIZE;
+            renderRings();
+          }, 600);
+        })(i);
+
+        found = true;
+        break;
+      }
+    }
+  });
+
+  document.getElementById("cqReapBtn").addEventListener("click", function() {
+    // Reap one CQ entry
+    for (var i = 0; i < RING_SIZE; i++) {
+      if (cqEntries[i]) {
+        cqEntries[i] = null;
+        cqHeadIdx = (cqHeadIdx + 1) % RING_SIZE;
+        renderRings();
+        break;
+      }
+    }
+  });
+
+  document.getElementById("iouringResetBtn").addEventListener("click", function() {
+    sqEntries = [];
+    cqEntries = [];
+    sqHeadIdx = 0;
+    sqTailIdx = 0;
+    cqHeadIdx = 0;
+    cqTailIdx = 0;
+    opCounter = 0;
+    renderRings();
+  });
+
+  renderRings();
+
+  // --- Reactor Pattern ---
+  var reactorLog = [];
+
+  function addReactorEvent(type, text) {
+    reactorLog.push({ type: type, text: text });
+    if (reactorLog.length > 8) reactorLog.shift();
+
+    var html = "";
+    for (var i = 0; i < reactorLog.length; i++) {
+      var evt = reactorLog[i];
+      html += '<div class="reactor-event ' + evt.type + '">' + evt.text + '</div>';
+    }
+    document.getElementById("reactorEvents").innerHTML = html;
+  }
+
+  function flashHandler(id) {
+    var el = document.getElementById(id);
+    el.classList.add("active");
+    setTimeout(function() { el.classList.remove("active"); }, 1500);
+  }
+
+  document.getElementById("reactorConnBtn").addEventListener("click", function() {
+    addReactorEvent("accept", "→ ACCEPT: new connection on fd:" + (4 + Math.floor(Math.random() * 20)));
+    flashHandler("handlerAccept");
+  });
+
+  document.getElementById("reactorDataBtn").addEventListener("click", function() {
+    var fd = 4 + Math.floor(Math.random() * 20);
+    addReactorEvent("read", "→ READ: data ready on fd:" + fd + " (1.2KB)");
+    flashHandler("handlerRead");
+    setTimeout(function() {
+      addReactorEvent("write", "→ WRITE: response sent to fd:" + fd);
+      flashHandler("handlerWrite");
+    }, 500);
+  });
+
+  document.getElementById("reactorTimerBtn").addEventListener("click", function() {
+    addReactorEvent("timer", "→ TIMER: keepalive check — closing idle connections");
+    flashHandler("handlerTimer");
+  });
+
+  document.getElementById("reactorResetBtn").addEventListener("click", function() {
+    reactorLog = [];
+    document.getElementById("reactorEvents").innerHTML = '<div class="reactor-event idle">Waiting for events...</div>';
+    var handlers = ["handlerAccept", "handlerRead", "handlerWrite", "handlerTimer"];
+    for (var h = 0; h < handlers.length; h++) {
+      document.getElementById(handlers[h]).classList.remove("active");
+    }
+  });
+
+  // --- epoll Event Loop Animation ---
+  var animSteps = [
+    { type: "syscall", text: ">>> epoll_wait(epfd, events, 1024, -1)" },
+    { type: "highlight", text: "    [sleeping... waiting for events]" },
+    { type: "event", text: "    ← IRQ: packet arrived on eth0" },
+    { type: "event", text: "    ← kernel: TCP data ready on fd:7" },
+    { type: "syscall", text: ">>> epoll_wait() returned 1 event" },
+    { type: "highlight", text: "    events[0] = { fd:7, EPOLLIN }" },
+    { type: "", text: "    dispatching to read handler..." },
+    { type: "syscall", text: ">>> read(7, buf, 4096) = 1380 bytes" },
+    { type: "", text: "    processing HTTP request: GET /api/data" },
+    { type: "", text: "    building JSON response (234 bytes)" },
+    { type: "syscall", text: ">>> write(7, response, 234) = 234" },
+    { type: "highlight", text: "    ✓ request handled in 0.12ms" },
+    { type: "", text: "" },
+    { type: "syscall", text: ">>> epoll_wait(epfd, events, 1024, -1)" },
+    { type: "highlight", text: "    [sleeping... waiting for events]" },
+    { type: "event", text: "    ← 3 events arrive simultaneously!" },
+    { type: "syscall", text: ">>> epoll_wait() returned 3 events" },
+    { type: "highlight", text: "    events[0] = { fd:4, EPOLLIN }  ← new connection" },
+    { type: "highlight", text: "    events[1] = { fd:8, EPOLLIN }  ← data ready" },
+    { type: "highlight", text: "    events[2] = { fd:5, EPOLLOUT } ← write ready" },
+    { type: "syscall", text: ">>> accept(4) = fd:12  (new client)" },
+    { type: "syscall", text: ">>> epoll_ctl(EPOLL_CTL_ADD, fd:12)" },
+    { type: "syscall", text: ">>> read(8, buf, 4096) = 512 bytes" },
+    { type: "syscall", text: ">>> write(5, buf, 2048) = 2048" },
+    { type: "highlight", text: "    ✓ 3 events handled in 0.08ms total" },
+    { type: "", text: "" },
+    { type: "highlight", text: "    One thread. Zero wasted cycles. This is epoll." },
+  ];
+
+  var animIdx = 0;
+  var animInterval = null;
+
+  function renderAnimStep() {
+    var el = document.getElementById("animTimeline");
+    if (animIdx === 0) el.innerHTML = "";
+
+    if (animIdx >= animSteps.length) {
+      clearInterval(animInterval);
+      animInterval = null;
+      document.getElementById("animStartBtn").disabled = false;
+      return;
+    }
+
+    var step = animSteps[animIdx];
+    var cls = "anim-line";
+    if (step.type) cls += " " + step.type;
+    el.innerHTML += '<div class="' + cls + '">' + step.text + '</div>';
+    el.scrollTop = el.scrollHeight;
+    animIdx++;
+  }
+
+  document.getElementById("animStartBtn").addEventListener("click", function() {
+    if (animInterval) return;
+    this.disabled = true;
+    animIdx = 0;
+    document.getElementById("animTimeline").innerHTML = "";
+    animInterval = setInterval(renderAnimStep, 350);
+  });
+
+  document.getElementById("animResetBtn").addEventListener("click", function() {
+    if (animInterval) {
+      clearInterval(animInterval);
+      animInterval = null;
+    }
+    animIdx = 0;
+    document.getElementById("animTimeline").innerHTML = '<div class="anim-line" style="color:#555;">Click "Start Animation" to watch the epoll event loop in action...</div>';
+    document.getElementById("animStartBtn").disabled = false;
+  });
+</script>

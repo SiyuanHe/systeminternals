@@ -1,0 +1,125 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "TrueTime & Commit-Wait", description: "GPS + atomic clocks → bounded uncertainty → external consistency", href: "/spanner/truetime/", status: "live" },
+  { title: "Paxos & Replication", description: "Multi-datacenter consensus and split management", href: "#", status: "coming" },
+  { title: "SQL & Schema Changes", description: "Online schema changes across billions of rows", href: "#", status: "coming" },
+  { title: "Read-Only Transactions", description: "Lock-free reads at a globally consistent timestamp", href: "#", status: "coming" },
+  { title: "Distributed Transactions", description: "Two-phase commit with TrueTime for external consistency", href: "#", status: "coming" },
+  { title: "Spanner vs CockroachDB", description: "TrueTime vs Hybrid Logical Clocks, trade-offs and similarities", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Google Spanner Internals" 
+  description="Interactive visualizations for understanding Google Spanner's TrueTime, Paxos replication, and globally-consistent distributed transactions"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Spanner", href: "/spanner/" }]}
+>
+  <section class="section-header">
+    <h1>🌐 Google Spanner Internals</h1>
+    <p>
+      Spanner is Google's globally-distributed database — the first to provide external consistency 
+      at global scale. Its secret weapon is <strong>TrueTime</strong>, a clock API backed by GPS receivers 
+      and atomic clocks in every datacenter, giving bounded clock uncertainty (~7ms). These visualizations 
+      explore how Spanner turns physical time into a consistency primitive.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .section-header strong {
+    color: #fff;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 179, 71, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

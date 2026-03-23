@@ -1,0 +1,120 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "TLS 1.3 Handshake", description: "1-RTT handshake, key exchange, certificate verification, and 0-RTT resumption", href: "/tls/handshake/", status: "live" },
+  { title: "Certificate Chain", description: "X.509 certificates, CA hierarchy, and trust validation", href: "#", status: "coming" },
+  { title: "Cipher Suites", description: "AEAD ciphers, key exchange algorithms, and negotiation", href: "#", status: "coming" },
+  { title: "TLS Record Protocol", description: "Record layer framing, encryption, and MAC verification", href: "#", status: "coming" },
+  { title: "mTLS & Client Certificates", description: "Mutual authentication for service-to-service communication", href: "#", status: "coming" },
+  { title: "HTTPS & SNI", description: "Server Name Indication and virtual hosting over TLS", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="TLS / SSL Internals" 
+  description="Interactive visualizations for understanding TLS 1.3 handshakes, certificate verification, key derivation, and secure transport"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "TLS", href: "/tls/" }]}
+>
+  <section class="section-header">
+    <h1>🔒 TLS / SSL Internals</h1>
+    <p>
+      Transport Layer Security (TLS) is the protocol that secures virtually all internet traffic.
+      TLS 1.3 dramatically simplified the handshake to 1-RTT, removed legacy insecure ciphers, and
+      introduced 0-RTT resumption. These visualizations help you understand what happens under the hood.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(34, 197, 94, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

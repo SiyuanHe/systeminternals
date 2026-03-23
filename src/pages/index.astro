@@ -120,6 +120,26 @@ const prometheusTopics = [
   { title: "PromQL Evaluation", description: "How range queries scan blocks, series, and samples", href: "#", status: "coming" },
 ];
 
+const spannerTopics = [
+  { title: "TrueTime & Commit-Wait", description: "GPS clocks, bounded uncertainty, external consistency, Paxos groups", href: "/spanner/truetime/", status: "live" },
+  { title: "Schema & SQL Layer", description: "Interleaved tables, secondary indexes, query processing", href: "#", status: "coming" },
+];
+
+const linuxTopics = [
+  { title: "I/O Models", description: "Blocking, epoll, io_uring — scalability and the reactor pattern", href: "/linux/io-models/", status: "live" },
+  { title: "Memory Management", description: "Virtual memory, page tables, TLB, and huge pages", href: "#", status: "coming" },
+];
+
+const dnsTopics = [
+  { title: "DNS Resolution", description: "Recursive resolution, caching, DNSSEC, DoH/DoT, anycast", href: "/dns/resolution/", status: "live" },
+  { title: "DNS Attacks", description: "Cache poisoning, amplification, and DNS rebinding", href: "#", status: "coming" },
+];
+
+const tlsTopics = [
+  { title: "TLS 1.3 Handshake", description: "1-RTT handshake, ECDHE, key derivation, 0-RTT resumption", href: "/tls/handshake/", status: "live" },
+  { title: "mTLS & Certificate Management", description: "Mutual TLS, ACME, and certificate rotation", href: "#", status: "coming" },
+];
+
 const sparkTopics = [
   { title: "DAG Execution", description: "Stages, tasks, and the execution plan — plus tuning for performance", href: "/spark/dag-execution/", status: "live" },
   { title: "Shuffle Internals", description: "The most expensive operation in Spark", href: "/spark/shuffle/", status: "live" },
@@ -502,6 +522,78 @@ const sparkTopics = [
     </h2>
     <div class="topics-grid">
       {envoyTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">⚡</span>
+      Google Spanner
+    </h2>
+    <div class="topics-grid">
+      {spannerTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🐧</span>
+      Linux Internals
+    </h2>
+    <div class="topics-grid">
+      {linuxTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🌍</span>
+      DNS
+    </h2>
+    <div class="topics-grid">
+      {dnsTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🔒</span>
+      TLS / Security
+    </h2>
+    <div class="topics-grid">
+      {tlsTopics.map(topic => (
         <a href={topic.href} class={`topic-card ${topic.status}`}>
           <div class="topic-status">
             {topic.status === "live" ? "✦ Live" : "Coming soon"}

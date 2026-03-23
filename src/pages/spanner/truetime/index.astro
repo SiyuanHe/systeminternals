@@ -1,0 +1,1500 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Google Spanner: TrueTime & Commit-Wait" 
+  description="Interactive visualization of Spanner's TrueTime API, commit-wait protocol, Paxos replication, and external consistency guarantees"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Spanner", href: "/spanner/" },
+    { label: "TrueTime", href: "/spanner/truetime/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⏱️ TrueTime &amp; Commit-Wait</h1>
+      <p class="subtitle">How Google Spanner uses physical clocks to guarantee external consistency at global scale</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Google Spanner is the only production system that provides <strong>external consistency</strong> 
+          for globally-distributed transactions. The key insight: if you can <em>bound clock uncertainty</em>, 
+          you can use real time as a consistency primitive. <strong>TrueTime</strong> exposes clock uncertainty 
+          explicitly — instead of returning a single timestamp, <code>TT.now()</code> returns an interval 
+          <code>[earliest, latest]</code>. Spanner's <em>commit-wait</em> rule then waits out the uncertainty, 
+          guaranteeing that if transaction T1 commits before T2 starts, T1's timestamp is less than T2's.
+        </p>
+      </div>
+    </section>
+
+    <!-- TrueTime API -->
+    <section class="api-section">
+      <h2>🕐 The TrueTime API</h2>
+      <p class="section-desc">Three methods that expose clock uncertainty to the database</p>
+
+      <div class="api-grid">
+        <div class="api-card" data-api="now">
+          <div class="api-name">TT.now()</div>
+          <div class="api-return">→ TTinterval [earliest, latest]</div>
+          <div class="api-desc">Returns a time interval guaranteed to contain the true absolute time. The width (ε) is typically 1-7ms.</div>
+        </div>
+        <div class="api-card" data-api="after">
+          <div class="api-name">TT.after(t)</div>
+          <div class="api-return">→ boolean</div>
+          <div class="api-desc">Returns true if timestamp t has definitely passed. Equivalent to: t &lt; TT.now().earliest</div>
+        </div>
+        <div class="api-card" data-api="before">
+          <div class="api-name">TT.before(t)</div>
+          <div class="api-return">→ boolean</div>
+          <div class="api-desc">Returns true if timestamp t has definitely not arrived yet. Equivalent to: t &gt; TT.now().latest</div>
+        </div>
+      </div>
+
+      <div class="uncertainty-viz">
+        <h3>Clock Uncertainty (ε) Over Time</h3>
+        <p class="section-desc">Between GPS/atomic clock syncs, uncertainty grows. After sync, it collapses back.</p>
+        <div class="uncertainty-canvas-wrap">
+          <canvas id="uncertaintyCanvas" width="800" height="200"></canvas>
+        </div>
+        <div class="uncertainty-controls">
+          <button id="syncClockBtn" class="action-btn primary-btn">📡 GPS Sync</button>
+          <div class="epsilon-display">ε = <span id="epsilonValue">1.0</span> ms</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive TrueTime Interval -->
+    <section class="interval-section">
+      <h2>📊 Live TrueTime Interval</h2>
+      <p class="section-desc">Watch TT.now() return an interval that shrinks after each clock sync</p>
+
+      <div class="interval-viz">
+        <div class="interval-timeline" id="intervalTimeline">
+          <div class="interval-bar" id="intervalBar">
+            <div class="interval-label-left" id="intervalEarliest">earliest</div>
+            <div class="interval-center-mark"></div>
+            <div class="interval-label-right" id="intervalLatest">latest</div>
+          </div>
+          <div class="true-time-marker" id="trueTimeMarker">
+            <div class="marker-label">true time (unknown)</div>
+          </div>
+        </div>
+        <div class="interval-readout">
+          <div class="readout-item">
+            <span class="readout-label">TT.now().earliest</span>
+            <span class="readout-value" id="readoutEarliest">—</span>
+          </div>
+          <div class="readout-item">
+            <span class="readout-label">TT.now().latest</span>
+            <span class="readout-value" id="readoutLatest">—</span>
+          </div>
+          <div class="readout-item highlight-readout">
+            <span class="readout-label">Uncertainty (ε)</span>
+            <span class="readout-value" id="readoutEpsilon">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Commit-Wait -->
+    <section class="commit-section">
+      <h2>⏳ Commit-Wait Protocol</h2>
+      <p class="section-desc">After assigning a commit timestamp s, Spanner waits until TT.after(s) is true</p>
+
+      <div class="commit-controls">
+        <button id="runCommitBtn" class="action-btn primary-btn">▶ Run Commit-Wait</button>
+        <button id="commitResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="commit-viz" id="commitViz">
+        <div class="commit-timeline-bar">
+          <div class="commit-phase" id="commitPhase1">
+            <span class="phase-label">① Acquire locks &amp; pick s = TT.now().latest</span>
+          </div>
+          <div class="commit-phase waiting" id="commitPhase2">
+            <span class="phase-label">② Commit-wait: sleep until TT.after(s)</span>
+            <div class="wait-progress" id="waitProgress"></div>
+          </div>
+          <div class="commit-phase" id="commitPhase3">
+            <span class="phase-label">③ Release locks &amp; notify client</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="commit-log" id="commitLog">
+        <div class="log-entry info">Ready — click "Run Commit-Wait" to begin</div>
+      </div>
+
+      <div class="commit-explain-grid">
+        <div class="explain-card">
+          <h3>Why Wait?</h3>
+          <p>
+            The commit timestamp <strong>s</strong> is chosen as <code>TT.now().latest</code> — the upper bound 
+            of the uncertainty interval. By waiting until <code>TT.after(s)</code> returns true, Spanner guarantees 
+            that <strong>s has definitely passed in absolute time</strong> before any locks are released. 
+            Any subsequent transaction will see a strictly greater timestamp.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>The Cost</h3>
+          <p>
+            Commit-wait adds <strong>~2ε</strong> of latency to every write transaction (typically 7-14ms). 
+            This is the price of external consistency. Google minimizes ε with <strong>GPS receivers</strong> 
+            and <strong>atomic clocks</strong> in every datacenter — GPS for accuracy, atomic clocks as 
+            backup when GPS signal drops.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- External Consistency -->
+    <section class="consistency-section">
+      <h2>🔒 External Consistency</h2>
+      <p class="section-desc">If T1 commits before T2 starts, then T1's timestamp &lt; T2's timestamp — always</p>
+
+      <div class="consistency-controls">
+        <button id="runConsistencyBtn" class="action-btn primary-btn">▶ Run Two Transactions</button>
+        <button id="consistencyResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="consistency-viz" id="consistencyViz">
+        <div class="txn-lane" id="txnLane1">
+          <div class="lane-label">T1</div>
+          <div class="lane-bar" id="laneBar1"></div>
+        </div>
+        <div class="txn-lane" id="txnLane2">
+          <div class="lane-label">T2</div>
+          <div class="lane-bar" id="laneBar2"></div>
+        </div>
+        <div class="time-axis">
+          <span>real time →</span>
+        </div>
+      </div>
+
+      <div class="consistency-log" id="consistencyLog">
+        <div class="log-entry info">Click "Run Two Transactions" to see external consistency in action</div>
+      </div>
+    </section>
+
+    <!-- Paxos Groups -->
+    <section class="paxos-section">
+      <h2>🗳️ Paxos Groups &amp; Multi-Datacenter Replication</h2>
+      <p class="section-desc">Each split (range of rows) is replicated via Paxos across datacenters</p>
+
+      <div class="paxos-controls">
+        <button id="paxosWriteBtn" class="action-btn primary-btn">📝 Write to Split</button>
+        <button id="paxosFailBtn" class="action-btn kill-btn">💀 Kill Replica</button>
+        <button id="paxosResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="dc-grid">
+        <div class="dc-box" id="dc1">
+          <div class="dc-name">🇺🇸 US-East</div>
+          <div class="dc-detail">GPS + Atomic Clock</div>
+          <div class="replica-box leader" id="replica1">
+            <div class="replica-role">Leader</div>
+            <div class="replica-data" id="replicaData1">v1: balance=$100</div>
+          </div>
+        </div>
+        <div class="dc-box" id="dc2">
+          <div class="dc-name">🇪🇺 EU-West</div>
+          <div class="dc-detail">GPS + Atomic Clock</div>
+          <div class="replica-box follower" id="replica2">
+            <div class="replica-role">Follower</div>
+            <div class="replica-data" id="replicaData2">v1: balance=$100</div>
+          </div>
+        </div>
+        <div class="dc-box" id="dc3">
+          <div class="dc-name">🇯🇵 Asia-NE</div>
+          <div class="dc-detail">GPS + Atomic Clock</div>
+          <div class="replica-box follower" id="replica3">
+            <div class="replica-role">Follower</div>
+            <div class="replica-data" id="replicaData3">v1: balance=$100</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="paxos-log" id="paxosLog">
+        <div class="log-entry info">3 replicas across 3 datacenters — quorum = 2</div>
+      </div>
+
+      <div class="paxos-explain">
+        <div class="explain-card">
+          <h3>Why Paxos, Not Raft?</h3>
+          <p>
+            Spanner uses <strong>Multi-Paxos</strong> (with a long-lived leader) for each split. Unlike Raft, 
+            Paxos allows more flexibility in leader election and log management. Each datacenter has 
+            <strong>GPS receivers</strong> and <strong>atomic clocks</strong> feeding into local TrueTime daemons. 
+            The leader coordinates writes, but <strong>read-only transactions are lock-free</strong> — they 
+            pick a safe timestamp and read from any sufficiently up-to-date replica.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Read-Only Transactions -->
+    <section class="readonly-section">
+      <h2>📖 Read-Only Transactions</h2>
+      <p class="section-desc">Lock-free, globally consistent reads at a chosen timestamp</p>
+
+      <div class="readonly-viz">
+        <div class="readonly-diagram">
+          <div class="ro-step">
+            <div class="ro-num">1</div>
+            <div class="ro-content">
+              <h4>Pick read timestamp</h4>
+              <p>Choose <code>s_read = TT.now().latest</code> — guaranteed to be in the past or present</p>
+            </div>
+          </div>
+          <div class="ro-arrow">→</div>
+          <div class="ro-step">
+            <div class="ro-num">2</div>
+            <div class="ro-content">
+              <h4>Read from any replica</h4>
+              <p>Any replica that is up-to-date through <code>s_read</code> can serve the read — no locks needed</p>
+            </div>
+          </div>
+          <div class="ro-arrow">→</div>
+          <div class="ro-step">
+            <div class="ro-num">3</div>
+            <div class="ro-content">
+              <h4>Snapshot isolation</h4>
+              <p>All reads see a consistent snapshot — no write can sneak in at <code>s_read</code> because commit-wait guarantees ordering</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CockroachDB Comparison -->
+    <section class="compare-section">
+      <h2>⚔️ Spanner vs CockroachDB: Clocks</h2>
+      <p class="section-desc">TrueTime (hardware clocks) vs Hybrid Logical Clocks (software only)</p>
+
+      <div class="compare-grid">
+        <div class="compare-card spanner-card">
+          <h3>🌐 Google Spanner</h3>
+          <div class="compare-items">
+            <div class="compare-item">
+              <strong>Clock Source</strong>
+              <span>GPS + Atomic Clocks (hardware)</span>
+            </div>
+            <div class="compare-item">
+              <strong>Uncertainty</strong>
+              <span>Bounded: ~1-7ms (ε)</span>
+            </div>
+            <div class="compare-item">
+              <strong>Consistency</strong>
+              <span>External consistency via commit-wait</span>
+            </div>
+            <div class="compare-item">
+              <strong>Write Latency Cost</strong>
+              <span>+2ε (~7-14ms) commit-wait</span>
+            </div>
+            <div class="compare-item">
+              <strong>Read-Only Txns</strong>
+              <span>Lock-free at safe timestamp</span>
+            </div>
+            <div class="compare-item">
+              <strong>Availability</strong>
+              <span>Google Cloud only</span>
+            </div>
+          </div>
+        </div>
+        <div class="compare-card crdb-card">
+          <h3>🪳 CockroachDB</h3>
+          <div class="compare-items">
+            <div class="compare-item">
+              <strong>Clock Source</strong>
+              <span>NTP + Hybrid Logical Clocks (software)</span>
+            </div>
+            <div class="compare-item">
+              <strong>Uncertainty</strong>
+              <span>Unbounded: relies on max-offset (default 500ms)</span>
+            </div>
+            <div class="compare-item">
+              <strong>Consistency</strong>
+              <span>Serializable SI + uncertainty restart</span>
+            </div>
+            <div class="compare-item">
+              <strong>Write Latency Cost</strong>
+              <span>No commit-wait, but possible txn restarts</span>
+            </div>
+            <div class="compare-item">
+              <strong>Read-Only Txns</strong>
+              <span>Leaseholder reads (no consensus)</span>
+            </div>
+            <div class="compare-item">
+              <strong>Availability</strong>
+              <span>Open source, runs anywhere</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="compare-insight">
+        <p>
+          <strong>Key trade-off:</strong> Spanner pays a small, predictable latency cost (commit-wait ~7ms) on 
+          every write to guarantee external consistency. CockroachDB avoids this cost but must occasionally 
+          <strong>restart transactions</strong> when it detects possible clock skew — and cannot guarantee 
+          external consistency without specialized hardware. For most applications, CockroachDB's approach 
+          is sufficient. For financial systems requiring strict real-time ordering, Spanner's guarantee is stronger.
+        </p>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://research.google/pubs/pub39966/" target="_blank">Spanner: Google's Globally-Distributed Database (OSDI 2012)</a> and <a href="https://research.google/pubs/pub45855/" target="_blank">Spanner, TrueTime &amp; the CAP Theorem (2017)</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Google%20Spanner%20TrueTime%20%26%20Commit-Wait&url=https://systeminternals.dev/spanner/truetime/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/spanner/truetime/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/spanner/truetime/&t=Interactive%20Google%20Spanner%20TrueTime%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #ffb347, #ff6723, #f87171);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(255, 179, 71, 0.1), rgba(248, 113, 113, 0.05));
+    border: 1px solid rgba(255, 179, 71, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #ffb347; font-style: normal; font-weight: 500; }
+  .overview-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    color: #fbbf24;
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #ffb347, #ff6723);
+    color: #111;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(255, 103, 35, 0.4);
+  }
+
+  .kill-btn {
+    background: linear-gradient(135deg, #f87171, #ef4444);
+    color: white;
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* API Section */
+  .api-section {
+    margin-bottom: 50px;
+  }
+
+  .api-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 30px;
+  }
+
+  .api-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 20px;
+    transition: all 0.3s;
+    cursor: default;
+  }
+
+  .api-card:hover {
+    background: rgba(255, 179, 71, 0.08);
+    border-color: rgba(255, 179, 71, 0.4);
+  }
+
+  .api-name {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #ffb347;
+    margin-bottom: 6px;
+  }
+
+  .api-return {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 12px;
+  }
+
+  .api-desc {
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.6;
+  }
+
+  /* Uncertainty Canvas */
+  .uncertainty-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .uncertainty-viz h3 {
+    color: #fff;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+  }
+
+  .uncertainty-canvas-wrap {
+    margin: 16px 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0,0,0,0.3);
+  }
+
+  #uncertaintyCanvas {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .uncertainty-controls {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-top: 12px;
+  }
+
+  .epsilon-display {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 1.1rem;
+    color: #ffb347;
+    font-weight: 600;
+  }
+
+  /* Interval Section */
+  .interval-section {
+    margin-bottom: 50px;
+  }
+
+  .interval-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .interval-timeline {
+    position: relative;
+    height: 80px;
+    margin: 20px 0;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .interval-bar {
+    position: relative;
+    height: 36px;
+    background: linear-gradient(90deg, rgba(255, 179, 71, 0.4), rgba(248, 113, 113, 0.4));
+    border: 2px solid #ffb347;
+    border-radius: 8px;
+    min-width: 100px;
+    max-width: 80%;
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+  }
+
+  .interval-label-left, .interval-label-right {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.7rem;
+    color: #ffb347;
+    white-space: nowrap;
+  }
+
+  .interval-center-mark {
+    width: 2px;
+    height: 20px;
+    background: #fff;
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+
+  .true-time-marker {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .marker-label {
+    font-size: 0.7rem;
+    color: #666;
+    margin-top: 40px;
+    white-space: nowrap;
+  }
+
+  .interval-readout {
+    display: flex;
+    gap: 20px;
+    margin-top: 16px;
+  }
+
+  .readout-item {
+    flex: 1;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+
+  .highlight-readout {
+    border-color: rgba(255, 179, 71, 0.4);
+    background: rgba(255, 179, 71, 0.06);
+  }
+
+  .readout-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .readout-value {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 1rem;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* Commit-Wait */
+  .commit-section {
+    margin-bottom: 50px;
+  }
+
+  .commit-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .commit-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  .commit-timeline-bar {
+    display: flex;
+    gap: 4px;
+  }
+
+  .commit-phase {
+    flex: 1;
+    padding: 16px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.5s;
+  }
+
+  .commit-phase.active-phase {
+    border-color: rgba(255, 179, 71, 0.5);
+    background: rgba(255, 179, 71, 0.1);
+  }
+
+  .commit-phase.done-phase {
+    border-color: rgba(34, 197, 94, 0.4);
+    background: rgba(34, 197, 94, 0.08);
+  }
+
+  .phase-label {
+    font-size: 0.85rem;
+    color: #ccc;
+    position: relative;
+    z-index: 1;
+  }
+
+  .wait-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #ffb347, #ff6723);
+    width: 0%;
+    transition: width 0.1s linear;
+  }
+
+  .commit-log, .paxos-log, .consistency-log {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.1);
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    margin-bottom: 24px;
+  }
+
+  .log-entry {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    animation: entryAppear 0.3s ease-out;
+  }
+
+  .log-entry.info { color: #9ca3af; }
+  .log-entry.time { color: #ffb347; }
+  .log-entry.wait { color: #fbbf24; }
+  .log-entry.success { color: #4ade80; }
+  .log-entry.error { color: #f87171; }
+  .log-entry.paxos { color: #a78bfa; }
+
+  @keyframes entryAppear {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .commit-explain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 50px;
+  }
+
+  .explain-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.1rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .explain-card p {
+    color: #aaa;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .explain-card strong { color: #ffb347; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #fbbf24;
+  }
+
+  /* External Consistency */
+  .consistency-section {
+    margin-bottom: 50px;
+  }
+
+  .consistency-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .consistency-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  .txn-lane {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .lane-label {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-weight: 700;
+    font-size: 1rem;
+    color: #fff;
+    min-width: 30px;
+  }
+
+  .lane-bar {
+    flex: 1;
+    height: 40px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .time-axis {
+    text-align: right;
+    color: #666;
+    font-size: 0.8rem;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .lane-segment {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    transition: all 0.5s ease;
+  }
+
+  /* Paxos Section */
+  .paxos-section {
+    margin-bottom: 50px;
+  }
+
+  .paxos-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .dc-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .dc-box {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s;
+  }
+
+  .dc-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .dc-detail {
+    font-size: 0.75rem;
+    color: #888;
+    margin-bottom: 14px;
+  }
+
+  .replica-box {
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+  }
+
+  .replica-box.leader {
+    border-color: rgba(255, 179, 71, 0.5);
+    background: rgba(255, 179, 71, 0.1);
+  }
+
+  .replica-box.follower {
+    border-color: rgba(96, 165, 250, 0.3);
+    background: rgba(96, 165, 250, 0.05);
+  }
+
+  .replica-box.dead {
+    opacity: 0.3;
+    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .replica-box.syncing {
+    border-color: rgba(167, 139, 250, 0.6);
+    background: rgba(167, 139, 250, 0.15);
+    box-shadow: 0 0 20px rgba(167, 139, 250, 0.2);
+  }
+
+  .replica-role {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .leader .replica-role { color: #ffb347; }
+  .follower .replica-role { color: #60a5fa; }
+  .dead .replica-role { color: #f87171; }
+
+  .replica-data {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    color: #aaa;
+  }
+
+  .paxos-explain {
+    margin-top: 20px;
+  }
+
+  /* Read-Only Transactions */
+  .readonly-section {
+    margin-bottom: 50px;
+  }
+
+  .readonly-viz {
+    background: rgba(0,0,0,0.2);
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .readonly-diagram {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .ro-step {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+  }
+
+  .ro-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(96, 165, 250, 0.3);
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+
+  .ro-content h4 {
+    color: #60a5fa;
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+  }
+
+  .ro-content p {
+    color: #aaa;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .ro-content code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    color: #fbbf24;
+  }
+
+  .ro-arrow {
+    color: #555;
+    font-size: 1.5rem;
+    align-self: center;
+    flex-shrink: 0;
+  }
+
+  /* Comparison */
+  .compare-section {
+    margin-bottom: 50px;
+  }
+
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+
+  .compare-card {
+    border-radius: 14px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .spanner-card {
+    background: rgba(255, 179, 71, 0.06);
+    border-color: rgba(255, 179, 71, 0.3);
+  }
+
+  .crdb-card {
+    background: rgba(110, 237, 138, 0.06);
+    border-color: rgba(110, 237, 138, 0.3);
+  }
+
+  .compare-card h3 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+
+  .compare-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .compare-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .compare-item strong {
+    font-size: 0.8rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .compare-item span {
+    font-size: 0.95rem;
+    color: #ccc;
+  }
+
+  .compare-insight {
+    background: linear-gradient(135deg, rgba(255, 179, 71, 0.08), rgba(110, 237, 138, 0.08));
+    border: 1px solid rgba(255, 179, 71, 0.2);
+    border-radius: 14px;
+    padding: 20px 24px;
+  }
+
+  .compare-insight p {
+    color: #ccc;
+    line-height: 1.7;
+    font-size: 0.95rem;
+  }
+
+  .compare-insight strong { color: #ffb347; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #60a5fa; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .api-grid { grid-template-columns: 1fr; }
+    .commit-explain-grid { grid-template-columns: 1fr; }
+    .commit-timeline-bar { flex-direction: column; }
+    .dc-grid { grid-template-columns: 1fr; }
+    .compare-grid { grid-template-columns: 1fr; }
+    .readonly-diagram { flex-direction: column; }
+    .ro-arrow { transform: rotate(90deg); align-self: center; }
+    .interval-readout { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ========== UNCERTAINTY CANVAS ==========
+  var canvas = document.getElementById('uncertaintyCanvas');
+  var ctx = canvas.getContext('2d');
+  var epsilon = 1.0;
+  var maxEpsilon = 7.0;
+  var epsilonGrowRate = 0.015;
+  var dataPoints = [];
+  var maxPoints = 200;
+  var uncertaintyRunning = true;
+
+  function initDataPoints() {
+    dataPoints = [];
+    for (var i = 0; i < maxPoints; i++) {
+      dataPoints.push(1.0);
+    }
+  }
+  initDataPoints();
+
+  function drawUncertainty() {
+    var w = canvas.width;
+    var h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (var y = 0; y < h; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Labels
+    ctx.fillStyle = '#666';
+    ctx.font = '11px Monaco, Menlo, monospace';
+    ctx.fillText('7ms', 5, 20);
+    ctx.fillText('4ms', 5, h * 0.45);
+    ctx.fillText('1ms', 5, h - 10);
+
+    // Upper bound line
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255, 179, 71, 0.8)';
+    ctx.lineWidth = 2;
+    for (var i = 0; i < dataPoints.length; i++) {
+      var x = (i / maxPoints) * w;
+      var normalized = (dataPoints[i] - 0.5) / (maxEpsilon + 0.5);
+      var y2 = h / 2 - normalized * (h / 2 - 10);
+      if (i === 0) ctx.moveTo(x, y2);
+      else ctx.lineTo(x, y2);
+    }
+    ctx.stroke();
+
+    // Lower bound line (mirror)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(248, 113, 113, 0.8)';
+    ctx.lineWidth = 2;
+    for (var i = 0; i < dataPoints.length; i++) {
+      var x = (i / maxPoints) * w;
+      var normalized = (dataPoints[i] - 0.5) / (maxEpsilon + 0.5);
+      var y2 = h / 2 + normalized * (h / 2 - 10);
+      if (i === 0) ctx.moveTo(x, y2);
+      else ctx.lineTo(x, y2);
+    }
+    ctx.stroke();
+
+    // Fill between
+    ctx.beginPath();
+    for (var i = 0; i < dataPoints.length; i++) {
+      var x = (i / maxPoints) * w;
+      var normalized = (dataPoints[i] - 0.5) / (maxEpsilon + 0.5);
+      var y2 = h / 2 - normalized * (h / 2 - 10);
+      if (i === 0) ctx.moveTo(x, y2);
+      else ctx.lineTo(x, y2);
+    }
+    for (var i = dataPoints.length - 1; i >= 0; i--) {
+      var x = (i / maxPoints) * w;
+      var normalized = (dataPoints[i] - 0.5) / (maxEpsilon + 0.5);
+      var y2 = h / 2 + normalized * (h / 2 - 10);
+      ctx.lineTo(x, y2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 179, 71, 0.1)';
+    ctx.fill();
+
+    // Center line (true time)
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function tickUncertainty() {
+    epsilon = Math.min(epsilon + epsilonGrowRate, maxEpsilon);
+    dataPoints.push(epsilon);
+    if (dataPoints.length > maxPoints) dataPoints.shift();
+
+    document.getElementById('epsilonValue').textContent = epsilon.toFixed(1);
+    drawUncertainty();
+    updateInterval();
+
+    if (uncertaintyRunning) {
+      requestAnimationFrame(tickUncertainty);
+    }
+  }
+
+  document.getElementById('syncClockBtn').addEventListener('click', function() {
+    epsilon = 0.5 + Math.random() * 0.5;
+    document.getElementById('epsilonValue').textContent = epsilon.toFixed(1);
+    addLogTo('commitLog', ''); // no-op, just visual feedback
+  });
+
+  tickUncertainty();
+
+  // ========== LIVE INTERVAL ==========
+  var baseTime = Date.now();
+
+  function updateInterval() {
+    var now = Date.now() - baseTime;
+    var earliest = now - epsilon;
+    var latest = now + epsilon;
+
+    document.getElementById('readoutEarliest').textContent = earliest.toFixed(1) + ' ms';
+    document.getElementById('readoutLatest').textContent = latest.toFixed(1) + ' ms';
+    document.getElementById('readoutEpsilon').textContent = '±' + epsilon.toFixed(1) + ' ms';
+
+    document.getElementById('intervalEarliest').textContent = earliest.toFixed(0);
+    document.getElementById('intervalLatest').textContent = latest.toFixed(0);
+
+    // Width of bar proportional to epsilon
+    var barWidth = Math.max(10, Math.min(80, (epsilon / maxEpsilon) * 80));
+    document.getElementById('intervalBar').style.width = barWidth + '%';
+  }
+
+  // ========== COMMIT-WAIT ==========
+  var commitRunning = false;
+
+  document.getElementById('runCommitBtn').addEventListener('click', function() {
+    if (commitRunning) return;
+    commitRunning = true;
+    var log = document.getElementById('commitLog');
+    log.innerHTML = '';
+    var phases = document.querySelectorAll('.commit-phase');
+    phases.forEach(function(p) { p.className = 'commit-phase'; });
+    document.getElementById('commitPhase2').classList.add('waiting');
+
+    var commitTs = (Date.now() - baseTime + epsilon).toFixed(1);
+
+    // Phase 1
+    phases[0].classList.add('active-phase');
+    addLogTo('commitLog', '① Acquire locks on affected rows', 'time');
+    addLogTo('commitLog', '① Pick commit timestamp s = TT.now().latest = ' + commitTs + ' ms', 'time');
+
+    setTimeout(function() {
+      phases[0].classList.remove('active-phase');
+      phases[0].classList.add('done-phase');
+      phases[1].classList.add('active-phase');
+      addLogTo('commitLog', '② Commit-wait begins: waiting until TT.after(' + commitTs + ') = true...', 'wait');
+
+      var waitDuration = epsilon * 2;
+      var waitStart = Date.now();
+      var progress = document.getElementById('waitProgress');
+
+      function animateWait() {
+        var elapsed = Date.now() - waitStart;
+        var pct = Math.min(100, (elapsed / (waitDuration * 15)) * 100);
+        progress.style.width = pct + '%';
+
+        if (pct < 100) {
+          requestAnimationFrame(animateWait);
+        } else {
+          phases[1].classList.remove('active-phase');
+          phases[1].classList.add('done-phase');
+          phases[2].classList.add('active-phase');
+          addLogTo('commitLog', '② TT.after(' + commitTs + ') = true — uncertainty resolved!', 'success');
+          addLogTo('commitLog', '③ Release locks, notify client — commit complete ✅', 'success');
+
+          setTimeout(function() {
+            phases[2].classList.remove('active-phase');
+            phases[2].classList.add('done-phase');
+            commitRunning = false;
+          }, 500);
+        }
+      }
+      animateWait();
+    }, 1200);
+  });
+
+  document.getElementById('commitResetBtn').addEventListener('click', function() {
+    commitRunning = false;
+    document.getElementById('commitLog').innerHTML = '<div class="log-entry info">Ready — click "Run Commit-Wait" to begin</div>';
+    var phases = document.querySelectorAll('.commit-phase');
+    phases.forEach(function(p) { p.className = 'commit-phase'; });
+    document.getElementById('commitPhase2').classList.add('waiting');
+    document.getElementById('waitProgress').style.width = '0%';
+  });
+
+  // ========== EXTERNAL CONSISTENCY ==========
+  document.getElementById('runConsistencyBtn').addEventListener('click', function() {
+    var log = document.getElementById('consistencyLog');
+    log.innerHTML = '';
+    var bar1 = document.getElementById('laneBar1');
+    var bar2 = document.getElementById('laneBar2');
+    bar1.innerHTML = '';
+    bar2.innerHTML = '';
+
+    var t1Start = 5;
+    var t1CommitWait = 30;
+    var t1End = 55;
+    var t2Start = 60;
+    var t2End = 85;
+
+    // T1 segments
+    function addSegment(bar, left, width, color, label, delay) {
+      setTimeout(function() {
+        var seg = document.createElement('div');
+        seg.className = 'lane-segment';
+        seg.style.left = left + '%';
+        seg.style.width = width + '%';
+        seg.style.background = color;
+        seg.style.color = '#111';
+        seg.textContent = label;
+        bar.appendChild(seg);
+      }, delay);
+    }
+
+    addSegment(bar1, t1Start, t1CommitWait - t1Start, 'rgba(255,179,71,0.6)', 'execute', 0);
+    addLogTo('consistencyLog', 'T1 begins executing...', 'time');
+
+    addSegment(bar1, t1CommitWait, t1End - t1CommitWait, 'rgba(251,191,36,0.8)', 'commit-wait', 800);
+    setTimeout(function() {
+      addLogTo('consistencyLog', 'T1 picks s1 = TT.now().latest, begins commit-wait...', 'wait');
+    }, 800);
+
+    setTimeout(function() {
+      addLogTo('consistencyLog', 'T1 committed at s1. TT.after(s1) confirmed. ✅', 'success');
+    }, 1600);
+
+    addSegment(bar2, t2Start, t2End - t2Start, 'rgba(96,165,250,0.6)', 'T2 execute', 2000);
+    setTimeout(function() {
+      addLogTo('consistencyLog', 'T2 starts. Picks s2 = TT.now().latest.', 'time');
+      addLogTo('consistencyLog', 'Because T1 waited out uncertainty: s1 < s2 guaranteed! 🔒', 'success');
+      addLogTo('consistencyLog', 'External consistency: T1 committed before T2 started → s1 < s2', 'success');
+    }, 2000);
+  });
+
+  document.getElementById('consistencyResetBtn').addEventListener('click', function() {
+    document.getElementById('consistencyLog').innerHTML = '<div class="log-entry info">Click "Run Two Transactions" to see external consistency in action</div>';
+    document.getElementById('laneBar1').innerHTML = '';
+    document.getElementById('laneBar2').innerHTML = '';
+  });
+
+  // ========== PAXOS REPLICATION ==========
+  var paxosState = {
+    version: 1,
+    balance: 100,
+    replicas: [
+      { id: 1, alive: true, role: 'leader' },
+      { id: 2, alive: true, role: 'follower' },
+      { id: 3, alive: true, role: 'follower' }
+    ]
+  };
+
+  document.getElementById('paxosWriteBtn').addEventListener('click', function() {
+    var leader = paxosState.replicas.find(function(r) { return r.role === 'leader' && r.alive; });
+    if (!leader) {
+      addLogTo('paxosLog', '❌ No leader available! Need to elect a new one.', 'error');
+      // Try to elect
+      var alive = paxosState.replicas.filter(function(r) { return r.alive; });
+      if (alive.length >= 2) {
+        alive[0].role = 'leader';
+        addLogTo('paxosLog', '🗳️ Elected Replica ' + alive[0].id + ' as new leader', 'paxos');
+        renderPaxos();
+      }
+      return;
+    }
+
+    paxosState.version++;
+    paxosState.balance += Math.floor(Math.random() * 100) + 10;
+    var newData = 'v' + paxosState.version + ': balance=$' + paxosState.balance;
+
+    addLogTo('paxosLog', '📝 Client writes to leader (Replica ' + leader.id + ')', 'info');
+
+    // Leader accepts
+    document.getElementById('replica' + leader.id).classList.add('syncing');
+    setTimeout(function() {
+      document.getElementById('replicaData' + leader.id).textContent = newData;
+      document.getElementById('replica' + leader.id).classList.remove('syncing');
+      addLogTo('paxosLog', '✍️ Leader accepts: ' + newData, 'time');
+
+      // Replicate to followers
+      var quorumNeeded = 1; // leader + 1 more = majority of 3
+      var acked = 0;
+      paxosState.replicas.forEach(function(r) {
+        if (r.id !== leader.id && r.alive) {
+          setTimeout(function() {
+            document.getElementById('replica' + r.id).classList.add('syncing');
+            setTimeout(function() {
+              document.getElementById('replicaData' + r.id).textContent = newData;
+              document.getElementById('replica' + r.id).classList.remove('syncing');
+              acked++;
+              addLogTo('paxosLog', '📨 Replica ' + r.id + ' acked (quorum: ' + (acked + 1) + '/2)', 'paxos');
+              if (acked >= quorumNeeded) {
+                addLogTo('paxosLog', '✅ Quorum reached — write committed!', 'success');
+              }
+            }, 400 + Math.random() * 300);
+          }, 200 + Math.random() * 200);
+        }
+      });
+    }, 500);
+  });
+
+  document.getElementById('paxosFailBtn').addEventListener('click', function() {
+    var alive = paxosState.replicas.filter(function(r) { return r.alive; });
+    if (alive.length <= 2) {
+      addLogTo('paxosLog', '⚠️ Cannot kill more — need 2 for quorum!', 'error');
+      return;
+    }
+    // Kill a follower preferably
+    var victim = alive.find(function(r) { return r.role === 'follower'; }) || alive[alive.length - 1];
+    victim.alive = false;
+    addLogTo('paxosLog', '💀 Replica ' + victim.id + ' (' + victim.role + ') killed!', 'error');
+    if (victim.role === 'leader') {
+      victim.role = 'follower';
+      var newLeader = paxosState.replicas.find(function(r) { return r.alive; });
+      if (newLeader) {
+        newLeader.role = 'leader';
+        addLogTo('paxosLog', '🗳️ Replica ' + newLeader.id + ' elected as new leader', 'paxos');
+      }
+    }
+    renderPaxos();
+  });
+
+  document.getElementById('paxosResetBtn').addEventListener('click', function() {
+    paxosState = {
+      version: 1,
+      balance: 100,
+      replicas: [
+        { id: 1, alive: true, role: 'leader' },
+        { id: 2, alive: true, role: 'follower' },
+        { id: 3, alive: true, role: 'follower' }
+      ]
+    };
+    renderPaxos();
+    document.getElementById('paxosLog').innerHTML = '<div class="log-entry info">3 replicas across 3 datacenters — quorum = 2</div>';
+  });
+
+  function renderPaxos() {
+    paxosState.replicas.forEach(function(r) {
+      var box = document.getElementById('replica' + r.id);
+      box.className = 'replica-box ' + (r.alive ? r.role : 'dead');
+      box.querySelector('.replica-role').textContent = r.alive ? (r.role.charAt(0).toUpperCase() + r.role.slice(1)) : 'Dead';
+      if (!r.alive) {
+        document.getElementById('replicaData' + r.id).textContent = '(offline)';
+      } else {
+        document.getElementById('replicaData' + r.id).textContent = 'v' + paxosState.version + ': balance=$' + paxosState.balance;
+      }
+    });
+  }
+
+  // ========== UTILITY ==========
+  function addLogTo(containerId, text, cls) {
+    var log = document.getElementById(containerId);
+    var entry = document.createElement('div');
+    entry.className = 'log-entry ' + (cls || 'info');
+    entry.textContent = text;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+</script>
+</BaseLayout>

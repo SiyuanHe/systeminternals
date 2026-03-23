@@ -1,0 +1,1069 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="DNS Resolution: How a Domain Becomes an IP" 
+  description="Interactive visualization of DNS resolution — recursive queries, record types, caching, TTL, DNSSEC, DoH/DoT, and anycast routing"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "DNS", href: "/dns/" },
+    { label: "Resolution", href: "/dns/resolution/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌐 DNS Resolution</h1>
+      <p class="subtitle">From Domain Name to IP Address · Step by Step</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          When you type <strong>www.example.com</strong> in your browser, a chain of queries walks the
+          <strong>DNS hierarchy</strong> — from <em>root servers</em> to <em>TLD servers</em> to
+          <em>authoritative nameservers</em> — to find the IP address. Your machine's <strong>stub resolver</strong>
+          asks a <strong>recursive resolver</strong> (like 8.8.8.8), which does the heavy lifting.
+          Each answer is <strong>cached with a TTL</strong>, so repeated lookups are instant.
+        </p>
+      </div>
+    </section>
+
+    <!-- Interactive Resolution Simulator -->
+    <section class="resolver-section">
+      <h2>🔍 Interactive Resolution Simulator</h2>
+      <p class="section-desc">Type a domain and watch the full recursive resolution unfold — stub resolver → recursive resolver → root → TLD → authoritative nameserver.</p>
+
+      <div class="resolver-controls">
+        <div class="domain-input-group">
+          <span class="input-prefix">dig</span>
+          <input type="text" id="domainInput" value="www.example.com" placeholder="Enter a domain..." spellcheck="false">
+          <select id="queryTypeSelect">
+            <option value="A">A</option>
+            <option value="AAAA">AAAA</option>
+            <option value="CNAME">CNAME</option>
+            <option value="MX">MX</option>
+            <option value="NS">NS</option>
+            <option value="TXT">TXT</option>
+            <option value="SRV">SRV</option>
+            <option value="SOA">SOA</option>
+          </select>
+        </div>
+        <button id="resolveBtn" class="action-btn primary-btn">▶ Resolve</button>
+        <button id="clearCacheBtn" class="action-btn reset-btn">🗑️ Clear Cache</button>
+      </div>
+
+      <div class="resolver-viz">
+        <div class="resolver-nodes">
+          <div class="resolver-node" id="nodeApp">
+            <div class="node-icon">💻</div>
+            <div class="node-label">Your App</div>
+            <div class="node-sublabel">stub resolver</div>
+          </div>
+          <div class="resolver-arrow" id="arrow1">
+            <div class="arrow-line"></div>
+            <div class="arrow-label" id="arrowLabel1"></div>
+          </div>
+          <div class="resolver-node" id="nodeRecursive">
+            <div class="node-icon">🔄</div>
+            <div class="node-label">Recursive Resolver</div>
+            <div class="node-sublabel">e.g. 8.8.8.8</div>
+          </div>
+          <div class="resolver-arrow" id="arrow2">
+            <div class="arrow-line"></div>
+            <div class="arrow-label" id="arrowLabel2"></div>
+          </div>
+          <div class="resolver-node" id="nodeRoot">
+            <div class="node-icon">🌍</div>
+            <div class="node-label">Root Server</div>
+            <div class="node-sublabel">. (13 anycast clusters)</div>
+          </div>
+          <div class="resolver-arrow" id="arrow3">
+            <div class="arrow-line"></div>
+            <div class="arrow-label" id="arrowLabel3"></div>
+          </div>
+          <div class="resolver-node" id="nodeTLD">
+            <div class="node-icon">📁</div>
+            <div class="node-label">TLD Server</div>
+            <div class="node-sublabel" id="tldSublabel">.com</div>
+          </div>
+          <div class="resolver-arrow" id="arrow4">
+            <div class="arrow-line"></div>
+            <div class="arrow-label" id="arrowLabel4"></div>
+          </div>
+          <div class="resolver-node" id="nodeAuth">
+            <div class="node-icon">🏛️</div>
+            <div class="node-label">Authoritative NS</div>
+            <div class="node-sublabel" id="authSublabel">ns1.example.com</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="resolver-log" id="resolverLog"></div>
+
+      <div class="resolver-result" id="resolverResult"></div>
+    </section>
+
+    <!-- DNS Hierarchy -->
+    <section class="hierarchy-section">
+      <h2>🏗️ DNS Hierarchy</h2>
+      <p class="section-desc">DNS is a distributed tree. Every domain is a path from the root down.</p>
+
+      <div class="hierarchy-tree">
+        <div class="tree-level root-level">
+          <div class="tree-node root-node">
+            <span class="tree-dot root-dot"></span>
+            <span class="tree-text">. (root)</span>
+            <span class="tree-detail">13 root server clusters (a.root-servers.net – m.root-servers.net)</span>
+          </div>
+        </div>
+        <div class="tree-connector"></div>
+        <div class="tree-level tld-level">
+          <div class="tree-node tld-node" data-tld=".com">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.com</span>
+          </div>
+          <div class="tree-node tld-node" data-tld=".org">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.org</span>
+          </div>
+          <div class="tree-node tld-node" data-tld=".dev">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.dev</span>
+          </div>
+          <div class="tree-node tld-node" data-tld=".io">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.io</span>
+          </div>
+          <div class="tree-node tld-node" data-tld=".net">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.net</span>
+          </div>
+          <div class="tree-node tld-node" data-tld=".uk">
+            <span class="tree-dot tld-dot"></span>
+            <span class="tree-text">.uk</span>
+          </div>
+        </div>
+        <div class="tree-connector"></div>
+        <div class="tree-level auth-level">
+          <div class="tree-node auth-node">
+            <span class="tree-dot auth-dot"></span>
+            <span class="tree-text">example.com</span>
+          </div>
+          <div class="tree-node auth-node">
+            <span class="tree-dot auth-dot"></span>
+            <span class="tree-text">google.com</span>
+          </div>
+          <div class="tree-node auth-node">
+            <span class="tree-dot auth-dot"></span>
+            <span class="tree-text">github.dev</span>
+          </div>
+        </div>
+        <div class="tree-connector"></div>
+        <div class="tree-level record-level">
+          <div class="tree-node record-node">
+            <span class="tree-dot record-dot"></span>
+            <span class="tree-text">www</span>
+            <span class="tree-detail">A → 93.184.216.34</span>
+          </div>
+          <div class="tree-node record-node">
+            <span class="tree-dot record-dot"></span>
+            <span class="tree-text">mail</span>
+            <span class="tree-detail">MX → 10 mail.example.com</span>
+          </div>
+          <div class="tree-node record-node">
+            <span class="tree-dot record-dot"></span>
+            <span class="tree-text">api</span>
+            <span class="tree-detail">CNAME → lb.example.com</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Record Type Explorer -->
+    <section class="records-section">
+      <h2>📋 DNS Record Types</h2>
+      <p class="section-desc">Click a record type to see its format, use case, and a real-world example.</p>
+
+      <div class="record-tabs" id="recordTabs"></div>
+      <div class="record-detail" id="recordDetail">
+        <div class="record-detail-placeholder">Select a record type above</div>
+      </div>
+    </section>
+
+    <!-- TTL & Caching -->
+    <section class="ttl-section">
+      <h2>⏱️ TTL &amp; Caching Layers</h2>
+      <p class="section-desc">Every DNS response includes a TTL (Time To Live). Each layer caches independently. Watch the countdown.</p>
+
+      <div class="ttl-controls">
+        <div class="slider-group">
+          <label>Initial TTL: <strong id="ttlLabel">300</strong> seconds</label>
+          <input type="range" id="ttlSlider" min="30" max="86400" value="300" step="30">
+        </div>
+        <button id="startTtlBtn" class="action-btn primary-btn">▶ Start Countdown</button>
+        <button id="resetTtlBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="ttl-layers" id="ttlLayers"></div>
+      <div class="ttl-timeline" id="ttlTimeline"></div>
+    </section>
+
+    <!-- Recursive vs Iterative -->
+    <section class="mode-section">
+      <h2>🔀 Recursive vs Iterative Queries</h2>
+      <p class="section-desc">A recursive query asks the resolver to do all the work. An iterative query gets referrals and follows them itself.</p>
+
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="recursive">Recursive</button>
+        <button class="mode-btn" data-mode="iterative">Iterative</button>
+      </div>
+
+      <div class="mode-viz" id="modeViz"></div>
+      <div class="mode-desc" id="modeDesc"></div>
+    </section>
+
+    <!-- DoH / DoT -->
+    <section class="encrypted-section">
+      <h2>🔒 DNS over HTTPS &amp; DNS over TLS</h2>
+      <p class="section-desc">Traditional DNS is plaintext UDP. DoH and DoT encrypt queries for privacy.</p>
+
+      <div class="encrypted-compare">
+        <div class="encrypt-card">
+          <div class="encrypt-header" style="border-color: #ef4444;">
+            <h3>🔓 Traditional DNS</h3>
+            <span class="encrypt-port">UDP/53</span>
+          </div>
+          <div class="encrypt-body">
+            <div class="packet-viz plaintext-packet">
+              <div class="packet-layer" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4);">
+                <span class="layer-label">UDP</span>
+                <span class="layer-detail">No encryption</span>
+              </div>
+              <div class="packet-layer" style="background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.3);">
+                <span class="layer-label">DNS Query</span>
+                <span class="layer-detail">Visible to ISP, routers, anyone on path</span>
+              </div>
+            </div>
+            <ul class="encrypt-features">
+              <li>❌ Query visible to network observers</li>
+              <li>❌ Vulnerable to tampering (MITM)</li>
+              <li>❌ ISP can log all domains you visit</li>
+              <li>✅ Low latency (no handshake)</li>
+              <li>✅ Universally supported</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="encrypt-card">
+          <div class="encrypt-header" style="border-color: #8b5cf6;">
+            <h3>🔐 DNS over TLS (DoT)</h3>
+            <span class="encrypt-port">TCP/853</span>
+          </div>
+          <div class="encrypt-body">
+            <div class="packet-viz">
+              <div class="packet-layer" style="background:rgba(139,92,246,0.15);border-color:rgba(139,92,246,0.4);">
+                <span class="layer-label">TLS 1.3</span>
+                <span class="layer-detail">Encrypted tunnel</span>
+              </div>
+              <div class="packet-layer" style="background:rgba(139,92,246,0.1);border-color:rgba(139,92,246,0.3);">
+                <span class="layer-label">DNS Query</span>
+                <span class="layer-detail">Encrypted inside TLS</span>
+              </div>
+            </div>
+            <ul class="encrypt-features">
+              <li>✅ Query encrypted end-to-end</li>
+              <li>✅ Server authenticated via certificate</li>
+              <li>⚠️ Dedicated port (853) — easily blocked</li>
+              <li>⚠️ TLS handshake adds latency</li>
+              <li>✅ Supported by Android 9+, systemd-resolved</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="encrypt-card">
+          <div class="encrypt-header" style="border-color: #06b6d4;">
+            <h3>🛡️ DNS over HTTPS (DoH)</h3>
+            <span class="encrypt-port">TCP/443</span>
+          </div>
+          <div class="encrypt-body">
+            <div class="packet-viz">
+              <div class="packet-layer" style="background:rgba(6,182,212,0.15);border-color:rgba(6,182,212,0.4);">
+                <span class="layer-label">HTTPS</span>
+                <span class="layer-detail">Looks like normal web traffic</span>
+              </div>
+              <div class="packet-layer" style="background:rgba(6,182,212,0.1);border-color:rgba(6,182,212,0.3);">
+                <span class="layer-label">DNS Query</span>
+                <span class="layer-detail">Hidden in HTTPS stream</span>
+              </div>
+            </div>
+            <ul class="encrypt-features">
+              <li>✅ Query encrypted end-to-end</li>
+              <li>✅ Indistinguishable from web traffic</li>
+              <li>✅ Hard to block (port 443)</li>
+              <li>⚠️ Centralizes DNS at browser level</li>
+              <li>✅ Firefox, Chrome, Edge, Safari support</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DNSSEC -->
+    <section class="dnssec-section">
+      <h2>🔏 DNSSEC: Chain of Trust</h2>
+      <p class="section-desc">DNSSEC adds cryptographic signatures to DNS records, creating a chain of trust from the root zone down.</p>
+
+      <div class="dnssec-chain" id="dnssecChain"></div>
+
+      <div class="dnssec-records">
+        <div class="dnssec-record-card">
+          <h4>DNSKEY</h4>
+          <p>Public key published in DNS. Zone Signing Key (ZSK) signs records; Key Signing Key (KSK) signs the DNSKEY set.</p>
+          <code>example.com. IN DNSKEY 257 3 13 mdsswUyr3DPW...</code>
+        </div>
+        <div class="dnssec-record-card">
+          <h4>RRSIG</h4>
+          <p>Signature over a record set. Validators use the DNSKEY to verify. Each RRSIG has an expiration.</p>
+          <code>example.com. IN RRSIG A 13 2 300 20250401 20250301 12345 example.com. oJB1W6...</code>
+        </div>
+        <div class="dnssec-record-card">
+          <h4>DS</h4>
+          <p>Delegation Signer — hash of child's KSK, stored in the parent zone. Links parent trust to child zone.</p>
+          <code>example.com. IN DS 12345 13 2 49FD46E6C4B45...</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- Anycast -->
+    <section class="anycast-section">
+      <h2>🌍 Anycast: Global DNS Routing</h2>
+      <p class="section-desc">Root servers and CDN DNS use anycast — the same IP address is announced from multiple locations. BGP routes you to the nearest one.</p>
+
+      <div class="anycast-viz" id="anycastViz">
+        <div class="anycast-map">
+          <div class="anycast-server" style="top:25%;left:20%;" data-loc="Virginia">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">Virginia</div>
+          </div>
+          <div class="anycast-server" style="top:20%;left:45%;" data-loc="London">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">London</div>
+          </div>
+          <div class="anycast-server" style="top:30%;left:55%;" data-loc="Frankfurt">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">Frankfurt</div>
+          </div>
+          <div class="anycast-server" style="top:35%;left:75%;" data-loc="Tokyo">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">Tokyo</div>
+          </div>
+          <div class="anycast-server" style="top:55%;left:80%;" data-loc="Singapore">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">Singapore</div>
+          </div>
+          <div class="anycast-server" style="top:65%;left:30%;" data-loc="São Paulo">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">São Paulo</div>
+          </div>
+          <div class="anycast-server" style="top:70%;left:55%;" data-loc="Johannesburg">
+            <div class="anycast-dot"></div>
+            <div class="anycast-label">Johannesburg</div>
+          </div>
+        </div>
+        <div class="anycast-info">
+          <p>All 7 servers announce the <strong>same IP</strong> (e.g., <code>198.41.0.4</code>). BGP routers direct your query to the <strong>topologically nearest</strong> instance. If one goes down, traffic reroutes automatically — no DNS change needed.</p>
+          <div class="anycast-stats">
+            <div class="anycast-stat">
+              <span class="stat-value-big">13</span>
+              <span class="stat-label-sm">Root server letters</span>
+            </div>
+            <div class="anycast-stat">
+              <span class="stat-value-big">1,700+</span>
+              <span class="stat-label-sm">Root instances worldwide</span>
+            </div>
+            <div class="anycast-stat">
+              <span class="stat-value-big">&lt;5ms</span>
+              <span class="stat-label-sm">Typical root RTT</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cache Status -->
+    <section class="cache-section">
+      <h2>📦 Cache Status</h2>
+      <p class="section-desc">Records resolved during your session. TTLs count down in real time.</p>
+      <div class="cache-table" id="cacheTable">
+        <div class="cache-empty">No cached records yet. Resolve a domain above!</div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Not Just One Server?</h3>
+          <p>
+            A single DNS server would need to handle <strong>trillions of queries per day</strong>.
+            The hierarchical design distributes load: root servers only point to TLD servers,
+            TLD servers only point to authoritative servers. Each layer is independently scalable.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Negative Caching</h3>
+          <p>
+            When a domain <em>doesn't exist</em>, the NXDOMAIN response is also cached —
+            with the SOA record's <code>minimum</code> field as TTL. This prevents repeated
+            lookups for typos or non-existent domains.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Glue Records</h3>
+          <p>
+            If <code>ns1.example.com</code> is the nameserver for <code>example.com</code>,
+            you have a chicken-and-egg problem. <strong>Glue records</strong> are A records
+            for nameservers included in the parent zone's delegation.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 UDP vs TCP</h3>
+          <p>
+            DNS uses <strong>UDP by default</strong> (port 53) for speed. If a response exceeds
+            <strong>512 bytes</strong> (or 4096 with EDNS0), the server sets the TC (truncated) bit
+            and the client retries over <strong>TCP</strong>. Zone transfers (AXFR) always use TCP.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://datatracker.ietf.org/doc/html/rfc1035" target="_blank">RFC 1035</a>, <a href="https://datatracker.ietf.org/doc/html/rfc8484" target="_blank">RFC 8484 (DoH)</a>, and <a href="https://datatracker.ietf.org/doc/html/rfc4033" target="_blank">RFC 4033 (DNSSEC)</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20DNS%20Resolution%20Visualizer&url=https://systeminternals.dev/dns/resolution/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/dns/resolution/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/dns/resolution/&t=Interactive%20DNS%20Resolution%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #06b6d4, #10b981, #f59e0b); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(16,185,129,0.05)); border: 1px solid rgba(6,182,212,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #10b981; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(6,182,212,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #06b6d4; cursor: pointer; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #06b6d4; }
+  .slider-group input[type="range"] { max-width: 400px; }
+
+  /* Resolution Simulator */
+  .resolver-section { margin-bottom: 50px; }
+  .resolver-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+  .domain-input-group { display: flex; align-items: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; overflow: hidden; }
+  .input-prefix { padding: 10px 12px; color: #10b981; font-family: monospace; font-weight: 700; font-size: 0.9rem; background: rgba(16,185,129,0.1); }
+  .domain-input-group input { padding: 10px 14px; background: transparent; border: none; color: #fff; font-size: 0.95rem; font-family: monospace; outline: none; min-width: 220px; }
+  .domain-input-group select { padding: 10px 12px; background: rgba(255,255,255,0.05); border: none; border-left: 1px solid rgba(255,255,255,0.15); color: #06b6d4; font-size: 0.85rem; font-weight: 600; cursor: pointer; outline: none; }
+  .domain-input-group select option { background: #1a1a2e; }
+
+  .resolver-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; overflow-x: auto; }
+  .resolver-nodes { display: flex; align-items: center; gap: 0; min-width: 900px; }
+  .resolver-node { text-align: center; flex-shrink: 0; width: 110px; padding: 12px 8px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); transition: all 0.4s; }
+  .resolver-node.active { border-color: #06b6d4; background: rgba(6,182,212,0.1); box-shadow: 0 0 20px rgba(6,182,212,0.3); }
+  .resolver-node.cache-hit { border-color: #f59e0b; background: rgba(245,158,11,0.1); box-shadow: 0 0 20px rgba(245,158,11,0.3); }
+  .node-icon { font-size: 1.8rem; margin-bottom: 6px; }
+  .node-label { font-size: 0.75rem; font-weight: 700; color: #fff; }
+  .node-sublabel { font-size: 0.65rem; color: #888; margin-top: 2px; }
+  .resolver-arrow { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 40px; position: relative; }
+  .arrow-line { width: 100%; height: 2px; background: rgba(255,255,255,0.1); position: relative; }
+  .arrow-line::after { content: ''; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left-color: rgba(255,255,255,0.2); }
+  .resolver-arrow.active .arrow-line { background: #06b6d4; animation: pulseGlow 1s ease-in-out infinite; }
+  .resolver-arrow.active .arrow-line::after { border-left-color: #06b6d4; }
+  .arrow-label { font-size: 0.6rem; color: #888; margin-top: 4px; white-space: nowrap; min-height: 14px; }
+
+  .resolver-log { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); min-height: 40px; max-height: 250px; overflow-y: auto; font-size: 0.85rem; font-family: monospace; margin-bottom: 16px; }
+  .resolver-result { min-height: 20px; }
+  .result-box { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 10px; padding: 14px 18px; font-family: monospace; font-size: 0.9rem; color: #10b981; }
+
+  /* DNS Hierarchy */
+  .hierarchy-section { margin-bottom: 50px; }
+  .hierarchy-tree { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 30px; border: 1px solid rgba(255,255,255,0.1); }
+  .tree-level { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .tree-connector { width: 2px; height: 24px; background: rgba(255,255,255,0.15); margin: 8px auto; }
+  .tree-node { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); cursor: default; transition: all 0.2s; }
+  .tree-node:hover { background: rgba(255,255,255,0.06); border-color: rgba(6,182,212,0.3); }
+  .tree-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .root-dot { background: #f59e0b; }
+  .tld-dot { background: #8b5cf6; }
+  .auth-dot { background: #06b6d4; }
+  .record-dot { background: #10b981; }
+  .tree-text { font-family: monospace; font-weight: 700; font-size: 0.85rem; color: #fff; }
+  .tree-detail { font-size: 0.7rem; color: #888; }
+
+  /* Record Types */
+  .records-section { margin-bottom: 50px; }
+  .record-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .record-tab { padding: 8px 16px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; font-family: monospace; font-weight: 700; }
+  .record-tab.active { border-color: #10b981; background: rgba(16,185,129,0.15); color: #10b981; }
+  .record-tab:hover { border-color: rgba(16,185,129,0.5); }
+  .record-detail { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); min-height: 100px; }
+  .record-detail-placeholder { color: #666; text-align: center; padding: 20px; }
+
+  /* TTL */
+  .ttl-section { margin-bottom: 50px; }
+  .ttl-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+  .ttl-layers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .ttl-layer { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+  .ttl-layer-name { font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .ttl-layer-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .ttl-countdown { font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #06b6d4; }
+  .ttl-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .ttl-bar-fill { height: 100%; border-radius: 3px; transition: width 1s linear; }
+  .ttl-timeline { font-size: 0.8rem; color: #888; text-align: center; min-height: 20px; }
+
+  /* Recursive vs Iterative */
+  .mode-section { margin-bottom: 50px; }
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 20px; }
+  .mode-btn { padding: 10px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+  .mode-btn.active { border-color: #8b5cf6; background: rgba(139,92,246,0.15); color: #a78bfa; }
+  .mode-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; min-height: 120px; }
+  .mode-desc { color: #aaa; font-size: 0.9rem; line-height: 1.6; padding: 12px; background: rgba(0,0,0,0.15); border-radius: 10px; }
+
+  /* Encrypted DNS */
+  .encrypted-section { margin-bottom: 50px; }
+  .encrypted-compare { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .encrypt-card { background: rgba(0,0,0,0.2); border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+  .encrypt-header { padding: 16px; border-bottom: 2px solid; display: flex; justify-content: space-between; align-items: center; }
+  .encrypt-header h3 { font-size: 0.95rem; color: #fff; margin: 0; }
+  .encrypt-port { font-family: monospace; font-size: 0.8rem; color: #888; background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px; }
+  .encrypt-body { padding: 16px; }
+  .packet-viz { margin-bottom: 14px; }
+  .packet-layer { padding: 10px 14px; border-radius: 8px; border: 1px solid; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .layer-label { font-weight: 700; font-size: 0.8rem; color: #fff; }
+  .layer-detail { font-size: 0.7rem; color: #aaa; }
+  .encrypt-features { list-style: none; padding: 0; margin: 0; }
+  .encrypt-features li { font-size: 0.8rem; color: #aaa; padding: 4px 0; line-height: 1.4; }
+
+  /* DNSSEC */
+  .dnssec-section { margin-bottom: 50px; }
+  .dnssec-chain { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px; min-height: 80px; }
+  .dnssec-records { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .dnssec-record-card { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .dnssec-record-card h4 { color: #f59e0b; font-size: 1rem; margin-bottom: 8px; font-family: monospace; }
+  .dnssec-record-card p { color: #aaa; font-size: 0.85rem; line-height: 1.5; margin-bottom: 10px; }
+  .dnssec-record-card code { display: block; background: rgba(0,0,0,0.3); padding: 8px 10px; border-radius: 6px; font-size: 0.7rem; color: #06b6d4; word-break: break-all; }
+
+  /* Anycast */
+  .anycast-section { margin-bottom: 50px; }
+  .anycast-viz { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }
+  .anycast-map { position: relative; background: rgba(0,0,0,0.2); border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); min-height: 300px; overflow: hidden; }
+  .anycast-server { position: absolute; text-align: center; }
+  .anycast-dot { width: 16px; height: 16px; border-radius: 50%; background: #06b6d4; margin: 0 auto 4px; box-shadow: 0 0 10px rgba(6,182,212,0.5); animation: pulseGlow 2s ease-in-out infinite; }
+  .anycast-label { font-size: 0.7rem; color: #aaa; white-space: nowrap; }
+  .anycast-info { }
+  .anycast-info p { color: #ccc; font-size: 0.95rem; line-height: 1.6; margin-bottom: 20px; }
+  .anycast-info strong { color: #fff; }
+  .anycast-info code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #06b6d4; }
+  .anycast-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .anycast-stat { text-align: center; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; }
+  .stat-value-big { display: block; font-size: 1.4rem; font-weight: 700; color: #06b6d4; }
+  .stat-label-sm { display: block; font-size: 0.7rem; color: #888; margin-top: 4px; }
+
+  /* Cache */
+  .cache-section { margin-bottom: 50px; }
+  .cache-table { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); }
+  .cache-empty { color: #666; text-align: center; padding: 20px; }
+  .cache-row { display: grid; grid-template-columns: 2fr 1fr 2fr 1fr; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); align-items: center; font-size: 0.85rem; font-family: monospace; }
+  .cache-row.cache-header { color: #888; font-weight: 700; font-family: inherit; border-bottom: 1px solid rgba(255,255,255,0.15); }
+  .cache-row .cache-domain { color: #fff; }
+  .cache-row .cache-type { color: #8b5cf6; }
+  .cache-row .cache-value { color: #10b981; }
+  .cache-row .cache-ttl { color: #f59e0b; }
+  .cache-row .cache-ttl.expired { color: #ef4444; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #06b6d4; }
+  .explain-card em { color: #10b981; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #06b6d4; }
+  .highlight-card { background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(16,185,129,0.08)); border-color: rgba(6,182,212,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #06b6d4; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 5px rgba(6,182,212,0.3); } 50% { box-shadow: 0 0 20px rgba(6,182,212,0.6); } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .encrypted-compare { grid-template-columns: 1fr; }
+    .dnssec-records { grid-template-columns: 1fr; }
+    .anycast-viz { grid-template-columns: 1fr; }
+    .ttl-layers { grid-template-columns: 1fr 1fr; }
+    .resolver-nodes { min-width: 700px; }
+  }
+</style>
+
+<script is:inline>
+  // ========== DNS RECORD DATA ==========
+  var dnsRecords = {
+    A: { name: 'A (Address)', desc: 'Maps a domain to an IPv4 address. The most common record type.', example: 'example.com.  300  IN  A  93.184.216.34', use: 'Point your domain to a web server\'s IPv4 address.' },
+    AAAA: { name: 'AAAA (IPv6 Address)', desc: 'Maps a domain to an IPv6 address. Same as A but for the modern internet.', example: 'example.com.  300  IN  AAAA  2606:2800:220:1:248:1893:25c8:1946', use: 'IPv6-enabled hosting. Most domains should have both A and AAAA.' },
+    CNAME: { name: 'CNAME (Canonical Name)', desc: 'Alias one domain to another. The resolver follows the chain until it finds an A/AAAA.', example: 'www.example.com.  300  IN  CNAME  example.com.', use: 'Point subdomains to a canonical name. Cannot coexist with other records at same name.' },
+    MX: { name: 'MX (Mail Exchange)', desc: 'Specifies mail servers for the domain, with priority (lower = preferred).', example: 'example.com.  300  IN  MX  10 mail.example.com.\nexample.com.  300  IN  MX  20 backup.example.com.', use: 'Email delivery. Multiple MX records provide failover.' },
+    NS: { name: 'NS (Name Server)', desc: 'Delegates a zone to the specified authoritative nameservers.', example: 'example.com.  86400  IN  NS  ns1.example.com.\nexample.com.  86400  IN  NS  ns2.example.com.', use: 'Set at registrar to delegate your domain. Usually 2+ for redundancy.' },
+    TXT: { name: 'TXT (Text)', desc: 'Stores arbitrary text. Used for SPF, DKIM, DMARC, domain verification, and more.', example: 'example.com.  300  IN  TXT  "v=spf1 include:_spf.google.com ~all"', use: 'Email authentication (SPF/DKIM/DMARC), domain ownership verification (Google, AWS).' },
+    SRV: { name: 'SRV (Service)', desc: 'Specifies host and port for a service. Format: _service._proto.name TTL IN SRV priority weight port target.', example: '_sip._tcp.example.com.  300  IN  SRV  10 60 5060 sip.example.com.', use: 'Service discovery for SIP, XMPP, LDAP, Minecraft servers, etc.' },
+    SOA: { name: 'SOA (Start of Authority)', desc: 'Contains zone metadata: primary NS, admin email, serial, refresh/retry/expire timers, and minimum TTL for negative caching.', example: 'example.com.  86400  IN  SOA  ns1.example.com. admin.example.com. (\n  2025032201  ; serial\n  3600        ; refresh\n  900         ; retry\n  604800      ; expire\n  300         ; minimum TTL\n)', use: 'Every zone must have exactly one SOA. Serial must increment on changes for zone transfers.' }
+  };
+
+  // ========== SIMULATED DNS DATABASE ==========
+  var dnsDB = {
+    'www.example.com': { A: '93.184.216.34', AAAA: '2606:2800:220:1:248:1893:25c8:1946', tld: 'com', auth: 'ns1.example.com' },
+    'example.com': { A: '93.184.216.34', AAAA: '2606:2800:220:1:248:1893:25c8:1946', MX: '10 mail.example.com', NS: 'ns1.example.com', TXT: '"v=spf1 include:_spf.google.com ~all"', SOA: 'ns1.example.com admin.example.com 2025032201 3600 900 604800 300', tld: 'com', auth: 'ns1.example.com' },
+    'google.com': { A: '142.250.80.46', AAAA: '2607:f8b0:4004:800::200e', MX: '10 smtp.google.com', tld: 'com', auth: 'ns1.google.com' },
+    'www.google.com': { A: '142.250.80.46', CNAME: 'google.com', tld: 'com', auth: 'ns1.google.com' },
+    'github.com': { A: '140.82.121.4', AAAA: '2606:50c0:8000::64', tld: 'com', auth: 'ns1.github.com' },
+    'api.github.com': { A: '140.82.121.6', CNAME: 'github.com', tld: 'com', auth: 'ns1.github.com' },
+    'cloudflare.com': { A: '104.16.132.229', tld: 'com', auth: 'ns1.cloudflare.com' },
+    'systeminternals.dev': { A: '76.76.21.21', tld: 'dev', auth: 'ns1.vercel-dns.com' },
+    'news.ycombinator.com': { A: '209.216.230.240', CNAME: 'ycombinator.com', tld: 'com', auth: 'ns1.ycombinator.com' },
+    'default': { A: '203.0.113.42', tld: 'com', auth: 'ns1.default.com' }
+  };
+
+  // ========== DNS CACHE ==========
+  var dnsCache = {};
+  var cacheTimers = [];
+
+  function addToCache(domain, type, value, ttl) {
+    var key = domain + '/' + type;
+    dnsCache[key] = { domain: domain, type: type, value: value, ttl: ttl, maxTtl: ttl, addedAt: Date.now() };
+    renderCacheTable();
+  }
+
+  function checkCache(domain, type) {
+    var key = domain + '/' + type;
+    var entry = dnsCache[key];
+    if (!entry) return null;
+    var elapsed = Math.floor((Date.now() - entry.addedAt) / 1000);
+    var remaining = entry.ttl - elapsed;
+    if (remaining <= 0) {
+      delete dnsCache[key];
+      renderCacheTable();
+      return null;
+    }
+    return { value: entry.value, remaining: remaining };
+  }
+
+  function clearCache() {
+    dnsCache = {};
+    renderCacheTable();
+  }
+
+  function renderCacheTable() {
+    var table = document.getElementById('cacheTable');
+    var keys = Object.keys(dnsCache);
+    if (keys.length === 0) {
+      table.innerHTML = '<div class="cache-empty">No cached records yet. Resolve a domain above!</div>';
+      return;
+    }
+    var html = '<div class="cache-row cache-header"><span>Domain</span><span>Type</span><span>Value</span><span>TTL</span></div>';
+    keys.forEach(function(key) {
+      var e = dnsCache[key];
+      var elapsed = Math.floor((Date.now() - e.addedAt) / 1000);
+      var remaining = Math.max(0, e.ttl - elapsed);
+      var expired = remaining <= 0;
+      html += '<div class="cache-row">';
+      html += '<span class="cache-domain">' + e.domain + '</span>';
+      html += '<span class="cache-type">' + e.type + '</span>';
+      html += '<span class="cache-value">' + e.value + '</span>';
+      html += '<span class="cache-ttl' + (expired ? ' expired' : '') + '">' + (expired ? 'EXPIRED' : remaining + 's') + '</span>';
+      html += '</div>';
+    });
+    table.innerHTML = html;
+  }
+
+  // Update cache display every second
+  setInterval(renderCacheTable, 1000);
+
+  // ========== RESOLUTION SIMULATOR ==========
+  var resolving = false;
+
+  function getDomainInfo(domain) {
+    return dnsDB[domain] || dnsDB['default'];
+  }
+
+  function getTLD(domain) {
+    var parts = domain.split('.');
+    return '.' + parts[parts.length - 1];
+  }
+
+  function getBaseDomain(domain) {
+    var parts = domain.split('.');
+    if (parts.length >= 2) return parts.slice(-2).join('.');
+    return domain;
+  }
+
+  function resetNodes() {
+    document.querySelectorAll('.resolver-node').forEach(function(n) {
+      n.classList.remove('active', 'cache-hit');
+    });
+    document.querySelectorAll('.resolver-arrow').forEach(function(a) {
+      a.classList.remove('active');
+    });
+    ['arrowLabel1','arrowLabel2','arrowLabel3','arrowLabel4'].forEach(function(id) {
+      document.getElementById(id).textContent = '';
+    });
+  }
+
+  function activateNode(id, isCacheHit) {
+    resetNodes();
+    var node = document.getElementById(id);
+    if (isCacheHit) {
+      node.classList.add('cache-hit');
+    } else {
+      node.classList.add('active');
+    }
+  }
+
+  function activateArrow(id) {
+    document.getElementById(id).classList.add('active');
+  }
+
+  function addLog(text, color) {
+    var log = document.getElementById('resolverLog');
+    var el = document.createElement('div');
+    el.style.cssText = 'padding:3px 0;color:' + (color || '#aaa') + ';animation:fadeIn 0.3s ease-out;';
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  document.getElementById('resolveBtn').addEventListener('click', function() {
+    if (resolving) return;
+    resolving = true;
+
+    var domain = document.getElementById('domainInput').value.trim().toLowerCase();
+    if (!domain) { resolving = false; return; }
+    var qtype = document.getElementById('queryTypeSelect').value;
+    var tld = getTLD(domain);
+    var info = getDomainInfo(domain);
+
+    document.getElementById('tldSublabel').textContent = tld;
+    document.getElementById('authSublabel').textContent = info.auth || 'ns1.' + getBaseDomain(domain);
+
+    var log = document.getElementById('resolverLog');
+    log.innerHTML = '';
+    document.getElementById('resolverResult').innerHTML = '';
+    resetNodes();
+
+    var steps = [];
+    var cached = checkCache(domain, qtype);
+
+    if (cached) {
+      // Cache hit path
+      steps.push(function(cb) {
+        activateNode('nodeApp');
+        addLog('$ dig ' + domain + ' ' + qtype, '#06b6d4');
+        addLog('→ Stub resolver checks local cache...', '#aaa');
+        setTimeout(cb, 600);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeRecursive', true);
+        activateArrow('arrow1');
+        document.getElementById('arrowLabel1').textContent = 'Query: ' + qtype;
+        addLog('⚡ CACHE HIT! ' + domain + ' ' + qtype + ' → ' + cached.value + ' (TTL: ' + cached.remaining + 's remaining)', '#f59e0b');
+        setTimeout(cb, 800);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeApp');
+        var resultValue = cached.value;
+        addLog('✅ Answer: ' + domain + ' → ' + resultValue + ' (from cache, ' + cached.remaining + 's TTL remaining)', '#10b981');
+        document.getElementById('resolverResult').innerHTML = '<div class="result-box">⚡ ' + domain + ' ' + qtype + ' → ' + resultValue + ' (CACHED, TTL: ' + cached.remaining + 's)</div>';
+        resolving = false;
+        cb();
+      });
+    } else {
+      // Full resolution
+      var resultValue = info[qtype] || info['A'] || '203.0.113.42';
+      var ttl = 300;
+
+      steps.push(function(cb) {
+        activateNode('nodeApp');
+        addLog('$ dig ' + domain + ' ' + qtype, '#06b6d4');
+        addLog('→ Application calls stub resolver (libc getaddrinfo)', '#aaa');
+        setTimeout(cb, 700);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeRecursive');
+        activateArrow('arrow1');
+        document.getElementById('arrowLabel1').textContent = 'Query: ' + qtype;
+        addLog('→ Stub resolver forwards to recursive resolver (8.8.8.8)', '#aaa');
+        addLog('→ Recursive resolver checks its cache... MISS', '#888');
+        setTimeout(cb, 800);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeRoot');
+        activateArrow('arrow2');
+        document.getElementById('arrowLabel2').textContent = 'Who has ' + tld + '?';
+        addLog('→ Query root server: "Who handles ' + tld + '?"', '#f59e0b');
+        addLog('← Root responds: "' + tld + ' NS is at ' + tld + '-servers" (referral)', '#f59e0b');
+        setTimeout(cb, 900);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeTLD');
+        activateArrow('arrow3');
+        document.getElementById('arrowLabel3').textContent = 'Who has ' + getBaseDomain(domain) + '?';
+        addLog('→ Query ' + tld + ' TLD server: "Who handles ' + getBaseDomain(domain) + '?"', '#8b5cf6');
+        addLog('← TLD responds: "' + getBaseDomain(domain) + ' NS is ' + (info.auth || 'ns1.' + getBaseDomain(domain)) + '" (referral)', '#8b5cf6');
+        setTimeout(cb, 900);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeAuth');
+        activateArrow('arrow4');
+        document.getElementById('arrowLabel4').textContent = qtype + ' for ' + domain + '?';
+        addLog('→ Query authoritative NS (' + (info.auth || 'ns1.' + getBaseDomain(domain)) + '): "' + qtype + ' record for ' + domain + '?"', '#06b6d4');
+
+        if (info[qtype]) {
+          addLog('← Authoritative answer: ' + domain + ' ' + qtype + ' → ' + resultValue + ' (TTL: ' + ttl + 's)', '#10b981');
+        } else {
+          addLog('← No ' + qtype + ' record found. Returning A record as fallback.', '#f59e0b');
+          addLog('← ' + domain + ' A → ' + resultValue + ' (TTL: ' + ttl + 's)', '#10b981');
+        }
+        setTimeout(cb, 800);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeRecursive');
+        addLog('→ Recursive resolver caches answer (TTL: ' + ttl + 's)', '#888');
+        addToCache(domain, qtype, resultValue, ttl);
+        setTimeout(cb, 500);
+      });
+      steps.push(function(cb) {
+        activateNode('nodeApp');
+        addLog('✅ Final answer: ' + domain + ' ' + qtype + ' → ' + resultValue, '#10b981');
+        addLog('Total hops: 4 (stub → recursive → root → TLD → auth)', '#888');
+        document.getElementById('resolverResult').innerHTML = '<div class="result-box">✅ ' + domain + ' ' + qtype + ' → ' + resultValue + ' (TTL: ' + ttl + 's, cached)</div>';
+        resolving = false;
+        cb();
+      });
+    }
+
+    // Execute steps sequentially
+    var i = 0;
+    function next() {
+      if (i < steps.length) {
+        steps[i](function() { i++; next(); });
+      }
+    }
+    next();
+  });
+
+  document.getElementById('clearCacheBtn').addEventListener('click', function() {
+    clearCache();
+    addLog('🗑️ Cache cleared!', '#f59e0b');
+  });
+
+  // ========== RECORD TYPE EXPLORER ==========
+  function renderRecordTabs() {
+    var tabs = document.getElementById('recordTabs');
+    var types = Object.keys(dnsRecords);
+    tabs.innerHTML = '';
+    types.forEach(function(type) {
+      var btn = document.createElement('button');
+      btn.className = 'record-tab';
+      btn.textContent = type;
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.record-tab').forEach(function(t) { t.classList.remove('active'); });
+        btn.classList.add('active');
+        var rec = dnsRecords[type];
+        var detail = document.getElementById('recordDetail');
+        detail.innerHTML = '<div style="margin-bottom:12px;"><span style="font-size:1.1rem;font-weight:700;color:#10b981;">' + rec.name + '</span></div>' +
+          '<p style="color:#ccc;margin-bottom:14px;line-height:1.6;">' + rec.desc + '</p>' +
+          '<div style="margin-bottom:14px;"><span style="font-size:0.8rem;color:#888;font-weight:600;">EXAMPLE:</span><pre style="background:rgba(0,0,0,0.3);padding:12px;border-radius:8px;font-size:0.8rem;color:#06b6d4;margin-top:6px;white-space:pre-wrap;overflow-x:auto;">' + rec.example + '</pre></div>' +
+          '<div><span style="font-size:0.8rem;color:#888;font-weight:600;">USE CASE:</span><p style="color:#aaa;font-size:0.9rem;margin-top:6px;">' + rec.use + '</p></div>';
+      });
+      tabs.appendChild(btn);
+    });
+  }
+  renderRecordTabs();
+
+  // ========== TTL COUNTDOWN ==========
+  var ttlInterval = null;
+  var ttlLayers = [
+    { name: 'Browser', icon: '🌐', factor: 1.0 },
+    { name: 'OS Cache', icon: '💻', factor: 1.0 },
+    { name: 'Recursive Resolver', icon: '🔄', factor: 1.0 },
+    { name: 'Authoritative NS', icon: '🏛️', factor: 1.0 }
+  ];
+
+  function renderTtlLayers(values) {
+    var container = document.getElementById('ttlLayers');
+    var maxTtl = parseInt(document.getElementById('ttlSlider').value);
+    var html = '';
+    ttlLayers.forEach(function(layer, i) {
+      var val = values ? values[i] : maxTtl;
+      var pct = maxTtl > 0 ? (val / maxTtl * 100) : 0;
+      var color = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+      html += '<div class="ttl-layer">';
+      html += '<div class="ttl-layer-icon">' + layer.icon + '</div>';
+      html += '<div class="ttl-layer-name">' + layer.name + '</div>';
+      html += '<div class="ttl-countdown">' + Math.max(0, val) + 's</div>';
+      html += '<div class="ttl-bar"><div class="ttl-bar-fill" style="width:' + pct + '%;background:' + color + ';"></div></div>';
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  document.getElementById('ttlSlider').addEventListener('input', function(e) {
+    document.getElementById('ttlLabel').textContent = e.target.value;
+    if (!ttlInterval) renderTtlLayers(null);
+  });
+
+  document.getElementById('startTtlBtn').addEventListener('click', function() {
+    if (ttlInterval) { clearInterval(ttlInterval); ttlInterval = null; }
+    var maxTtl = parseInt(document.getElementById('ttlSlider').value);
+    var startTime = Date.now();
+    var speed = maxTtl > 600 ? 50 : 1; // speed up for large TTLs
+
+    document.getElementById('ttlTimeline').textContent = 'Counting down... (' + (speed > 1 ? speed + 'x speed' : 'real-time') + ')';
+
+    ttlInterval = setInterval(function() {
+      var elapsed = Math.floor((Date.now() - startTime) / 1000) * speed;
+      var values = ttlLayers.map(function(layer) {
+        return Math.max(0, maxTtl - elapsed);
+      });
+
+      // Browser cache typically has shorter effective TTL
+      values[0] = Math.max(0, Math.min(60, maxTtl) - elapsed);
+
+      renderTtlLayers(values);
+
+      if (values.every(function(v) { return v <= 0; })) {
+        clearInterval(ttlInterval);
+        ttlInterval = null;
+        document.getElementById('ttlTimeline').textContent = '⏰ All TTLs expired! Next query will trigger full resolution.';
+      }
+    }, 1000);
+  });
+
+  document.getElementById('resetTtlBtn').addEventListener('click', function() {
+    if (ttlInterval) { clearInterval(ttlInterval); ttlInterval = null; }
+    renderTtlLayers(null);
+    document.getElementById('ttlTimeline').textContent = '';
+  });
+
+  renderTtlLayers(null);
+
+  // ========== RECURSIVE VS ITERATIVE ==========
+  var currentMode = 'recursive';
+
+  function renderModeViz() {
+    var viz = document.getElementById('modeViz');
+    var desc = document.getElementById('modeDesc');
+
+    if (currentMode === 'recursive') {
+      viz.innerHTML = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;">' +
+        '<div style="padding:12px 16px;border-radius:10px;border:2px solid #06b6d4;background:rgba(6,182,212,0.1);text-align:center;"><div style="font-size:1.3rem;">💻</div><div style="font-size:0.75rem;color:#fff;font-weight:700;">Client</div></div>' +
+        '<div style="text-align:center;"><div style="color:#06b6d4;font-size:0.7rem;">query →</div><div style="color:#10b981;font-size:0.7rem;">← final answer</div></div>' +
+        '<div style="padding:12px 16px;border-radius:10px;border:2px solid #8b5cf6;background:rgba(139,92,246,0.1);text-align:center;min-width:120px;"><div style="font-size:1.3rem;">🔄</div><div style="font-size:0.75rem;color:#fff;font-weight:700;">Recursive Resolver</div><div style="font-size:0.6rem;color:#888;margin-top:4px;">Does ALL the work</div></div>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#444;">→←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.05);font-size:0.7rem;color:#f59e0b;">🌍 Root</div></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#444;">→←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(139,92,246,0.3);background:rgba(139,92,246,0.05);font-size:0.7rem;color:#8b5cf6;">📁 TLD</div></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#444;">→←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(6,182,212,0.3);background:rgba(6,182,212,0.05);font-size:0.7rem;color:#06b6d4;">🏛️ Auth NS</div></div>' +
+        '</div>' +
+        '</div>';
+      desc.innerHTML = '<strong style="color:#8b5cf6;">Recursive query:</strong> The client sends one query to the recursive resolver, which then handles all the iterative lookups (root → TLD → authoritative) and returns the final answer. This is the standard model — your OS stub resolver sends a recursive query to 8.8.8.8 or your ISP\'s resolver.';
+    } else {
+      viz.innerHTML = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;">' +
+        '<div style="padding:12px 16px;border-radius:10px;border:2px solid #06b6d4;background:rgba(6,182,212,0.1);text-align:center;min-width:80px;"><div style="font-size:1.3rem;">💻</div><div style="font-size:0.75rem;color:#fff;font-weight:700;">Client</div><div style="font-size:0.6rem;color:#888;">Does the walking</div></div>' +
+        '<div style="display:flex;flex-direction:column;gap:12px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#f59e0b;font-size:0.65rem;">1. →←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.05);font-size:0.7rem;color:#f59e0b;">🌍 Root: "try .com servers"</div></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#8b5cf6;font-size:0.65rem;">2. →←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(139,92,246,0.3);background:rgba(139,92,246,0.05);font-size:0.7rem;color:#8b5cf6;">📁 TLD: "try ns1.example.com"</div></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="color:#10b981;font-size:0.65rem;">3. →←</span><div style="padding:6px 12px;border-radius:8px;border:1px solid rgba(16,185,129,0.3);background:rgba(16,185,129,0.05);font-size:0.7rem;color:#10b981;">🏛️ Auth: "93.184.216.34!"</div></div>' +
+        '</div>' +
+        '</div>';
+      desc.innerHTML = '<strong style="color:#f59e0b;">Iterative query:</strong> Each server returns a referral ("I don\'t know, but ask this server"). The querier follows each referral itself. This is what happens <em>between</em> the recursive resolver and the authoritative servers. Recursive resolvers use iterative queries internally.';
+    }
+  }
+
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentMode = btn.getAttribute('data-mode');
+      renderModeViz();
+    });
+  });
+  renderModeViz();
+
+  // ========== DNSSEC CHAIN OF TRUST ==========
+  function renderDnssecChain() {
+    var chain = document.getElementById('dnssecChain');
+    var levels = [
+      { zone: '. (Root)', color: '#f59e0b', keys: 'KSK + ZSK', signs: 'Signs .com DS record' },
+      { zone: '.com (TLD)', color: '#8b5cf6', keys: 'KSK + ZSK', signs: 'Signs example.com DS record' },
+      { zone: 'example.com', color: '#06b6d4', keys: 'KSK + ZSK', signs: 'Signs A, MX, TXT records' },
+    ];
+
+    var html = '<div style="display:flex;flex-direction:column;gap:0;align-items:center;">';
+    levels.forEach(function(level, i) {
+      html += '<div style="display:flex;align-items:center;gap:16px;width:100%;max-width:600px;margin:0 auto;">';
+      html += '<div style="padding:14px 20px;border-radius:12px;border:2px solid ' + level.color + ';background:' + level.color + '15;flex:1;text-align:center;">';
+      html += '<div style="font-weight:700;color:' + level.color + ';font-size:0.9rem;">' + level.zone + '</div>';
+      html += '<div style="font-size:0.7rem;color:#888;margin-top:4px;">🔑 ' + level.keys + '</div>';
+      html += '</div>';
+      html += '<div style="font-size:0.75rem;color:#aaa;min-width:180px;">' + level.signs + '</div>';
+      html += '</div>';
+      if (i < levels.length - 1) {
+        html += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0;">';
+        html += '<div style="width:2px;height:20px;background:rgba(255,255,255,0.15);"></div>';
+        html += '<span style="font-size:0.65rem;color:#888;">DS record (hash of child KSK) →</span>';
+        html += '</div>';
+      }
+    });
+    html += '</div>';
+    html += '<div style="margin-top:14px;text-align:center;font-size:0.8rem;color:#888;">Trust anchor: Root KSK is pre-installed in validators (RFC 5011 rollover)</div>';
+    chain.innerHTML = html;
+  }
+  renderDnssecChain();
+
+  // ========== RESOLVER LOG HELPER ==========
+  function addLog(text, color) {
+    var log = document.getElementById('resolverLog');
+    var el = document.createElement('div');
+    el.style.cssText = 'padding:3px 0;color:' + (color || '#aaa') + ';animation:fadeIn 0.3s ease-out;';
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+</script>
