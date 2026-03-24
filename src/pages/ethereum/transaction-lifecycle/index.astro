@@ -1,0 +1,573 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Ethereum Transaction Lifecycle" 
+  description="Interactive visualization of an Ethereum transaction from wallet signing through mempool, block inclusion, and finality"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Ethereum", href: "/ethereum/" },
+    { label: "Transaction Lifecycle", href: "/ethereum/transaction-lifecycle/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📤 Transaction Lifecycle</h1>
+      <p class="subtitle">From "Send" Button to On-Chain Finality</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          An Ethereum transaction goes through <strong>7 stages</strong>: creation → signing → broadcast →
+          mempool → block inclusion → execution → finality. Each stage has failure modes and timing
+          characteristics. Understanding this flow helps debug stuck transactions, optimize gas,
+          and build reliable dApps.
+        </p>
+      </div>
+    </section>
+
+    <!-- Transaction Simulator -->
+    <section class="tx-section">
+      <h2>🎮 Transaction Simulator</h2>
+      <p class="section-desc">Configure a transaction and watch it flow through the network.</p>
+
+      <div class="tx-config">
+        <div class="tx-field">
+          <label>From:</label>
+          <span class="tx-addr">0xA1b2...C3d4</span>
+        </div>
+        <div class="tx-field">
+          <label>To:</label>
+          <span class="tx-addr">0xE5f6...G7h8</span>
+        </div>
+        <div class="tx-field">
+          <label>Value:</label>
+          <input type="number" id="txValue" value="0.1" step="0.01" min="0" max="100">
+          <span>ETH</span>
+        </div>
+        <div class="tx-field">
+          <label>Max Fee:</label>
+          <input type="number" id="txMaxFee" value="30" step="1" min="1" max="500">
+          <span>gwei</span>
+        </div>
+        <div class="tx-field">
+          <label>Priority Fee:</label>
+          <input type="number" id="txPriorityFee" value="2" step="0.5" min="0" max="50">
+          <span>gwei</span>
+        </div>
+        <div class="tx-field">
+          <label>Gas Limit:</label>
+          <input type="number" id="txGasLimit" value="21000" step="1000" min="21000" max="10000000">
+        </div>
+      </div>
+
+      <div class="tx-pipeline" id="txPipeline">
+        <div class="tx-stage" data-stage="0" id="txStage0">
+          <div class="tx-stage-num">1</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">📝</div>
+            <div class="tx-stage-title">Create</div>
+            <div class="tx-stage-desc">Build transaction object with nonce, to, value, gas params</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="1" id="txStage1">
+          <div class="tx-stage-num">2</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">🔐</div>
+            <div class="tx-stage-title">Sign</div>
+            <div class="tx-stage-desc">ECDSA signature with private key → v, r, s components</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="2" id="txStage2">
+          <div class="tx-stage-num">3</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">📡</div>
+            <div class="tx-stage-title">Broadcast</div>
+            <div class="tx-stage-desc">Send raw tx to RPC endpoint → gossip to peers (DevP2P)</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="3" id="txStage3">
+          <div class="tx-stage-num">4</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">🏊</div>
+            <div class="tx-stage-title">Mempool</div>
+            <div class="tx-stage-desc">Pending in each node's local mempool, ordered by priority fee</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="4" id="txStage4">
+          <div class="tx-stage-num">5</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">⛏️</div>
+            <div class="tx-stage-title">Block Inclusion</div>
+            <div class="tx-stage-desc">Builder selects tx for block → Proposer includes it</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="5" id="txStage5">
+          <div class="tx-stage-num">6</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">⚙️</div>
+            <div class="tx-stage-title">Execution</div>
+            <div class="tx-stage-desc">EVM executes → state changes applied → receipt generated</div>
+          </div>
+        </div>
+        <div class="tx-stage" data-stage="6" id="txStage6">
+          <div class="tx-stage-num">7</div>
+          <div class="tx-stage-content">
+            <div class="tx-stage-icon">✅</div>
+            <div class="tx-stage-title">Finality</div>
+            <div class="tx-stage-desc">2 epochs (~13 min) of attestations → irreversible</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tx-actions">
+        <button id="txSendBtn" class="action-btn primary-btn">📤 Send Transaction</button>
+        <button id="txStepBtn" class="action-btn secondary-btn" disabled>⏭ Next Stage</button>
+        <button id="txStuckBtn" class="action-btn danger-btn">🐌 Simulate Stuck Tx</button>
+        <button id="txRevertBtn" class="action-btn danger-btn">💥 Simulate Revert</button>
+        <button id="txResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="tx-details" id="txDetails">
+        <div class="tx-detail-item">
+          <span class="tx-detail-label">Status:</span>
+          <span class="tx-detail-value" id="txStatus">Not sent</span>
+        </div>
+        <div class="tx-detail-item">
+          <span class="tx-detail-label">Hash:</span>
+          <span class="tx-detail-value" id="txHash">—</span>
+        </div>
+        <div class="tx-detail-item">
+          <span class="tx-detail-label">Block:</span>
+          <span class="tx-detail-value" id="txBlock">—</span>
+        </div>
+        <div class="tx-detail-item">
+          <span class="tx-detail-label">Gas Used:</span>
+          <span class="tx-detail-value" id="txGasUsedDetail">—</span>
+        </div>
+        <div class="tx-detail-item">
+          <span class="tx-detail-label">Cost:</span>
+          <span class="tx-detail-value" id="txCost">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mempool Visualization -->
+    <section class="mempool-section">
+      <h2>🏊 Mempool</h2>
+      <p class="section-desc">Pending transactions sorted by priority fee. Higher tips get included first.</p>
+
+      <div class="mempool-viz" id="mempoolViz">
+        <div class="mempool-header">
+          <span>Tx</span><span>From</span><span>Priority Fee</span><span>Max Fee</span><span>Gas</span>
+        </div>
+        <div class="mempool-entries" id="mempoolEntries"></div>
+      </div>
+
+      <div class="mempool-actions">
+        <button id="mpAddBtn" class="action-btn primary-btn">📥 Add Random Tx</button>
+        <button id="mpMineBtn" class="action-btn secondary-btn">⛏️ Mine Block (top 5)</button>
+        <button id="mpResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="mempool-stats">
+        <span>Pending: <strong id="mpPending">0</strong></span>
+        <span>Included: <strong id="mpIncluded">0</strong></span>
+        <span>Avg tip: <strong id="mpAvgTip">0</strong> gwei</span>
+      </div>
+    </section>
+
+    <!-- Finality Timeline -->
+    <section class="finality-section">
+      <h2>⏱️ Finality Timeline</h2>
+      <p class="section-desc">How long until a transaction is truly irreversible?</p>
+
+      <div class="finality-timeline">
+        <div class="fin-point" style="left:0%">
+          <div class="fin-dot"></div>
+          <div class="fin-label">Signed</div>
+          <div class="fin-time">0s</div>
+        </div>
+        <div class="fin-point" style="left:5%">
+          <div class="fin-dot"></div>
+          <div class="fin-label">In mempool</div>
+          <div class="fin-time">~1s</div>
+        </div>
+        <div class="fin-point" style="left:15%">
+          <div class="fin-dot confirmed"></div>
+          <div class="fin-label">1 confirmation</div>
+          <div class="fin-time">~12s</div>
+        </div>
+        <div class="fin-point" style="left:40%">
+          <div class="fin-dot confirmed"></div>
+          <div class="fin-label">1 epoch (32 slots)</div>
+          <div class="fin-time">~6.4 min</div>
+        </div>
+        <div class="fin-point" style="left:100%">
+          <div class="fin-dot finalized"></div>
+          <div class="fin-label">Finalized</div>
+          <div class="fin-time">~13 min</div>
+        </div>
+        <div class="fin-bar"></div>
+      </div>
+
+      <div class="finality-notes">
+        <div class="fin-note">
+          <strong>1 confirmation:</strong> Included in a block. Could theoretically be reorged (very rare post-merge).
+        </div>
+        <div class="fin-note">
+          <strong>Finalized:</strong> 2/3 of validators have attested. Reverting requires slashing ~$10B+ in ETH. Effectively irreversible.
+        </div>
+        <div class="fin-note">
+          <strong>Most dApps:</strong> Consider 1 confirmation sufficient for small amounts. Exchanges often wait for finality.
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Stuck Transaction? Speed It Up</h3>
+          <p>
+            Tx stuck in mempool = priority fee too low. Fix: send a new transaction with
+            <strong>same nonce</strong> but higher maxPriorityFeePerGas. This "replaces" the stuck tx.
+            In MetaMask: "Speed Up" does exactly this. Or "Cancel" = self-transfer with same nonce.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔢 Nonce Management</h3>
+          <p>
+            Each address has a <strong>nonce</strong> — a sequential counter. Transactions must be
+            included in nonce order. If nonce 5 is pending, nonce 6 waits even if it has higher gas.
+            Gap in nonces = all subsequent txs stuck. Use <code>eth_getTransactionCount("pending")</code>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ MEV & Transaction Ordering</h3>
+          <p>
+            Searchers monitor the mempool for profitable opportunities (arbitrage, liquidations).
+            They pay higher tips or use <strong>Flashbots</strong> to submit bundles privately.
+            This is why your swap might get sandwiched — a searcher front-runs and back-runs your trade.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Transaction Types</h3>
+          <p>
+            <strong>Type 0:</strong> Legacy (gasPrice). <strong>Type 1:</strong> EIP-2930 (access list).
+            <strong>Type 2:</strong> EIP-1559 (maxFeePerGas + maxPriorityFeePerGas). 
+            <strong>Type 3:</strong> EIP-4844 (blob transactions for L2 data). Always use Type 2+.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://ethereum.org/en/developers/docs/transactions/" target="_blank">Ethereum Transaction Documentation</a> and <a href="https://www.evm.codes/" target="_blank">evm.codes</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Ethereum%20Transaction%20Lifecycle%20Visualizer&url=https://systeminternals.dev/ethereum/transaction-lifecycle/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/ethereum/transaction-lifecycle/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/ethereum/transaction-lifecycle/&t=Interactive%20Ethereum%20Transaction%20Lifecycle%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #818cf8, #a78bfa, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(129,140,248,0.1), rgba(167,139,250,0.05)); border: 1px solid rgba(129,140,248,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #818cf8, #6366f1); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(129,140,248,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Tx Config */
+  .tx-section { margin-bottom: 50px; }
+  .tx-config { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+  .tx-field { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+  .tx-field label { color: #888; min-width: 60px; }
+  .tx-field input { padding: 6px 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; width: 80px; font-family: 'Monaco','Menlo',monospace; }
+  .tx-field span { color: #888; font-size: 0.8rem; }
+  .tx-addr { color: #a78bfa; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; }
+
+  /* Pipeline */
+  .tx-pipeline { display: flex; flex-direction: column; gap: 0; margin-bottom: 16px; }
+  .tx-stage { display: flex; gap: 14px; padding: 14px 16px; border-left: 3px solid rgba(255,255,255,0.08); transition: all 0.4s; align-items: center; }
+  .tx-stage.active { border-left-color: #818cf8; background: rgba(129,140,248,0.06); border-radius: 0 10px 10px 0; }
+  .tx-stage.done { border-left-color: #34d399; }
+  .tx-stage.error { border-left-color: #ef4444; background: rgba(239,68,68,0.05); }
+  .tx-stage.stuck { border-left-color: #fbbf24; background: rgba(251,191,36,0.05); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+  .tx-stage-num { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #888; flex-shrink: 0; }
+  .tx-stage.active .tx-stage-num { background: rgba(129,140,248,0.3); color: #818cf8; }
+  .tx-stage.done .tx-stage-num { background: rgba(52,211,153,0.3); color: #34d399; }
+  .tx-stage.error .tx-stage-num { background: rgba(239,68,68,0.3); color: #ef4444; }
+  .tx-stage-content { display: flex; align-items: center; gap: 10px; flex: 1; }
+  .tx-stage-icon { font-size: 1.2rem; }
+  .tx-stage-title { font-size: 0.9rem; font-weight: 600; color: #fff; min-width: 100px; }
+  .tx-stage-desc { font-size: 0.8rem; color: #888; }
+
+  .tx-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+
+  .tx-details { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); }
+  .tx-detail-item { display: flex; gap: 6px; font-size: 0.8rem; }
+  .tx-detail-label { color: #888; }
+  .tx-detail-value { color: #ccc; font-family: 'Monaco','Menlo',monospace; }
+
+  /* Mempool */
+  .mempool-section { margin-bottom: 50px; }
+  .mempool-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; max-height: 300px; overflow-y: auto; }
+  .mempool-header { display: flex; gap: 12px; padding: 8px 12px; font-size: 0.75rem; font-weight: 700; color: #888; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .mempool-header span { flex: 1; }
+  :global(.mp-entry) { display: flex; gap: 12px; padding: 8px 12px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; border-bottom: 1px solid rgba(255,255,255,0.03); animation: mpSlide 0.3s ease-out; }
+  @keyframes mpSlide { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+  :global(.mp-entry span) { flex: 1; color: #ccc; }
+  :global(.mp-entry.top) { background: rgba(129,140,248,0.06); }
+  :global(.mp-entry.mined) { opacity: 0.4; text-decoration: line-through; }
+  :global(.mp-tip) { color: #34d399 !important; font-weight: 600; }
+
+  .mempool-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .mempool-stats { display: flex; gap: 20px; font-size: 0.85rem; color: #888; }
+  .mempool-stats strong { color: #818cf8; }
+
+  /* Finality */
+  .finality-section { margin-bottom: 50px; }
+  .finality-timeline { position: relative; height: 100px; margin-bottom: 20px; }
+  .fin-bar { position: absolute; top: 30px; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #818cf8, #34d399); border-radius: 2px; }
+  .fin-point { position: absolute; top: 0; transform: translateX(-50%); text-align: center; }
+  .fin-dot { width: 16px; height: 16px; border-radius: 50%; background: rgba(129,140,248,0.3); border: 2px solid #818cf8; margin: 0 auto 6px; }
+  .fin-dot.confirmed { background: rgba(52,211,153,0.3); border-color: #34d399; }
+  .fin-dot.finalized { background: #34d399; border-color: #34d399; box-shadow: 0 0 10px rgba(52,211,153,0.5); }
+  .fin-label { font-size: 0.75rem; color: #ccc; font-weight: 600; white-space: nowrap; }
+  .fin-time { font-size: 0.7rem; color: #888; }
+
+  .finality-notes { display: flex; flex-direction: column; gap: 8px; }
+  .fin-note { font-size: 0.85rem; color: #aaa; padding: 8px 14px; background: rgba(0,0,0,0.15); border-radius: 8px; }
+  .fin-note strong { color: #818cf8; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #818cf8; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #a78bfa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(129,140,248,0.08), rgba(167,139,250,0.08)); border-color: rgba(129,140,248,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #818cf8; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .tx-config { flex-direction: column; }
+    .tx-stage-desc { display: none; }
+  }
+</style>
+
+<script>
+  // ========== TX SIMULATOR ==========
+  let txStep = -1;
+  let txMode = 'normal'; // normal, stuck, revert
+
+  function resetStages() {
+    for (let i = 0; i <= 6; i++) {
+      const el = document.getElementById(`txStage${i}`)!;
+      el.classList.remove('active', 'done', 'error', 'stuck');
+    }
+    txStep = -1;
+  }
+
+  function setStageActive(idx: number) {
+    for (let i = 0; i < idx; i++) document.getElementById(`txStage${i}`)!.classList.add('done');
+    document.getElementById(`txStage${idx}`)!.classList.add('active');
+  }
+
+  function generateHash(): string {
+    return '0x' + Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join('') + '...';
+  }
+
+  async function runTx() {
+    resetStages();
+    const maxFee = parseFloat((document.getElementById('txMaxFee') as HTMLInputElement).value);
+    const tip = parseFloat((document.getElementById('txPriorityFee') as HTMLInputElement).value);
+    const gasLimit = parseInt((document.getElementById('txGasLimit') as HTMLInputElement).value);
+    const value = parseFloat((document.getElementById('txValue') as HTMLInputElement).value);
+    const hash = generateHash();
+
+    const stages = [
+      () => {
+        document.getElementById('txStatus')!.textContent = 'Creating...';
+        document.getElementById('txHash')!.textContent = '—';
+      },
+      () => {
+        document.getElementById('txStatus')!.textContent = 'Signing with ECDSA...';
+        document.getElementById('txHash')!.textContent = hash;
+      },
+      () => { document.getElementById('txStatus')!.textContent = 'Broadcasting to peers...'; },
+      () => {
+        if (txMode === 'stuck') {
+          document.getElementById('txStatus')!.textContent = '🐌 Stuck! Priority fee too low...';
+          document.getElementById(`txStage3`)!.classList.add('stuck');
+          document.getElementById(`txStage3`)!.classList.remove('active');
+          return false;
+        }
+        document.getElementById('txStatus')!.textContent = 'In mempool (pending)...';
+      },
+      () => {
+        document.getElementById('txStatus')!.textContent = 'Included in block!';
+        document.getElementById('txBlock')!.textContent = `#${19000000 + Math.floor(Math.random() * 1000000)}`;
+      },
+      () => {
+        if (txMode === 'revert') {
+          document.getElementById('txStatus')!.textContent = '❌ REVERTED (execution failed)';
+          document.getElementById(`txStage5`)!.classList.add('error');
+          document.getElementById(`txStage5`)!.classList.remove('active');
+          document.getElementById('txGasUsedDetail')!.textContent = gasLimit.toLocaleString() + ' (all consumed!)';
+          const cost = (maxFee * gasLimit / 1e9);
+          document.getElementById('txCost')!.textContent = cost.toFixed(6) + ' ETH (wasted!)';
+          return false;
+        }
+        document.getElementById('txStatus')!.textContent = 'Executing on EVM...';
+        document.getElementById('txGasUsedDetail')!.textContent = '21,000';
+        const effectiveFee = Math.min(maxFee, 15 + tip); // baseFee ~15
+        const cost = (effectiveFee * 21000 / 1e9);
+        document.getElementById('txCost')!.textContent = cost.toFixed(6) + ' ETH';
+      },
+      () => {
+        document.getElementById('txStatus')!.textContent = '✅ Finalized (~13 min)';
+      },
+    ];
+
+    for (let i = 0; i <= 6; i++) {
+      setStageActive(i);
+      const result = stages[i]();
+      if (result === false) return;
+      await new Promise(r => setTimeout(r, 500));
+      document.getElementById(`txStage${i}`)!.classList.remove('active');
+    }
+    // Mark all done
+    for (let i = 0; i <= 6; i++) document.getElementById(`txStage${i}`)!.classList.add('done');
+  }
+
+  document.getElementById('txSendBtn')?.addEventListener('click', () => {
+    txMode = 'normal';
+    runTx();
+  });
+
+  document.getElementById('txStuckBtn')?.addEventListener('click', () => {
+    txMode = 'stuck';
+    runTx();
+  });
+
+  document.getElementById('txRevertBtn')?.addEventListener('click', () => {
+    txMode = 'revert';
+    runTx();
+  });
+
+  document.getElementById('txResetBtn')?.addEventListener('click', () => {
+    resetStages();
+    document.getElementById('txStatus')!.textContent = 'Not sent';
+    document.getElementById('txHash')!.textContent = '—';
+    document.getElementById('txBlock')!.textContent = '—';
+    document.getElementById('txGasUsedDetail')!.textContent = '—';
+    document.getElementById('txCost')!.textContent = '—';
+  });
+
+  // ========== MEMPOOL ==========
+  interface MempoolTx { id: number; from: string; tip: number; maxFee: number; gas: number; mined: boolean; }
+  let mpTxs: MempoolTx[] = [];
+  let mpTxId = 0;
+  let mpMined = 0;
+
+  function randomAddr(): string {
+    return '0x' + Array.from({ length: 4 }, () => Math.floor(Math.random() * 16).toString(16)).join('') + '...';
+  }
+
+  function renderMempool() {
+    mpTxs.sort((a, b) => b.tip - a.tip);
+    const el = document.getElementById('mempoolEntries')!;
+    el.innerHTML = mpTxs.map((tx, i) => {
+      const cls = tx.mined ? 'mined' : i < 5 ? 'top' : '';
+      return `<div class="mp-entry ${cls}">
+        <span>tx-${tx.id}</span>
+        <span>${tx.from}</span>
+        <span class="mp-tip">${tx.tip} gwei</span>
+        <span>${tx.maxFee} gwei</span>
+        <span>${(tx.gas / 1000).toFixed(0)}k</span>
+      </div>`;
+    }).join('');
+
+    const pending = mpTxs.filter(t => !t.mined);
+    document.getElementById('mpPending')!.textContent = String(pending.length);
+    document.getElementById('mpIncluded')!.textContent = String(mpMined);
+    const avgTip = pending.length > 0 ? (pending.reduce((s, t) => s + t.tip, 0) / pending.length).toFixed(1) : '0';
+    document.getElementById('mpAvgTip')!.textContent = avgTip;
+  }
+
+  document.getElementById('mpAddBtn')?.addEventListener('click', () => {
+    mpTxId++;
+    mpTxs.push({
+      id: mpTxId,
+      from: randomAddr(),
+      tip: Math.floor(Math.random() * 20) + 1,
+      maxFee: Math.floor(Math.random() * 50) + 15,
+      gas: [21000, 50000, 100000, 200000][Math.floor(Math.random() * 4)],
+      mined: false,
+    });
+    renderMempool();
+  });
+
+  document.getElementById('mpMineBtn')?.addEventListener('click', () => {
+    const pending = mpTxs.filter(t => !t.mined).sort((a, b) => b.tip - a.tip);
+    const toMine = pending.slice(0, 5);
+    toMine.forEach(tx => { tx.mined = true; mpMined++; });
+    renderMempool();
+  });
+
+  document.getElementById('mpResetBtn')?.addEventListener('click', () => {
+    mpTxs = [];
+    mpTxId = 0;
+    mpMined = 0;
+    renderMempool();
+  });
+
+  // Seed some txs
+  for (let i = 0; i < 8; i++) {
+    mpTxId++;
+    mpTxs.push({
+      id: mpTxId,
+      from: randomAddr(),
+      tip: Math.floor(Math.random() * 20) + 1,
+      maxFee: Math.floor(Math.random() * 50) + 15,
+      gas: [21000, 50000, 100000, 200000][Math.floor(Math.random() * 4)],
+      mined: false,
+    });
+  }
+  renderMempool();
+</script>
+</BaseLayout>

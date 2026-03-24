@@ -1,0 +1,53 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "EVM Execution & Gas", description: "Step through bytecode, watch the stack, and understand gas metering", href: "/ethereum/evm-gas/", status: "live" },
+  { title: "Transaction Lifecycle", description: "From wallet signature to block inclusion — mempool, priority fees, and finality", href: "/ethereum/transaction-lifecycle/", status: "live" },
+  { title: "Merkle Patricia Trie", description: "How Ethereum stores world state in a cryptographic trie", href: "#", status: "coming" },
+  { title: "Proof of Stake & Consensus", description: "Slots, epochs, attestations, and validator mechanics", href: "#", status: "coming" },
+  { title: "MEV & Block Building", description: "Searchers, builders, proposers, and the PBS pipeline", href: "#", status: "coming" },
+];
+---
+
+<BaseLayout 
+  title="Ethereum Internals" 
+  description="Interactive visualizations for understanding Ethereum's EVM, transactions, consensus, and state management"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Ethereum", href: "/ethereum/" }]}
+>
+  <section class="section-header">
+    <h1>⟠ Ethereum Internals</h1>
+    <p>
+      Ethereum is a decentralized state machine. These visualizations help you understand
+      EVM execution, transaction processing, state storage, and consensus — the pieces that
+      make smart contracts work.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 40px; }
+  .section-header h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 16px; color: #fff; }
+  .section-header p { font-size: 1.1rem; color: #888; max-width: 700px; line-height: 1.7; }
+  .topics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .topic-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; transition: all 0.3s; display: block; color: inherit; }
+  .topic-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(99,102,241,0.4); transform: translateY(-4px); box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+  .topic-card.coming { opacity: 0.5; cursor: default; }
+  .topic-card.coming:hover { transform: none; background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); box-shadow: none; }
+  .topic-status { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; color: #666; }
+  .topic-card.live .topic-status { color: #22c55e; }
+  .topic-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; color: #fff; }
+  .topic-card p { font-size: 0.95rem; color: #888; line-height: 1.5; }
+</style>
