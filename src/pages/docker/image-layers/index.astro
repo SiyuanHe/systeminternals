@@ -1,0 +1,457 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Docker Image Layers & Union Filesystem" 
+  description="Interactive visualization of Docker image layers, copy-on-write, layer caching, multi-stage builds, and image size optimization"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Docker", href: "/docker/" },
+    { label: "Image Layers", href: "/docker/image-layers/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📦 Image Layers & Union FS</h1>
+      <p class="subtitle">How Docker Stacks Filesystem Layers and Why Order Matters</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A Docker image is a stack of <strong>read-only layers</strong>, each created by a Dockerfile instruction.
+          Layers are content-addressable (SHA256) and <em>shared</em> between images. When a container runs,
+          a thin <strong>writable layer</strong> is added on top using a <em>copy-on-write</em> (CoW) filesystem.
+          Understanding layers is key to fast builds, small images, and efficient caching.
+        </p>
+      </div>
+    </section>
+
+    <!-- Layer Stack -->
+    <section class="layers-section">
+      <h2>🏗️ Build an Image</h2>
+      <p class="section-desc">Add Dockerfile instructions and watch layers stack up. Each instruction creates a new layer.</p>
+
+      <div class="layers-viz">
+        <div class="dockerfile-col">
+          <div class="df-label">Dockerfile</div>
+          <div class="df-instructions" id="dfInstructions"></div>
+          <div class="df-add-row">
+            <select id="dfCmd">
+              <option value="FROM node:20-alpine">FROM node:20-alpine</option>
+              <option value="WORKDIR /app">WORKDIR /app</option>
+              <option value="COPY package*.json ./">COPY package*.json ./</option>
+              <option value="RUN npm install">RUN npm install</option>
+              <option value="COPY . .">COPY . .</option>
+              <option value="RUN npm run build">RUN npm run build</option>
+              <option value="EXPOSE 3000">EXPOSE 3000</option>
+              <option value="CMD [&quot;node&quot;, &quot;dist/index.js&quot;]">CMD ["node", "dist/index.js"]</option>
+            </select>
+            <button id="dfAddBtn" class="action-btn primary-btn">➕ Add</button>
+            <button id="dfPresetBtn" class="action-btn secondary-btn">📋 Full Preset</button>
+            <button id="dfResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          </div>
+        </div>
+
+        <div class="layer-stack-col">
+          <div class="ls-label">Image Layers</div>
+          <div class="layer-stack" id="layerStack">
+            <div class="layer-empty">Add instructions to build layers</div>
+          </div>
+          <div class="layer-total">
+            Total size: <strong id="layerTotal">0 MB</strong>
+            <span class="layer-count" id="layerCount">0 layers</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Copy-on-Write -->
+    <section class="cow-section">
+      <h2>📝 Copy-on-Write</h2>
+      <p class="section-desc">When a container modifies a file, it's copied to the writable layer. Original layer is unchanged.</p>
+
+      <div class="cow-viz">
+        <div class="cow-layers" id="cowLayers">
+          <div class="cow-layer writable">
+            <div class="cow-layer-label">🔓 Container Layer (R/W)</div>
+            <div class="cow-files" id="cowWritable"></div>
+          </div>
+          <div class="cow-layer readonly">
+            <div class="cow-layer-label">🔒 Layer 3: COPY . .</div>
+            <div class="cow-files">
+              <span class="cow-file" data-file="index.js">index.js <span class="cow-size">2KB</span></span>
+              <span class="cow-file" data-file="config.json">config.json <span class="cow-size">1KB</span></span>
+            </div>
+          </div>
+          <div class="cow-layer readonly">
+            <div class="cow-layer-label">🔒 Layer 2: RUN npm install</div>
+            <div class="cow-files">
+              <span class="cow-file">node_modules/ <span class="cow-size">150MB</span></span>
+            </div>
+          </div>
+          <div class="cow-layer readonly base">
+            <div class="cow-layer-label">🔒 Layer 1: FROM node:20-alpine</div>
+            <div class="cow-files">
+              <span class="cow-file">/usr/local/bin/node <span class="cow-size">80MB</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cow-actions">
+        <button id="cowModifyBtn" class="action-btn primary-btn">✏️ Modify config.json</button>
+        <button id="cowCreateBtn" class="action-btn secondary-btn">📄 Create new file</button>
+        <button id="cowDeleteBtn" class="action-btn danger-btn">🗑️ Delete index.js</button>
+        <button id="cowResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="cow-result" id="cowResult"></div>
+    </section>
+
+    <!-- Cache Optimization -->
+    <section class="cache-section">
+      <h2>⚡ Layer Caching</h2>
+      <p class="section-desc">Docker caches layers. If nothing changed, the cached layer is reused. Order your Dockerfile for maximum cache hits.</p>
+
+      <div class="cache-comparison">
+        <div class="cache-col bad">
+          <div class="cache-col-label">❌ Bad: code change invalidates npm install</div>
+          <div class="cache-steps" id="cacheBad">
+            <div class="cache-step cached">FROM node:20-alpine <span class="cache-badge hit">CACHED</span></div>
+            <div class="cache-step cached">WORKDIR /app <span class="cache-badge hit">CACHED</span></div>
+            <div class="cache-step miss">COPY . . <span class="cache-badge miss-badge">CHANGED</span></div>
+            <div class="cache-step miss">RUN npm install <span class="cache-badge miss-badge">REBUILD 💸</span></div>
+            <div class="cache-step miss">RUN npm run build <span class="cache-badge miss-badge">REBUILD</span></div>
+          </div>
+          <div class="cache-time">Build time: <strong>~120s</strong></div>
+        </div>
+        <div class="cache-col good">
+          <div class="cache-col-label">✅ Good: separate package.json copy</div>
+          <div class="cache-steps" id="cacheGood">
+            <div class="cache-step cached">FROM node:20-alpine <span class="cache-badge hit">CACHED</span></div>
+            <div class="cache-step cached">WORKDIR /app <span class="cache-badge hit">CACHED</span></div>
+            <div class="cache-step cached">COPY package*.json ./ <span class="cache-badge hit">CACHED</span></div>
+            <div class="cache-step cached">RUN npm install <span class="cache-badge hit">CACHED ✨</span></div>
+            <div class="cache-step miss">COPY . . <span class="cache-badge miss-badge">CHANGED</span></div>
+            <div class="cache-step miss">RUN npm run build <span class="cache-badge miss-badge">REBUILD</span></div>
+          </div>
+          <div class="cache-time">Build time: <strong>~15s</strong></div>
+        </div>
+      </div>
+
+      <button id="cacheAnimBtn" class="action-btn primary-btn" style="margin-top:16px">▶ Animate Build</button>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Multi-Stage Builds</h3>
+          <p>
+            Use <code>FROM node AS builder</code> for build deps, then <code>FROM node:alpine</code>
+            for production with only <code>COPY --from=builder /app/dist ./dist</code>.
+            Build tools stay in the builder stage. Final image: <strong>10-50x smaller</strong>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🗜️ Reducing Image Size</h3>
+          <p>
+            Combine RUN commands with <code>&&</code> to avoid extra layers.
+            Delete temp files in the <em>same RUN</em> (otherwise they exist in a previous layer).
+            Use <code>.dockerignore</code> to exclude node_modules, .git, etc. from COPY context.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔍 Content-Addressable Storage</h3>
+          <p>
+            Each layer is identified by its SHA256 hash. If two images share layers
+            (same base image, same npm install), the layer is stored <strong>once on disk</strong>.
+            <code>docker system df</code> shows shared vs unique size.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ BuildKit & Cache Mounts</h3>
+          <p>
+            <code>RUN --mount=type=cache,target=/root/.npm npm install</code> persists
+            the npm cache across builds without including it in any layer. 
+            Even faster than layer caching for package managers. Requires BuildKit (default since Docker 23).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.docker.com/build/guide/layers/" target="_blank">Docker Build Layers Guide</a> and <a href="https://docs.docker.com/storage/storagedriver/" target="_blank">Storage Driver Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Docker%20Image%20Layers%20Visualizer&url=https://systeminternals.dev/docker/image-layers/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/docker/image-layers/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/docker/image-layers/&t=Interactive%20Docker%20Image%20Layers%20%26%20Union%20FS%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #06b6d4, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(52,211,153,0.05)); border: 1px solid rgba(6,182,212,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #06b6d4; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(6,182,212,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Layer Builder */
+  .layers-section { margin-bottom: 50px; }
+  .layers-viz { display: flex; gap: 20px; }
+  .dockerfile-col { flex: 1; }
+  .layer-stack-col { flex: 1; }
+  .df-label, .ls-label { font-size: 0.85rem; font-weight: 700; color: #06b6d4; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .df-instructions { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; min-height: 60px; }
+  :global(.df-line) { padding: 6px 12px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; animation: msgAppear 0.3s ease-out; display: flex; gap: 8px; }
+  :global(.df-line-num) { color: #555; min-width: 20px; }
+  :global(.df-line-cmd) { color: #06b6d4; font-weight: 600; }
+  :global(.df-line-arg) { color: #ccc; }
+  @keyframes msgAppear { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+  .df-add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .df-add-row select { padding: 8px 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #fff; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; flex: 1; min-width: 180px; }
+  .df-add-row select option { background: #1a1a2e; }
+
+  .layer-stack { display: flex; flex-direction: column; gap: 4px; min-height: 60px; }
+  .layer-empty { color: #666; font-size: 0.9rem; text-align: center; padding: 20px; }
+  :global(.layer-item) { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-radius: 8px; font-size: 0.8rem; animation: layerSlide 0.4s ease-out; }
+  @keyframes layerSlide { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.layer-item.base) { background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.3); }
+  :global(.layer-item.metadata) { background: rgba(107,114,128,0.1); border: 1px dashed rgba(107,114,128,0.3); }
+  :global(.layer-item.small) { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.25); }
+  :global(.layer-item.medium) { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.25); }
+  :global(.layer-item.large) { background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.25); }
+  :global(.layer-cmd) { font-family: 'Monaco','Menlo',monospace; color: #ccc; }
+  :global(.layer-size) { font-weight: 700; color: #888; flex-shrink: 0; }
+  :global(.layer-hash) { font-size: 0.65rem; color: #555; font-family: 'Monaco','Menlo',monospace; }
+
+  .layer-total { margin-top: 12px; font-size: 0.85rem; color: #888; display: flex; gap: 16px; }
+  .layer-total strong { color: #06b6d4; }
+  .layer-count { color: #666; }
+
+  /* CoW */
+  .cow-section { margin-bottom: 50px; }
+  .cow-viz { margin-bottom: 16px; }
+  .cow-layers { display: flex; flex-direction: column; gap: 4px; }
+  .cow-layer { padding: 12px 16px; border-radius: 10px; }
+  .cow-layer.writable { background: rgba(52,211,153,0.08); border: 2px solid rgba(52,211,153,0.3); min-height: 50px; }
+  .cow-layer.readonly { background: rgba(96,165,250,0.05); border: 1px solid rgba(96,165,250,0.15); }
+  .cow-layer.base { background: rgba(167,139,250,0.05); border-color: rgba(167,139,250,0.15); }
+  .cow-layer-label { font-size: 0.8rem; font-weight: 600; color: #aaa; margin-bottom: 6px; }
+  .cow-files { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cow-file { padding: 4px 10px; background: rgba(255,255,255,0.05); border-radius: 6px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #bbb; }
+  .cow-size { color: #666; font-size: 0.7rem; }
+  :global(.cow-file.modified) { background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: #fde68a; }
+  :global(.cow-file.new) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+  :global(.cow-file.deleted) { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; text-decoration: line-through; }
+  :global(.cow-file.whiteout) { background: rgba(239,68,68,0.15); border: 1px dashed rgba(239,68,68,0.3); color: #fca5a5; }
+
+  .cow-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cow-result { font-size: 0.9rem; color: #aaa; min-height: 24px; padding: 8px; text-align: center; }
+
+  /* Cache */
+  .cache-section { margin-bottom: 50px; }
+  .cache-comparison { display: flex; gap: 16px; }
+  .cache-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .cache-col.bad { border-color: rgba(239,68,68,0.25); }
+  .cache-col.good { border-color: rgba(52,211,153,0.25); }
+  .cache-col-label { font-size: 0.85rem; font-weight: 600; margin-bottom: 12px; }
+  .cache-col.bad .cache-col-label { color: #f87171; }
+  .cache-col.good .cache-col-label { color: #34d399; }
+  .cache-steps { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .cache-step { padding: 8px 12px; border-radius: 6px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #ccc; display: flex; justify-content: space-between; align-items: center; gap: 8px; transition: all 0.3s; }
+  .cache-step.cached { background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.15); }
+  .cache-step.miss { background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.15); }
+  .cache-badge { font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+  .cache-badge.hit { background: rgba(52,211,153,0.2); color: #34d399; }
+  .cache-badge.miss-badge { background: rgba(249,115,22,0.2); color: #f97316; }
+  .cache-time { font-size: 0.85rem; color: #888; text-align: center; }
+  .cache-time strong { color: #fff; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #06b6d4; }
+  .explain-card em { color: #fbbf24; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #06b6d4; }
+  .highlight-card { background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(52,211,153,0.08)); border-color: rgba(6,182,212,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #06b6d4; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .layers-viz { flex-direction: column; }
+    .cache-comparison { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== LAYER BUILDER ==========
+  interface LayerInfo { cmd: string; arg: string; size: number; type: string; }
+
+  const LAYER_MAP: Record<string, LayerInfo> = {
+    'FROM node:20-alpine': { cmd: 'FROM', arg: 'node:20-alpine', size: 180, type: 'base' },
+    'WORKDIR /app': { cmd: 'WORKDIR', arg: '/app', size: 0, type: 'metadata' },
+    'COPY package*.json ./': { cmd: 'COPY', arg: 'package*.json ./', size: 0.5, type: 'small' },
+    'RUN npm install': { cmd: 'RUN', arg: 'npm install', size: 150, type: 'large' },
+    'COPY . .': { cmd: 'COPY', arg: '. .', size: 25, type: 'medium' },
+    'RUN npm run build': { cmd: 'RUN', arg: 'npm run build', size: 40, type: 'medium' },
+    'EXPOSE 3000': { cmd: 'EXPOSE', arg: '3000', size: 0, type: 'metadata' },
+    'CMD ["node", "dist/index.js"]': { cmd: 'CMD', arg: '["node", "dist/index.js"]', size: 0, type: 'metadata' },
+  };
+
+  let layers: LayerInfo[] = [];
+
+  function renderLayers() {
+    const dfEl = document.getElementById('dfInstructions')!;
+    const stackEl = document.getElementById('layerStack')!;
+
+    dfEl.innerHTML = layers.map((l, i) =>
+      `<div class="df-line"><span class="df-line-num">${i + 1}</span><span class="df-line-cmd">${l.cmd}</span><span class="df-line-arg">${l.arg}</span></div>`
+    ).join('');
+
+    if (layers.length === 0) {
+      stackEl.innerHTML = '<div class="layer-empty">Add instructions to build layers</div>';
+    } else {
+      // Render bottom-up (first layer at bottom)
+      stackEl.innerHTML = [...layers].reverse().map(l => {
+        const hash = Math.random().toString(36).substring(2, 14);
+        const sizeStr = l.size === 0 ? '0 B' : l.size < 1 ? (l.size * 1024).toFixed(0) + ' KB' : l.size.toFixed(0) + ' MB';
+        return `<div class="layer-item ${l.type}">
+          <span class="layer-cmd">${l.cmd} ${l.arg}</span>
+          <span class="layer-size">${sizeStr}</span>
+        </div>`;
+      }).join('');
+    }
+
+    const totalMB = layers.reduce((s, l) => s + l.size, 0);
+    document.getElementById('layerTotal')!.textContent = totalMB.toFixed(1) + ' MB';
+    document.getElementById('layerCount')!.textContent = layers.length + ' layers';
+  }
+
+  document.getElementById('dfAddBtn')?.addEventListener('click', () => {
+    const cmd = (document.getElementById('dfCmd') as HTMLSelectElement).value;
+    const info = LAYER_MAP[cmd];
+    if (!info) return;
+    layers.push(info);
+    renderLayers();
+  });
+
+  document.getElementById('dfPresetBtn')?.addEventListener('click', () => {
+    layers = Object.values(LAYER_MAP);
+    renderLayers();
+  });
+
+  document.getElementById('dfResetBtn')?.addEventListener('click', () => {
+    layers = [];
+    renderLayers();
+  });
+
+  // ========== COPY-ON-WRITE ==========
+  let cowFiles: Array<{name: string; size: string; cls: string}> = [];
+
+  function renderCow() {
+    const el = document.getElementById('cowWritable')!;
+    el.innerHTML = cowFiles.map(f =>
+      `<span class="cow-file ${f.cls}">${f.name} <span class="cow-size">${f.size}</span></span>`
+    ).join('');
+  }
+
+  document.getElementById('cowModifyBtn')?.addEventListener('click', () => {
+    if (cowFiles.find(f => f.name === 'config.json (copy)')) {
+      document.getElementById('cowResult')!.textContent = 'Already modified — copy already in writable layer';
+      return;
+    }
+    cowFiles.push({ name: 'config.json (copy)', size: '1KB', cls: 'modified' });
+    renderCow();
+    document.getElementById('cowResult')!.textContent = '✏️ config.json copied up to writable layer, then modified. Original in Layer 3 is unchanged.';
+  });
+
+  document.getElementById('cowCreateBtn')?.addEventListener('click', () => {
+    const name = `new-${cowFiles.length + 1}.log`;
+    cowFiles.push({ name, size: '0.5KB', cls: 'new' });
+    renderCow();
+    document.getElementById('cowResult')!.textContent = `📄 ${name} created in writable layer. Only exists in this container, not the image.`;
+  });
+
+  document.getElementById('cowDeleteBtn')?.addEventListener('click', () => {
+    if (cowFiles.find(f => f.name === '.wh.index.js')) {
+      document.getElementById('cowResult')!.textContent = 'Already deleted via whiteout';
+      return;
+    }
+    cowFiles.push({ name: '.wh.index.js', size: 'whiteout', cls: 'whiteout' });
+    renderCow();
+    document.getElementById('cowResult')!.textContent = '🗑️ Whiteout file (.wh.index.js) created in writable layer. Hides index.js from lower layers without actually deleting it.';
+  });
+
+  document.getElementById('cowResetBtn')?.addEventListener('click', () => {
+    cowFiles = [];
+    renderCow();
+    document.getElementById('cowResult')!.textContent = '';
+  });
+
+  // ========== CACHE ANIMATION ==========
+  document.getElementById('cacheAnimBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('cacheAnimBtn') as HTMLButtonElement;
+    btn.disabled = true;
+
+    // Reset both
+    document.querySelectorAll('.cache-step').forEach(s => { s.style.opacity = '0.3'; });
+
+    // Animate bad
+    const badSteps = document.querySelectorAll('#cacheBad .cache-step');
+    for (const step of badSteps) {
+      (step as HTMLElement).style.opacity = '1';
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+
+    // Animate good
+    const goodSteps = document.querySelectorAll('#cacheGood .cache-step');
+    for (const step of goodSteps) {
+      (step as HTMLElement).style.opacity = '1';
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    btn.disabled = false;
+  });
+
+  // ========== INIT ==========
+  renderLayers();
+  renderCow();
+</script>
+</BaseLayout>

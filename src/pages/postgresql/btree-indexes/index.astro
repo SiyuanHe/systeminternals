@@ -1,0 +1,575 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="PostgreSQL B-Tree Index Internals" 
+  description="Interactive visualization of PostgreSQL B-Tree indexes: page structure, splits, scans, covering indexes, and deduplication"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "PostgreSQL", href: "/postgresql/" },
+    { label: "B-Tree Indexes", href: "/postgresql/btree-indexes/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌳 B-Tree Index Internals</h1>
+      <p class="subtitle">How PostgreSQL Finds Your Row Without Scanning Every Page</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          The <strong>B-Tree</strong> is PostgreSQL's default index. It keeps keys sorted in a balanced tree
+          of 8KB pages, where leaf pages are linked for efficient range scans. A lookup descends from root →
+          internal → leaf in <em>O(log n)</em> I/O operations. For a table with 10 million rows, that's
+          typically <strong>3-4 page reads</strong> vs. a full sequential scan of ~100,000 pages.
+        </p>
+      </div>
+    </section>
+
+    <!-- Interactive B-Tree -->
+    <section class="btree-section">
+      <h2>🔍 Interactive B-Tree</h2>
+      <p class="section-desc">Insert keys and watch the tree grow. Click a node to see its page contents.</p>
+
+      <div class="btree-viz" id="btreeViz"></div>
+
+      <div class="btree-controls">
+        <div class="btree-input-row">
+          <input type="number" id="btreeKey" placeholder="Key (1-999)" min="1" max="999" value="">
+          <button id="btreeInsertBtn" class="action-btn primary-btn">📥 Insert</button>
+          <button id="btreeInsert5Btn" class="action-btn secondary-btn">📥 Insert 5 Random</button>
+          <button id="btreeSearchBtn" class="action-btn search-btn">🔍 Search</button>
+          <button id="btreeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="btree-info" id="btreeInfo">Insert keys to build the tree. Order (max keys per node): 4</div>
+
+      <div class="btree-stats">
+        <span>Keys: <strong id="btreeKeyCount">0</strong></span>
+        <span>Height: <strong id="btreeHeight">0</strong></span>
+        <span>Nodes: <strong id="btreeNodeCount">0</strong></span>
+        <span>Page reads for lookup: <strong id="btreePageReads">0</strong></span>
+      </div>
+    </section>
+
+    <!-- Index Scan Types -->
+    <section class="scan-section">
+      <h2>📖 Scan Types</h2>
+      <p class="section-desc">How PostgreSQL uses the B-Tree for different query patterns.</p>
+
+      <div class="scan-cards">
+        <div class="scan-card" data-scan="index">
+          <div class="scan-icon">🎯</div>
+          <h3>Index Scan</h3>
+          <p>Traverse B-Tree → find leaf → follow TID to heap page → return row. Best for selective queries (&lt;5% of rows).</p>
+          <div class="scan-flow">B-Tree → Leaf → <span class="heap-hop">Heap</span> → Row</div>
+          <code>WHERE id = 42</code>
+        </div>
+        <div class="scan-card" data-scan="index-only">
+          <div class="scan-icon">⚡</div>
+          <h3>Index-Only Scan</h3>
+          <p>All needed columns are in the index (covering index). Skips heap entirely if visibility map says page is all-visible.</p>
+          <div class="scan-flow">B-Tree → Leaf → <span class="skip-heap">Skip Heap!</span> → Done</div>
+          <code>SELECT id FROM t WHERE id > 100</code>
+        </div>
+        <div class="scan-card" data-scan="bitmap">
+          <div class="scan-icon">🗺️</div>
+          <h3>Bitmap Index Scan</h3>
+          <p>Build bitmap of matching heap pages → sort by page → fetch pages sequentially. Best for medium selectivity (5-25%).</p>
+          <div class="scan-flow">B-Tree → Bitmap → <span class="heap-hop">Sort</span> → Sequential I/O</div>
+          <code>WHERE age BETWEEN 20 AND 30</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- Page Split Demo -->
+    <section class="split-section">
+      <h2>✂️ Page Splits</h2>
+      <p class="section-desc">When a leaf page is full, it splits. Watch how keys redistribute.</p>
+
+      <div class="split-viz" id="splitViz">
+        <div class="split-before" id="splitBefore">
+          <div class="split-label">Before (full page)</div>
+          <div class="split-page" id="splitPageBefore"></div>
+        </div>
+        <div class="split-arrow" id="splitArrow" style="display:none">→</div>
+        <div class="split-after" id="splitAfter" style="display:none">
+          <div class="split-label">After split</div>
+          <div class="split-pages">
+            <div class="split-page" id="splitPageLeft"></div>
+            <div class="split-page" id="splitPageRight"></div>
+          </div>
+          <div class="split-new-key">↑ New separator key promoted to parent</div>
+        </div>
+      </div>
+
+      <div class="split-actions">
+        <button id="splitFillBtn" class="action-btn secondary-btn">📦 Fill Page</button>
+        <button id="splitDoBtn" class="action-btn danger-btn" disabled>✂️ Split!</button>
+        <button id="splitResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="split-info" id="splitInfo">Click "Fill Page" to load a page to capacity, then split it.</div>
+    </section>
+
+    <!-- Cost Estimation -->
+    <section class="cost-section">
+      <h2>⚡ Index vs Sequential Scan Cost</h2>
+      <p class="section-desc">When does PostgreSQL choose an index? Adjust selectivity to see.</p>
+
+      <div class="cost-controls">
+        <div class="slider-group">
+          <label>Table size: <strong id="costRowsLabel">1,000,000</strong> rows</label>
+          <input type="range" id="costRowsSlider" min="1000" max="10000000" value="1000000" step="1000">
+        </div>
+        <div class="slider-group">
+          <label>Selectivity: <strong id="costSelLabel">1</strong>% of rows</label>
+          <input type="range" id="costSelSlider" min="0.1" max="100" value="1" step="0.1">
+        </div>
+      </div>
+
+      <div class="cost-bars">
+        <div class="cost-bar-group">
+          <div class="cost-bar-label">Sequential Scan</div>
+          <div class="cost-bar-track"><div class="cost-bar-fill seq-fill" id="costSeqBar"></div></div>
+          <div class="cost-bar-value" id="costSeqVal"></div>
+        </div>
+        <div class="cost-bar-group">
+          <div class="cost-bar-label">Index Scan</div>
+          <div class="cost-bar-track"><div class="cost-bar-fill idx-fill" id="costIdxBar"></div></div>
+          <div class="cost-bar-value" id="costIdxVal"></div>
+        </div>
+      </div>
+
+      <div class="cost-verdict" id="costVerdict"></div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Covering Indexes (INCLUDE)</h3>
+          <p>
+            <code>CREATE INDEX ON t (id) INCLUDE (name, email)</code> stores extra columns in
+            leaf pages without affecting sort order. Enables <strong>index-only scans</strong>
+            for queries that need those columns — zero heap fetches. Trade-off: larger index.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Deduplication (PG 13+)</h3>
+          <p>
+            For non-unique indexes with many duplicate keys, PostgreSQL compresses leaf entries
+            by storing each key once with a list of TIDs. Reduces index size by 50-90% for
+            low-cardinality columns. Enabled by default.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Index Bloat</h3>
+          <p>
+            Dead tuples in indexes aren't immediately cleaned. VACUUM removes them, but the space
+            isn't always reclaimed. Use <code>pgstattuple</code> to measure bloat.
+            <code>REINDEX CONCURRENTLY</code> rebuilds without locking.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Partial Indexes</h3>
+          <p>
+            <code>CREATE INDEX ON orders (created_at) WHERE status = 'pending'</code> — 
+            index only the rows that matter. Smaller, faster, and maintained only for matching rows.
+            Perfect for hot/cold data patterns.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.postgresql.org/docs/current/btree.html" target="_blank">PostgreSQL B-Tree Documentation</a> and <a href="https://www.postgresql.org/docs/current/indexes.html" target="_blank">Index Types Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20PostgreSQL%20B-Tree%20Index%20Visualizer&url=https://systeminternals.dev/postgresql/btree-indexes/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/postgresql/btree-indexes/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/postgresql/btree-indexes/&t=Interactive%20PostgreSQL%20B-Tree%20Index%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #34d399, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  h3 { font-size: 1.05rem; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(52,211,153,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .search-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .search-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; max-width: 500px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+
+  /* B-Tree Viz */
+  .btree-section { margin-bottom: 50px; }
+  .btree-viz { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; min-height: 120px; overflow-x: auto; }
+
+  :global(.bt-level) { display: flex; justify-content: center; gap: 16px; margin-bottom: 20px; position: relative; }
+  :global(.bt-node) { display: flex; gap: 2px; padding: 6px 4px; background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; cursor: pointer; transition: all 0.3s; }
+  :global(.bt-node:hover) { border-color: #60a5fa; background: rgba(96,165,250,0.2); }
+  :global(.bt-node.root) { border-color: rgba(167,139,250,0.5); background: rgba(167,139,250,0.1); }
+  :global(.bt-node.leaf) { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+  :global(.bt-node.highlight) { border-color: #fbbf24; background: rgba(251,191,36,0.15); box-shadow: 0 0 15px rgba(251,191,36,0.3); }
+  :global(.bt-key) { padding: 4px 8px; font-size: 0.75rem; font-weight: 700; font-family: 'Monaco','Menlo',monospace; color: #fff; min-width: 28px; text-align: center; }
+  :global(.bt-key.found) { background: rgba(52,211,153,0.3); border-radius: 4px; color: #34d399; }
+  :global(.bt-level-label) { position: absolute; left: 0; top: 50%; transform: translateY(-50%); font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .btree-controls { margin-bottom: 12px; }
+  .btree-input-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .btree-input-row input { padding: 8px 14px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.05); color: #fff; font-size: 0.9rem; width: 140px; font-family: 'Monaco','Menlo',monospace; }
+  .btree-info { font-size: 0.9rem; color: #888; text-align: center; padding: 8px; min-height: 24px; }
+  .btree-stats { display: flex; gap: 20px; justify-content: center; font-size: 0.85rem; color: #888; flex-wrap: wrap; }
+  .btree-stats strong { color: #60a5fa; }
+
+  /* Scan Types */
+  .scan-section { margin-bottom: 50px; }
+  .scan-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .scan-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; transition: all 0.3s; }
+  .scan-card:hover { border-color: rgba(96,165,250,0.3); transform: translateY(-3px); }
+  .scan-icon { font-size: 1.5rem; margin-bottom: 8px; }
+  .scan-card h3 { font-size: 0.95rem; }
+  .scan-card p { font-size: 0.8rem; color: #aaa; line-height: 1.5; margin-bottom: 10px; }
+  .scan-flow { font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #888; margin-bottom: 8px; }
+  .heap-hop { color: #f97316; font-weight: 600; }
+  .skip-heap { color: #34d399; font-weight: 600; }
+  .scan-card code { display: block; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; color: #60a5fa; }
+
+  /* Page Split */
+  .split-section { margin-bottom: 50px; }
+  .split-viz { display: flex; align-items: center; gap: 20px; margin-bottom: 16px; justify-content: center; flex-wrap: wrap; }
+  .split-label { font-size: 0.8rem; color: #888; margin-bottom: 8px; text-align: center; }
+  .split-page { display: flex; gap: 3px; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid rgba(96,165,250,0.3); border-radius: 10px; justify-content: center; min-width: 120px; }
+  :global(.sp-key) { padding: 6px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; font-family: 'Monaco','Menlo',monospace; background: rgba(96,165,250,0.15); color: #93c5fd; animation: msgAppear 0.3s ease-out; }
+  :global(.sp-key.new) { background: rgba(52,211,153,0.2); color: #34d399; border: 1px solid rgba(52,211,153,0.4); }
+  :global(.sp-key.promoted) { background: rgba(167,139,250,0.2); color: #a78bfa; border: 1px solid rgba(167,139,250,0.4); }
+  @keyframes msgAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+  .split-arrow { font-size: 2rem; color: #60a5fa; }
+  .split-pages { display: flex; gap: 12px; }
+  .split-new-key { font-size: 0.8rem; color: #a78bfa; text-align: center; margin-top: 8px; }
+  .split-actions { display: flex; gap: 12px; justify-content: center; margin-bottom: 12px; }
+  .split-info { font-size: 0.9rem; color: #888; text-align: center; }
+
+  /* Cost Estimation */
+  .cost-section { margin-bottom: 50px; }
+  .cost-controls { margin-bottom: 24px; }
+  .slider-group { margin-bottom: 16px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #60a5fa; }
+  .cost-bars { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+  .cost-bar-group { }
+  .cost-bar-label { font-size: 0.85rem; color: #ccc; margin-bottom: 6px; font-weight: 600; }
+  .cost-bar-track { height: 28px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 4px; }
+  .cost-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+  .seq-fill { background: linear-gradient(90deg, #f97316, #ef4444); }
+  .idx-fill { background: linear-gradient(90deg, #34d399, #60a5fa); }
+  .cost-bar-value { font-size: 0.8rem; color: #888; text-align: right; }
+  .cost-verdict { padding: 14px 18px; border-radius: 10px; font-size: 0.9rem; line-height: 1.6; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(52,211,153,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .scan-cards { grid-template-columns: 1fr; }
+    .split-viz { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== B-TREE IMPLEMENTATION ==========
+  const ORDER = 4; // max keys per node
+  interface BTreeNode { keys: number[]; children: BTreeNode[]; isLeaf: boolean; }
+
+  let btRoot: BTreeNode = { keys: [], children: [], isLeaf: true };
+  let allKeys: number[] = [];
+
+  function btInsert(key: number) {
+    if (allKeys.includes(key)) return;
+    allKeys.push(key);
+    const root = btRoot;
+    if (root.keys.length === ORDER) {
+      const newRoot: BTreeNode = { keys: [], children: [root], isLeaf: false };
+      btSplitChild(newRoot, 0);
+      btRoot = newRoot;
+      btInsertNonFull(newRoot, key);
+    } else {
+      btInsertNonFull(root, key);
+    }
+  }
+
+  function btInsertNonFull(node: BTreeNode, key: number) {
+    let i = node.keys.length - 1;
+    if (node.isLeaf) {
+      while (i >= 0 && key < node.keys[i]) i--;
+      node.keys.splice(i + 1, 0, key);
+    } else {
+      while (i >= 0 && key < node.keys[i]) i--;
+      i++;
+      if (node.children[i].keys.length === ORDER) {
+        btSplitChild(node, i);
+        if (key > node.keys[i]) i++;
+      }
+      btInsertNonFull(node.children[i], key);
+    }
+  }
+
+  function btSplitChild(parent: BTreeNode, idx: number) {
+    const child = parent.children[idx];
+    const mid = Math.floor(ORDER / 2);
+    const newNode: BTreeNode = { keys: child.keys.splice(mid + 1), children: [], isLeaf: child.isLeaf };
+    const midKey = child.keys.pop()!;
+    if (!child.isLeaf) {
+      newNode.children = child.children.splice(mid + 1);
+    }
+    parent.keys.splice(idx, 0, midKey);
+    parent.children.splice(idx + 1, 0, newNode);
+  }
+
+  function btSearch(node: BTreeNode, key: number): number[] {
+    const path: number[] = [];
+    let current = node;
+    while (true) {
+      path.push(current.keys[0] || 0); // track visited
+      let i = 0;
+      while (i < current.keys.length && key > current.keys[i]) i++;
+      if (i < current.keys.length && key === current.keys[i]) return path;
+      if (current.isLeaf) return path;
+      current = current.children[i];
+    }
+  }
+
+  function btHeight(node: BTreeNode): number {
+    if (node.isLeaf) return 1;
+    return 1 + btHeight(node.children[0]);
+  }
+
+  function btNodeCount(node: BTreeNode): number {
+    if (node.isLeaf) return 1;
+    return 1 + node.children.reduce((sum, c) => sum + btNodeCount(c), 0);
+  }
+
+  // ========== RENDER B-TREE ==========
+  function renderBTree(highlightKey?: number) {
+    const viz = document.getElementById('btreeViz')!;
+    viz.innerHTML = '';
+    if (allKeys.length === 0) {
+      viz.innerHTML = '<div style="text-align:center;color:#666;padding:30px">Empty tree — insert some keys!</div>';
+      return;
+    }
+
+    const levels: BTreeNode[][] = [];
+    let currentLevel = [btRoot];
+    while (currentLevel.length > 0) {
+      levels.push(currentLevel);
+      const nextLevel: BTreeNode[] = [];
+      currentLevel.forEach(n => { if (!n.isLeaf) nextLevel.push(...n.children); });
+      currentLevel = nextLevel;
+    }
+
+    const labels = ['Root', 'Internal', 'Leaf'];
+    levels.forEach((level, li) => {
+      const levelEl = document.createElement('div');
+      levelEl.className = 'bt-level';
+      const labelText = li === 0 ? 'Root' : li === levels.length - 1 ? 'Leaf' : 'Internal';
+      levelEl.innerHTML = `<div class="bt-level-label">${labelText}</div>`;
+
+      level.forEach(node => {
+        const nodeEl = document.createElement('div');
+        const cls = li === 0 ? 'root' : node.isLeaf ? 'leaf' : '';
+        nodeEl.className = `bt-node ${cls}`;
+        nodeEl.innerHTML = node.keys.map(k =>
+          `<span class="bt-key ${highlightKey === k ? 'found' : ''}">${k}</span>`
+        ).join('');
+        levelEl.appendChild(nodeEl);
+      });
+
+      viz.appendChild(levelEl);
+    });
+
+    document.getElementById('btreeKeyCount')!.textContent = String(allKeys.length);
+    document.getElementById('btreeHeight')!.textContent = String(btHeight(btRoot));
+    document.getElementById('btreeNodeCount')!.textContent = String(btNodeCount(btRoot));
+    document.getElementById('btreePageReads')!.textContent = String(btHeight(btRoot));
+  }
+
+  document.getElementById('btreeInsertBtn')?.addEventListener('click', () => {
+    const input = document.getElementById('btreeKey') as HTMLInputElement;
+    const key = parseInt(input.value);
+    if (isNaN(key) || key < 1 || key > 999) {
+      document.getElementById('btreeInfo')!.textContent = '⚠️ Enter a key between 1-999';
+      return;
+    }
+    if (allKeys.includes(key)) {
+      document.getElementById('btreeInfo')!.textContent = `Key ${key} already exists`;
+      return;
+    }
+    btInsert(key);
+    renderBTree(key);
+    input.value = '';
+    document.getElementById('btreeInfo')!.textContent = `Inserted ${key}. Tree height: ${btHeight(btRoot)}`;
+  });
+
+  document.getElementById('btreeInsert5Btn')?.addEventListener('click', () => {
+    const inserted: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      let key: number;
+      do { key = Math.floor(Math.random() * 200) + 1; } while (allKeys.includes(key));
+      btInsert(key);
+      inserted.push(key);
+    }
+    renderBTree();
+    document.getElementById('btreeInfo')!.textContent = `Inserted: ${inserted.sort((a, b) => a - b).join(', ')}`;
+  });
+
+  document.getElementById('btreeSearchBtn')?.addEventListener('click', () => {
+    const input = document.getElementById('btreeKey') as HTMLInputElement;
+    const key = parseInt(input.value);
+    if (isNaN(key)) {
+      document.getElementById('btreeInfo')!.textContent = '⚠️ Enter a key to search';
+      return;
+    }
+    const path = btSearch(btRoot, key);
+    const found = allKeys.includes(key);
+    renderBTree(found ? key : undefined);
+    document.getElementById('btreeInfo')!.textContent = found
+      ? `✅ Found ${key} in ${path.length} page read(s)`
+      : `❌ Key ${key} not found (searched ${path.length} page(s))`;
+  });
+
+  document.getElementById('btreeResetBtn')?.addEventListener('click', () => {
+    btRoot = { keys: [], children: [], isLeaf: true };
+    allKeys = [];
+    renderBTree();
+    document.getElementById('btreeInfo')!.textContent = 'Tree reset. Order (max keys per node): 4';
+  });
+
+  // ========== PAGE SPLIT DEMO ==========
+  let splitKeys: number[] = [];
+
+  document.getElementById('splitFillBtn')?.addEventListener('click', () => {
+    splitKeys = [10, 20, 30, 40];
+    const page = document.getElementById('splitPageBefore')!;
+    page.innerHTML = splitKeys.map(k => `<span class="sp-key">${k}</span>`).join('');
+    document.getElementById('splitAfter')!.style.display = 'none';
+    document.getElementById('splitArrow')!.style.display = 'none';
+    (document.getElementById('splitDoBtn') as HTMLButtonElement).disabled = false;
+    document.getElementById('splitInfo')!.textContent = 'Page full (4 keys). Now insert key 25 — triggers split!';
+  });
+
+  document.getElementById('splitDoBtn')?.addEventListener('click', () => {
+    // Insert 25 into [10, 20, 30, 40] — splits at median
+    const page = document.getElementById('splitPageBefore')!;
+    page.innerHTML = splitKeys.map(k => `<span class="sp-key">${k}</span>`).join('') + `<span class="sp-key new">25</span>`;
+
+    setTimeout(() => {
+      document.getElementById('splitArrow')!.style.display = 'block';
+      document.getElementById('splitAfter')!.style.display = 'block';
+      document.getElementById('splitPageLeft')!.innerHTML = [10, 20].map(k => `<span class="sp-key">${k}</span>`).join('');
+      document.getElementById('splitPageRight')!.innerHTML = [30, 40].map(k => `<span class="sp-key">${k}</span>`).join('') ;
+      // Show promoted key
+      document.getElementById('splitPageRight')!.insertAdjacentHTML('afterbegin', '<span class="sp-key new">25</span>');
+      document.getElementById('splitInfo')!.textContent = 'Split! Key 25 goes right. Median (25) promoted to parent. Left: [10,20], Right: [25,30,40].';
+      (document.getElementById('splitDoBtn') as HTMLButtonElement).disabled = true;
+    }, 400);
+  });
+
+  document.getElementById('splitResetBtn')?.addEventListener('click', () => {
+    splitKeys = [];
+    document.getElementById('splitPageBefore')!.innerHTML = '';
+    document.getElementById('splitAfter')!.style.display = 'none';
+    document.getElementById('splitArrow')!.style.display = 'none';
+    (document.getElementById('splitDoBtn') as HTMLButtonElement).disabled = true;
+    document.getElementById('splitInfo')!.textContent = 'Click "Fill Page" to load a page to capacity, then split it.';
+  });
+
+  // ========== COST ESTIMATION ==========
+  function updateCost() {
+    const rows = parseInt((document.getElementById('costRowsSlider') as HTMLInputElement).value);
+    const sel = parseFloat((document.getElementById('costSelSlider') as HTMLInputElement).value);
+
+    document.getElementById('costRowsLabel')!.textContent = rows.toLocaleString();
+    document.getElementById('costSelLabel')!.textContent = sel.toFixed(1);
+
+    // Simplified cost model
+    const heapPages = Math.ceil(rows / 100); // ~100 rows per 8KB page
+    const seqCost = heapPages; // read all pages
+
+    const matchingRows = Math.ceil(rows * sel / 100);
+    const treeHeight = Math.ceil(Math.log(rows) / Math.log(100)); // fanout ~100
+    const leafReads = Math.ceil(matchingRows / 100);
+    const heapFetches = matchingRows; // random I/O
+    const idxCost = treeHeight + leafReads + heapFetches * 4; // random I/O is ~4x costlier
+
+    const maxCost = Math.max(seqCost, idxCost);
+    const seqPct = Math.min(100, seqCost / maxCost * 100);
+    const idxPct = Math.min(100, idxCost / maxCost * 100);
+
+    document.getElementById('costSeqBar')!.style.width = seqPct + '%';
+    document.getElementById('costSeqVal')!.textContent = `~${seqCost.toLocaleString()} page reads (sequential)`;
+    document.getElementById('costIdxBar')!.style.width = idxPct + '%';
+    document.getElementById('costIdxVal')!.textContent = `~${idxCost.toLocaleString()} page reads (random I/O weighted)`;
+
+    const verdict = document.getElementById('costVerdict')!;
+    if (idxCost < seqCost) {
+      verdict.style.background = 'rgba(52,211,153,0.08)';
+      verdict.style.border = '1px solid rgba(52,211,153,0.25)';
+      verdict.style.color = '#6ee7b7';
+      verdict.innerHTML = `✅ <strong>Index Scan wins!</strong> At ${sel}% selectivity, reading ${matchingRows.toLocaleString()} rows via index is faster than scanning ${heapPages.toLocaleString()} pages.`;
+    } else {
+      verdict.style.background = 'rgba(249,115,22,0.08)';
+      verdict.style.border = '1px solid rgba(249,115,22,0.25)';
+      verdict.style.color = '#fdba74';
+      verdict.innerHTML = `⚠️ <strong>Sequential Scan wins!</strong> At ${sel}% selectivity (${matchingRows.toLocaleString()} rows), random I/O from index is costlier than just reading the whole table.`;
+    }
+  }
+
+  document.getElementById('costRowsSlider')?.addEventListener('input', updateCost);
+  document.getElementById('costSelSlider')?.addEventListener('input', updateCost);
+
+  // ========== INIT ==========
+  renderBTree();
+  updateCost();
+</script>
+</BaseLayout>
