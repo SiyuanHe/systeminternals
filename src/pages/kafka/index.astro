@@ -3,8 +3,11 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 
 const topics = [
   { title: "Partitions & Offsets", description: "The anatomy of a Kafka topic — and how to choose partition counts", href: "/kafka/partitions/", status: "live" },
-  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "#", status: "coming" },
-  { title: "Log Compaction", description: "Keeping the latest value per key", href: "#", status: "coming" },
+  { title: "Consumer Groups & Rebalancing", description: "How Kafka distributes work and what happens when things change", href: "/kafka/consumer-groups/", status: "live" },
+  { title: "ISR & Replication", description: "In-sync replicas and durability guarantees", href: "/kafka/isr-replication/", status: "live" },
+  { title: "Log Compaction", description: "Keeping the latest value per key forever", href: "/kafka/log-compaction/", status: "live" },
+  { title: "KRaft & Controller Quorum", description: "Kafka without ZooKeeper — the new metadata layer", href: "/kafka/kraft/", status: "live" },
+  { title: "Transactions & Exactly-Once", description: "Idempotent producers, atomic multi-partition writes, and the read-process-write pattern", href: "/kafka/transactions/", status: "live" },
 ];
 ---
 

@@ -1,0 +1,1050 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kafka Transactions & Exactly-Once Semantics" 
+  description="Interactive visualization of Kafka exactly-once semantics (EOS), idempotent producers, transactional messaging, and the read-process-write pattern"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kafka", href: "/kafka/" },
+    { label: "Transactions & EOS", href: "/kafka/transactions/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔒 Transactions & Exactly-Once Semantics</h1>
+      <p class="subtitle">How Kafka Guarantees Each Message Is Processed Exactly Once</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          <strong>Exactly-once semantics (EOS)</strong> means every message is delivered and processed
+          <em>exactly once</em> — no duplicates, no losses. Kafka achieves this through three layers:
+          <strong>idempotent producers</strong> (dedup at the broker), <strong>transactions</strong>
+          (atomic multi-partition writes), and the <strong>read-process-write</strong> pattern
+          (consume + produce + commit offsets atomically).
+        </p>
+      </div>
+    </section>
+
+    <!-- Delivery Guarantees Comparison -->
+    <section class="guarantees-section">
+      <h2>📊 Delivery Guarantees Compared</h2>
+      <p class="section-desc">Click each mode to see what happens when a producer retry or failure occurs.</p>
+
+      <div class="guarantee-tabs">
+        <button class="guarantee-tab active" data-mode="at-most-once">At-Most-Once</button>
+        <button class="guarantee-tab" data-mode="at-least-once">At-Least-Once</button>
+        <button class="guarantee-tab" data-mode="exactly-once">Exactly-Once</button>
+      </div>
+
+      <div class="guarantee-viz" id="guaranteeViz">
+        <div class="gv-producer">
+          <div class="gv-label">Producer</div>
+          <div class="gv-messages" id="gvProducerMsgs"></div>
+        </div>
+        <div class="gv-arrow" id="gvArrow">
+          <div class="gv-arrow-line"></div>
+          <div class="gv-arrow-status" id="gvArrowStatus"></div>
+        </div>
+        <div class="gv-broker">
+          <div class="gv-label">Broker</div>
+          <div class="gv-messages" id="gvBrokerMsgs"></div>
+        </div>
+        <div class="gv-arrow">
+          <div class="gv-arrow-line"></div>
+        </div>
+        <div class="gv-consumer">
+          <div class="gv-label">Consumer</div>
+          <div class="gv-messages" id="gvConsumerMsgs"></div>
+        </div>
+      </div>
+
+      <div class="guarantee-desc" id="guaranteeDesc">
+        <strong>At-Most-Once:</strong> Producer sends and doesn't retry. If the send fails (network timeout, broker crash), the message is lost. Fast but unreliable. <code>acks=0</code> or fire-and-forget.
+      </div>
+
+      <div class="guarantee-actions">
+        <button id="gvSendBtn" class="action-btn primary-btn">📤 Send Message</button>
+        <button id="gvFailBtn" class="action-btn danger-btn">💥 Simulate Failure</button>
+        <button id="gvResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Idempotent Producer -->
+    <section class="idempotent-section">
+      <h2>🆔 Idempotent Producer</h2>
+      <p class="section-desc">Each producer gets a unique PID + sequence number per partition. Brokers detect and discard duplicates.</p>
+
+      <div class="idemp-controls">
+        <div class="toggle-group">
+          <label>enable.idempotence:</label>
+          <button class="toggle-btn" id="idempToggle" data-on="false">
+            <span class="toggle-knob"></span>
+            <span class="toggle-label">false</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="idemp-viz" id="idempViz">
+        <div class="idemp-producer">
+          <div class="idemp-box-label">Producer (PID: 42)</div>
+          <div class="idemp-seq">Next Seq: <strong id="idempSeq">0</strong></div>
+          <div class="idemp-outbox" id="idempOutbox"></div>
+        </div>
+        <div class="idemp-network" id="idempNetwork">
+          <div class="idemp-net-label" id="idempNetLabel">Network</div>
+        </div>
+        <div class="idemp-broker">
+          <div class="idemp-box-label">Broker (Partition 0)</div>
+          <div class="idemp-dedup-cache">
+            <span class="idemp-cache-label">Dedup Cache:</span>
+            <span id="idempCache">PID:42 → seq -1</span>
+          </div>
+          <div class="idemp-log" id="idempLog"></div>
+        </div>
+      </div>
+
+      <div class="idemp-actions">
+        <button id="idempSendBtn" class="action-btn primary-btn">📤 Send Message</button>
+        <button id="idempRetryBtn" class="action-btn secondary-btn">🔄 Retry (network glitch)</button>
+        <button id="idempResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="idemp-result" id="idempResult"></div>
+    </section>
+
+    <!-- Transactional Producer -->
+    <section class="txn-section">
+      <h2>⚛️ Transactional Producer</h2>
+      <p class="section-desc">Atomically write to multiple partitions. Either all writes commit, or all abort.</p>
+
+      <div class="txn-viz" id="txnViz">
+        <div class="txn-producer-col">
+          <div class="txn-box-label">Producer</div>
+          <div class="txn-state-badge" id="txnState">IDLE</div>
+          <div class="txn-api-log" id="txnApiLog"></div>
+        </div>
+
+        <div class="txn-partitions-col">
+          <div class="txn-box-label">Topic Partitions</div>
+          <div class="txn-part" id="txnP0">
+            <div class="txn-part-label">P0</div>
+            <div class="txn-part-log" id="txnP0Log"></div>
+          </div>
+          <div class="txn-part" id="txnP1">
+            <div class="txn-part-label">P1</div>
+            <div class="txn-part-log" id="txnP1Log"></div>
+          </div>
+          <div class="txn-part" id="txnP2">
+            <div class="txn-part-label">P2</div>
+            <div class="txn-part-log" id="txnP2Log"></div>
+          </div>
+        </div>
+
+        <div class="txn-coordinator-col">
+          <div class="txn-box-label">Transaction Coordinator</div>
+          <div class="txn-coord-log" id="txnCoordLog"></div>
+        </div>
+      </div>
+
+      <div class="txn-actions">
+        <button id="txnBeginBtn" class="action-btn primary-btn">▶ beginTransaction()</button>
+        <button id="txnSendBtn" class="action-btn secondary-btn" disabled>📤 send()</button>
+        <button id="txnCommitBtn" class="action-btn commit-btn" disabled>✅ commitTransaction()</button>
+        <button id="txnAbortBtn" class="action-btn danger-btn" disabled>❌ abortTransaction()</button>
+        <button id="txnResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="txn-consumer-section">
+        <h3>Consumer View</h3>
+        <div class="txn-iso-toggle">
+          <label>isolation.level:</label>
+          <button class="iso-btn active" data-iso="read_uncommitted">read_uncommitted</button>
+          <button class="iso-btn" data-iso="read_committed">read_committed</button>
+        </div>
+        <div class="txn-consumer-view" id="txnConsumerView">
+          <p class="consumer-hint">Run a transaction above to see what the consumer reads</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Read-Process-Write -->
+    <section class="rpw-section">
+      <h2>🔄 Read-Process-Write Pattern</h2>
+      <p class="section-desc">The holy grail: consume → process → produce → commit offsets — all in one atomic transaction.</p>
+
+      <div class="rpw-viz" id="rpwViz">
+        <div class="rpw-stage rpw-input">
+          <div class="rpw-stage-label">Input Topic</div>
+          <div class="rpw-messages" id="rpwInput"></div>
+        </div>
+        <div class="rpw-arrow-container">
+          <div class="rpw-arrow-down">consume</div>
+        </div>
+        <div class="rpw-stage rpw-processor">
+          <div class="rpw-stage-label">Stream Processor</div>
+          <div class="rpw-proc-status" id="rpwProcStatus">Idle</div>
+          <div class="rpw-proc-detail" id="rpwProcDetail"></div>
+        </div>
+        <div class="rpw-outputs">
+          <div class="rpw-output-branch">
+            <div class="rpw-arrow-down">produce</div>
+            <div class="rpw-stage rpw-output">
+              <div class="rpw-stage-label">Output Topic</div>
+              <div class="rpw-messages" id="rpwOutput"></div>
+            </div>
+          </div>
+          <div class="rpw-output-branch">
+            <div class="rpw-arrow-down">commit offsets</div>
+            <div class="rpw-stage rpw-offsets">
+              <div class="rpw-stage-label">__consumer_offsets</div>
+              <div class="rpw-messages" id="rpwOffsets"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rpw-txn-badge" id="rpwTxnBadge">
+        <span class="rpw-txn-icon">⚛️</span>
+        <span id="rpwTxnText">All three operations happen in ONE transaction</span>
+      </div>
+
+      <div class="rpw-actions">
+        <button id="rpwRunBtn" class="action-btn primary-btn">▶ Process Next Batch</button>
+        <button id="rpwCrashBtn" class="action-btn danger-btn">💥 Crash Mid-Transaction</button>
+        <button id="rpwResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="rpw-result" id="rpwResult"></div>
+    </section>
+
+    <!-- Performance Tradeoffs -->
+    <section class="perf-section">
+      <h2>⚡ Performance Tradeoffs</h2>
+      <p class="section-desc">EOS isn't free. Tune these knobs to understand the cost.</p>
+
+      <div class="perf-controls">
+        <div class="perf-slider-group">
+          <label>Transaction batch size: <strong id="perfBatchLabel">100</strong> msgs</label>
+          <input type="range" id="perfBatchSlider" min="1" max="1000" value="100">
+        </div>
+        <div class="perf-slider-group">
+          <label>transaction.timeout.ms: <strong id="perfTimeoutLabel">60000</strong></label>
+          <input type="range" id="perfTimeoutSlider" min="1000" max="120000" value="60000" step="1000">
+        </div>
+        <div class="perf-toggle-row">
+          <div class="perf-toggle">
+            <label>Idempotence:</label>
+            <span class="perf-always-on">Always ON (Kafka 3.0+)</span>
+          </div>
+          <div class="perf-toggle">
+            <label>Transactions:</label>
+            <button class="toggle-btn perf-txn-toggle" id="perfTxnToggle" data-on="true">
+              <span class="toggle-knob"></span>
+              <span class="toggle-label">ON</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="perf-meters">
+        <div class="perf-meter">
+          <div class="perf-meter-label">Throughput</div>
+          <div class="perf-bar-track">
+            <div class="perf-bar-fill throughput-bar" id="perfThroughput" style="width:85%"></div>
+          </div>
+          <div class="perf-bar-value" id="perfThroughputVal">~850K msgs/sec</div>
+        </div>
+        <div class="perf-meter">
+          <div class="perf-meter-label">Latency (p99)</div>
+          <div class="perf-bar-track">
+            <div class="perf-bar-fill latency-bar" id="perfLatency" style="width:15%"></div>
+          </div>
+          <div class="perf-bar-value" id="perfLatencyVal">~15ms</div>
+        </div>
+        <div class="perf-meter">
+          <div class="perf-meter-label">Broker CPU Overhead</div>
+          <div class="perf-bar-track">
+            <div class="perf-bar-fill cpu-bar" id="perfCpu" style="width:8%"></div>
+          </div>
+          <div class="perf-bar-value" id="perfCpuVal">~8%</div>
+        </div>
+      </div>
+
+      <div class="perf-tip" id="perfTip">
+        💡 <strong>Tip:</strong> Larger batch sizes amortize the fixed cost of transactions. At 100+ messages per transaction, overhead drops below 3%.
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 EOS ≠ Magic</h3>
+          <p>
+            Kafka's EOS guarantees apply <strong>within Kafka</strong>. If your processor has external
+            side effects (HTTP calls, database writes), you need to handle idempotency in those
+            systems too. EOS ensures the Kafka log is consistent — it can't undo an email you already sent.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 transactional.id</h3>
+          <p>
+            Each transactional producer needs a stable <code>transactional.id</code>.
+            On restart, the new instance <em>fences out</em> the old one using this ID —
+            preventing zombie producers from committing stale transactions.
+            Choose IDs based on input partition assignment for stream processing.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Kafka Streams Makes It Easy</h3>
+          <p>
+            Set <code>processing.guarantee=exactly_once_v2</code> and Kafka Streams handles
+            all the transaction lifecycle automatically. It wraps each task's
+            read-process-write cycle in a transaction behind the scenes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 When NOT to Use EOS</h3>
+          <p>
+            If duplicates are harmless (metrics, logs, idempotent consumers),
+            <code>at-least-once</code> with <code>acks=all</code> gives you
+            better throughput. EOS adds ~3-10% overhead. Use it when correctness
+            matters: financial transactions, inventory, state machines.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://kafka.apache.org/documentation/#semantics" target="_blank">Apache Kafka Semantics Documentation</a> and <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-447%3A+Producer+scalability+for+exactly+once+semantics" target="_blank">KIP-447: Exactly Once v2</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kafka%20Exactly-Once%20Semantics%20Visualizer&url=https://systeminternals.dev/kafka/transactions/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kafka/transactions/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kafka/transactions/&t=Interactive%20Kafka%20Transactions%20%26%20Exactly-Once%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  h3 { font-size: 1.15rem; color: #fff; margin-bottom: 10px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .commit-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .commit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #34d399; cursor: pointer; }
+
+  /* Guarantee Section */
+  .guarantees-section { margin-bottom: 50px; }
+  .guarantee-tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .guarantee-tab { padding: 10px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .guarantee-tab.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; }
+
+  .guarantee-viz { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; overflow-x: auto; }
+  .gv-producer, .gv-broker, .gv-consumer { min-width: 140px; text-align: center; }
+  .gv-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .gv-messages { min-height: 60px; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  :global(.gv-msg) { padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; animation: msgAppear 0.3s ease-out; white-space: nowrap; }
+  @keyframes msgAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+  :global(.gv-msg.normal) { background: rgba(52,211,153,0.2); border: 1px solid rgba(52,211,153,0.4); color: #34d399; }
+  :global(.gv-msg.duplicate) { background: rgba(251,191,36,0.2); border: 1px solid rgba(251,191,36,0.4); color: #fbbf24; }
+  :global(.gv-msg.lost) { background: rgba(239,68,68,0.15); border: 1px dashed rgba(239,68,68,0.4); color: #f87171; text-decoration: line-through; }
+  :global(.gv-msg.deduped) { background: rgba(167,139,250,0.2); border: 1px solid rgba(167,139,250,0.4); color: #a78bfa; }
+
+  .gv-arrow { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 60px; }
+  .gv-arrow-line { width: 100%; height: 2px; background: rgba(255,255,255,0.2); position: relative; }
+  .gv-arrow-line::after { content: '→'; position: absolute; right: -6px; top: -10px; color: rgba(255,255,255,0.3); font-size: 1.2rem; }
+  .gv-arrow-status { font-size: 0.75rem; color: #888; margin-top: 6px; min-height: 18px; }
+
+  .guarantee-desc { padding: 14px 18px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; margin-bottom: 16px; }
+  .guarantee-desc strong { color: #34d399; }
+  .guarantee-desc code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .guarantee-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* Idempotent Section */
+  .idempotent-section { margin-bottom: 50px; }
+  .idemp-controls { margin-bottom: 20px; }
+  .toggle-group { display: flex; align-items: center; gap: 12px; }
+  .toggle-group label { color: #ccc; font-size: 0.95rem; font-family: 'Monaco','Menlo',monospace; }
+  .toggle-btn { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid rgba(255,255,255,0.2); border-radius: 20px; background: rgba(239,68,68,0.15); color: #f87171; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+  .toggle-btn[data-on="true"] { background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.4); color: #34d399; }
+  .toggle-knob { width: 18px; height: 18px; border-radius: 50%; background: #f87171; transition: all 0.3s; }
+  .toggle-btn[data-on="true"] .toggle-knob { background: #34d399; }
+
+  .idemp-viz { display: flex; align-items: stretch; gap: 16px; margin-bottom: 16px; }
+  .idemp-producer, .idemp-broker { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .idemp-network { width: 80px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .idemp-net-label { font-size: 0.75rem; color: #888; writing-mode: vertical-rl; text-orientation: mixed; }
+  .idemp-box-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; }
+  .idemp-seq { font-size: 0.85rem; color: #aaa; margin-bottom: 10px; font-family: 'Monaco','Menlo',monospace; }
+  .idemp-seq strong { color: #34d399; }
+  .idemp-outbox { min-height: 40px; display: flex; flex-direction: column; gap: 4px; }
+  .idemp-dedup-cache { font-size: 0.8rem; color: #888; margin-bottom: 10px; font-family: 'Monaco','Menlo',monospace; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 8px; }
+  .idemp-cache-label { color: #a78bfa; font-weight: 600; }
+  .idemp-log { min-height: 40px; display: flex; flex-direction: column; gap: 4px; }
+  .idemp-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .idemp-result { font-size: 0.9rem; color: #aaa; min-height: 24px; padding: 8px; text-align: center; }
+
+  :global(.idemp-msg) { padding: 5px 12px; border-radius: 6px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; animation: msgAppear 0.3s ease-out; }
+  :global(.idemp-msg.sent) { background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; }
+  :global(.idemp-msg.accepted) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+  :global(.idemp-msg.rejected) { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; text-decoration: line-through; }
+  :global(.idemp-msg.duplicate) { background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: #fde68a; }
+
+  /* Transaction Section */
+  .txn-section { margin-bottom: 50px; }
+  .txn-viz { display: flex; gap: 16px; margin-bottom: 16px; }
+  .txn-producer-col, .txn-coordinator-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .txn-partitions-col { flex: 1.2; display: flex; flex-direction: column; gap: 8px; }
+  .txn-box-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; }
+  .txn-state-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .txn-state-badge.active { background: rgba(52,211,153,0.2); color: #34d399; }
+  .txn-state-badge.committing { background: rgba(167,139,250,0.2); color: #a78bfa; }
+  .txn-state-badge.aborting { background: rgba(239,68,68,0.2); color: #f87171; }
+
+  .txn-api-log, .txn-coord-log { font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; display: flex; flex-direction: column; gap: 4px; min-height: 60px; max-height: 200px; overflow-y: auto; }
+  :global(.txn-log-entry) { padding: 4px 8px; border-radius: 4px; animation: msgAppear 0.3s ease-out; }
+  :global(.txn-log-entry.api) { color: #93c5fd; }
+  :global(.txn-log-entry.coord) { color: #c4b5fd; }
+  :global(.txn-log-entry.ok) { color: #6ee7b7; }
+  :global(.txn-log-entry.err) { color: #fca5a5; }
+
+  .txn-part { background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; border: 1px solid rgba(255,255,255,0.1); transition: border-color 0.3s; }
+  .txn-part.has-uncommitted { border-color: rgba(251,191,36,0.4); }
+  .txn-part.committed { border-color: rgba(52,211,153,0.4); }
+  .txn-part.aborted { border-color: rgba(239,68,68,0.4); }
+  .txn-part-label { font-size: 0.8rem; font-weight: 700; color: #60a5fa; margin-bottom: 6px; }
+  .txn-part-log { display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; }
+
+  :global(.txn-msg) { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; animation: msgAppear 0.3s ease-out; }
+  :global(.txn-msg.uncommitted) { background: rgba(251,191,36,0.15); border: 1px dashed rgba(251,191,36,0.4); color: #fde68a; }
+  :global(.txn-msg.committed) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.4); color: #6ee7b7; }
+  :global(.txn-msg.aborted) { background: rgba(239,68,68,0.1); border: 1px dashed rgba(239,68,68,0.3); color: #fca5a5; text-decoration: line-through; opacity: 0.5; }
+
+  .txn-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+
+  .txn-consumer-section { background: rgba(0,0,0,0.15); border-radius: 14px; padding: 20px; border: 1px solid rgba(255,255,255,0.08); }
+  .txn-iso-toggle { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .txn-iso-toggle label { color: #ccc; font-size: 0.9rem; font-family: 'Monaco','Menlo',monospace; }
+  .iso-btn { padding: 6px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.03); color: #ccc; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; cursor: pointer; transition: all 0.2s; }
+  .iso-btn.active { border-color: #34d399; background: rgba(52,211,153,0.15); color: #34d399; }
+  .txn-consumer-view { min-height: 40px; }
+  .consumer-hint { color: #666; font-size: 0.9rem; font-style: italic; }
+  :global(.txn-cv-msg) { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; margin: 2px; }
+  :global(.txn-cv-msg.visible) { background: rgba(52,211,153,0.15); color: #6ee7b7; }
+  :global(.txn-cv-msg.hidden) { background: rgba(107,114,128,0.15); color: #6b7280; border: 1px dashed rgba(107,114,128,0.3); }
+
+  /* Read-Process-Write */
+  .rpw-section { margin-bottom: 50px; }
+  .rpw-viz { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 16px; }
+  .rpw-stage { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px 24px; border: 1px solid rgba(255,255,255,0.1); min-width: 240px; text-align: center; }
+  .rpw-stage-label { font-size: 0.8rem; font-weight: 700; color: #60a5fa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .rpw-messages { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 28px; }
+  :global(.rpw-msg) { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; animation: msgAppear 0.3s ease-out; }
+  :global(.rpw-msg.pending) { background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; }
+  :global(.rpw-msg.processed) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+  :global(.rpw-msg.failed) { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+
+  .rpw-arrow-container { display: flex; justify-content: center; }
+  .rpw-arrow-down { font-size: 0.75rem; color: #888; padding: 4px 0; text-align: center; }
+  .rpw-outputs { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; }
+  .rpw-output-branch { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .rpw-proc-status { font-size: 0.9rem; font-weight: 600; color: #9ca3af; }
+  .rpw-proc-status.processing { color: #fbbf24; }
+  .rpw-proc-status.done { color: #34d399; }
+  .rpw-proc-status.crashed { color: #ef4444; }
+  .rpw-proc-detail { font-size: 0.8rem; color: #888; margin-top: 4px; font-family: 'Monaco','Menlo',monospace; }
+
+  .rpw-txn-badge { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.3); border-radius: 10px; margin-bottom: 16px; font-size: 0.9rem; color: #c4b5fd; }
+  .rpw-txn-icon { font-size: 1.2rem; }
+  .rpw-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .rpw-result { font-size: 0.9rem; color: #aaa; min-height: 24px; padding: 8px; text-align: center; }
+
+  /* Performance Section */
+  .perf-section { margin-bottom: 50px; }
+  .perf-controls { margin-bottom: 24px; }
+  .perf-slider-group { margin-bottom: 16px; }
+  .perf-slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .perf-slider-group strong { color: #34d399; }
+  .perf-slider-group input[type="range"] { max-width: 500px; }
+  .perf-toggle-row { display: flex; gap: 30px; flex-wrap: wrap; }
+  .perf-toggle { display: flex; align-items: center; gap: 10px; }
+  .perf-toggle label { color: #ccc; font-size: 0.9rem; }
+  .perf-always-on { color: #34d399; font-size: 0.85rem; font-weight: 600; }
+  .perf-txn-toggle { font-size: 0.8rem; }
+
+  .perf-meters { display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px; }
+  .perf-meter { }
+  .perf-meter-label { font-size: 0.85rem; color: #ccc; margin-bottom: 6px; font-weight: 600; }
+  .perf-bar-track { height: 28px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 4px; }
+  .perf-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+  .throughput-bar { background: linear-gradient(90deg, #34d399, #059669); }
+  .latency-bar { background: linear-gradient(90deg, #fbbf24, #f97316); }
+  .cpu-bar { background: linear-gradient(90deg, #60a5fa, #a78bfa); }
+  .perf-bar-value { font-size: 0.8rem; color: #888; text-align: right; }
+
+  .perf-tip { padding: 14px 18px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .perf-tip strong { color: #34d399; }
+
+  /* Explain Section */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .txn-viz { flex-direction: column; }
+    .idemp-viz { flex-direction: column; }
+    .idemp-network { width: 100%; writing-mode: initial; flex-direction: row; height: 30px; }
+    .idemp-net-label { writing-mode: initial; }
+    .guarantee-viz { flex-direction: column; }
+    .gv-arrow-line::after { content: '↓'; right: 50%; top: auto; bottom: -14px; }
+    .rpw-outputs { flex-direction: column; align-items: center; }
+  }
+</style>
+
+<script>
+  // ========== DELIVERY GUARANTEES ==========
+  let gvMode = 'at-most-once';
+  let gvMsgCount = 0;
+  let gvBrokerMsgs: string[] = [];
+  let gvConsumerMsgs: string[] = [];
+  let gvFailed = false;
+
+  const GUARANTEE_DESCS: Record<string, string> = {
+    'at-most-once': '<strong>At-Most-Once:</strong> Producer sends and doesn\'t retry. If the send fails (network timeout, broker crash), the message is lost. Fast but unreliable. <code>acks=0</code> or fire-and-forget.',
+    'at-least-once': '<strong>At-Least-Once:</strong> Producer retries on failure until acknowledged. Guarantees delivery but may produce <em>duplicates</em> if the ack was lost (broker wrote it, but producer didn\'t get the ack). <code>acks=all, retries=MAX</code>.',
+    'exactly-once': '<strong>Exactly-Once:</strong> Idempotent producer + transactions. Broker detects duplicates via PID+seq. Even with retries, each message appears in the log <em>exactly once</em>. <code>enable.idempotence=true</code>.'
+  };
+
+  function renderGvMsgs(container: string, msgs: string[], style: string) {
+    const el = document.getElementById(container)!;
+    el.innerHTML = msgs.map(m => `<span class="gv-msg ${style}">${m}</span>`).join('');
+  }
+
+  function gvReset() {
+    gvMsgCount = 0;
+    gvBrokerMsgs = [];
+    gvConsumerMsgs = [];
+    gvFailed = false;
+    document.getElementById('gvProducerMsgs')!.innerHTML = '';
+    document.getElementById('gvBrokerMsgs')!.innerHTML = '';
+    document.getElementById('gvConsumerMsgs')!.innerHTML = '';
+    document.getElementById('gvArrowStatus')!.textContent = '';
+  }
+
+  document.querySelectorAll('.guarantee-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.guarantee-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      gvMode = (tab as HTMLElement).dataset.mode!;
+      document.getElementById('guaranteeDesc')!.innerHTML = GUARANTEE_DESCS[gvMode];
+      gvReset();
+    });
+  });
+
+  document.getElementById('gvSendBtn')?.addEventListener('click', () => {
+    gvMsgCount++;
+    const msgId = `M${gvMsgCount}`;
+    const prodEl = document.getElementById('gvProducerMsgs')!;
+    prodEl.innerHTML += `<span class="gv-msg normal">${msgId}</span>`;
+
+    if (!gvFailed) {
+      gvBrokerMsgs.push(msgId);
+      renderGvMsgs('gvBrokerMsgs', gvBrokerMsgs, 'normal');
+      gvConsumerMsgs.push(msgId);
+      renderGvMsgs('gvConsumerMsgs', gvConsumerMsgs, 'normal');
+      document.getElementById('gvArrowStatus')!.textContent = '✓ ack';
+    }
+  });
+
+  document.getElementById('gvFailBtn')?.addEventListener('click', () => {
+    gvMsgCount++;
+    const msgId = `M${gvMsgCount}`;
+    const prodEl = document.getElementById('gvProducerMsgs')!;
+    gvFailed = true;
+
+    if (gvMode === 'at-most-once') {
+      prodEl.innerHTML += `<span class="gv-msg lost">${msgId}</span>`;
+      document.getElementById('gvArrowStatus')!.textContent = '✗ lost (no retry)';
+    } else if (gvMode === 'at-least-once') {
+      // Broker got it but ack was lost -> producer retries -> duplicate
+      gvBrokerMsgs.push(msgId);
+      prodEl.innerHTML += `<span class="gv-msg normal">${msgId}</span>`;
+      document.getElementById('gvArrowStatus')!.textContent = '✗ ack lost...';
+
+      setTimeout(() => {
+        prodEl.innerHTML += `<span class="gv-msg duplicate">${msgId} (retry)</span>`;
+        gvBrokerMsgs.push(msgId);
+        renderGvMsgs('gvBrokerMsgs', gvBrokerMsgs, 'normal');
+        // Show duplicate on broker side
+        const brokerEl = document.getElementById('gvBrokerMsgs')!;
+        brokerEl.lastElementChild?.classList.add('duplicate');
+        (brokerEl.lastElementChild as HTMLElement).classList.remove('normal');
+        gvConsumerMsgs.push(msgId);
+        gvConsumerMsgs.push(msgId);
+        const consEl = document.getElementById('gvConsumerMsgs')!;
+        consEl.innerHTML = '';
+        gvConsumerMsgs.forEach((m, i) => {
+          const isDup = i > 0 && gvConsumerMsgs[i - 1] === m;
+          consEl.innerHTML += `<span class="gv-msg ${isDup ? 'duplicate' : 'normal'}">${m}${isDup ? ' ⚠️' : ''}</span>`;
+        });
+        document.getElementById('gvArrowStatus')!.textContent = '⚠️ duplicate!';
+        gvFailed = false;
+      }, 800);
+      return;
+    } else {
+      // Exactly-once: broker deduplicates
+      gvBrokerMsgs.push(msgId);
+      prodEl.innerHTML += `<span class="gv-msg normal">${msgId}</span>`;
+      document.getElementById('gvArrowStatus')!.textContent = '✗ ack lost...';
+
+      setTimeout(() => {
+        prodEl.innerHTML += `<span class="gv-msg deduped">${msgId} (retry)</span>`;
+        document.getElementById('gvArrowStatus')!.textContent = '✓ deduped (PID+seq)';
+        // Broker does NOT add duplicate
+        renderGvMsgs('gvBrokerMsgs', gvBrokerMsgs, 'normal');
+        gvConsumerMsgs.push(msgId);
+        renderGvMsgs('gvConsumerMsgs', gvConsumerMsgs, 'normal');
+        gvFailed = false;
+      }, 800);
+      return;
+    }
+    gvFailed = false;
+  });
+
+  document.getElementById('gvResetBtn')?.addEventListener('click', gvReset);
+
+  // ========== IDEMPOTENT PRODUCER ==========
+  let idempOn = false;
+  let idempSeq = 0;
+  let idempBrokerSeq = -1;
+  let idempMsgNum = 0;
+  let lastSentSeq = -1;
+
+  document.getElementById('idempToggle')?.addEventListener('click', () => {
+    idempOn = !idempOn;
+    const btn = document.getElementById('idempToggle')!;
+    btn.dataset.on = String(idempOn);
+    btn.querySelector('.toggle-label')!.textContent = String(idempOn);
+    idempReset();
+  });
+
+  function idempReset() {
+    idempSeq = 0;
+    idempBrokerSeq = -1;
+    idempMsgNum = 0;
+    lastSentSeq = -1;
+    document.getElementById('idempSeq')!.textContent = '0';
+    document.getElementById('idempCache')!.textContent = 'PID:42 → seq -1';
+    document.getElementById('idempOutbox')!.innerHTML = '';
+    document.getElementById('idempLog')!.innerHTML = '';
+    document.getElementById('idempResult')!.textContent = '';
+  }
+
+  document.getElementById('idempSendBtn')?.addEventListener('click', () => {
+    idempMsgNum++;
+    const seq = idempSeq;
+    lastSentSeq = seq;
+    idempSeq++;
+    document.getElementById('idempSeq')!.textContent = String(idempSeq);
+
+    const outbox = document.getElementById('idempOutbox')!;
+    outbox.innerHTML += `<div class="idemp-msg sent">→ msg-${idempMsgNum} [seq=${seq}]</div>`;
+
+    // Broker accepts
+    idempBrokerSeq = seq;
+    document.getElementById('idempCache')!.textContent = `PID:42 → seq ${idempBrokerSeq}`;
+    document.getElementById('idempLog')!.innerHTML += `<div class="idemp-msg accepted">✓ msg-${idempMsgNum} [seq=${seq}]</div>`;
+    document.getElementById('idempResult')!.textContent = `✅ Message ${idempMsgNum} written at sequence ${seq}`;
+  });
+
+  document.getElementById('idempRetryBtn')?.addEventListener('click', () => {
+    if (lastSentSeq < 0) {
+      document.getElementById('idempResult')!.textContent = '⚠️ Send a message first!';
+      return;
+    }
+
+    const outbox = document.getElementById('idempOutbox')!;
+    outbox.innerHTML += `<div class="idemp-msg duplicate">↻ msg-${idempMsgNum} [seq=${lastSentSeq}] (retry)</div>`;
+
+    if (idempOn) {
+      // Broker rejects duplicate
+      document.getElementById('idempLog')!.innerHTML += `<div class="idemp-msg rejected">✗ msg-${idempMsgNum} [seq=${lastSentSeq}] DUPLICATE (seq ≤ ${idempBrokerSeq})</div>`;
+      document.getElementById('idempResult')!.textContent = `🛡️ Duplicate detected! Broker already has seq ${lastSentSeq}. Message discarded.`;
+    } else {
+      // Without idempotence, broker accepts duplicate
+      document.getElementById('idempLog')!.innerHTML += `<div class="idemp-msg duplicate">⚠️ msg-${idempMsgNum} [seq=${lastSentSeq}] DUPLICATE WRITTEN!</div>`;
+      document.getElementById('idempResult')!.textContent = `⚠️ Duplicate written! Without idempotence, broker has no way to detect retries.`;
+    }
+  });
+
+  document.getElementById('idempResetBtn')?.addEventListener('click', idempReset);
+
+  // ========== TRANSACTIONAL PRODUCER ==========
+  let txnActive = false;
+  let txnSendCount = 0;
+  let txnPartMsgs: Record<string, Array<{msg: string; status: string}>> = { P0: [], P1: [], P2: [] };
+  let txnIsolation = 'read_uncommitted';
+  let txnMsgCounter = 0;
+  let txnHistory: Array<{msgs: Array<{part: string; msg: string}>; status: string}> = [];
+
+  function txnLog(container: string, text: string, cls: string) {
+    const el = document.getElementById(container)!;
+    el.innerHTML += `<div class="txn-log-entry ${cls}">${text}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function renderTxnPartitions() {
+    ['P0', 'P1', 'P2'].forEach(p => {
+      const logEl = document.getElementById(`txn${p}Log`)!;
+      const partEl = document.getElementById(`txn${p}`)!;
+      logEl.innerHTML = txnPartMsgs[p].map(m => `<span class="txn-msg ${m.status}">${m.msg}</span>`).join('');
+      partEl.className = 'txn-part';
+      if (txnPartMsgs[p].some(m => m.status === 'uncommitted')) partEl.classList.add('has-uncommitted');
+      else if (txnPartMsgs[p].some(m => m.status === 'committed')) partEl.classList.add('committed');
+      else if (txnPartMsgs[p].some(m => m.status === 'aborted')) partEl.classList.add('aborted');
+    });
+  }
+
+  function renderTxnConsumer() {
+    const view = document.getElementById('txnConsumerView')!;
+    if (txnHistory.length === 0) {
+      view.innerHTML = '<p class="consumer-hint">Run a transaction above to see what the consumer reads</p>';
+      return;
+    }
+    let html = '';
+    txnHistory.forEach(txn => {
+      txn.msgs.forEach(m => {
+        if (txnIsolation === 'read_committed') {
+          if (txn.status === 'committed') {
+            html += `<span class="txn-cv-msg visible">${m.msg}</span>`;
+          } else {
+            html += `<span class="txn-cv-msg hidden">${m.msg} (filtered)</span>`;
+          }
+        } else {
+          html += `<span class="txn-cv-msg visible">${m.msg}</span>`;
+        }
+      });
+    });
+    view.innerHTML = html || '<p class="consumer-hint">No messages yet</p>';
+  }
+
+  function txnSetBtnState(begin: boolean, send: boolean, commit: boolean, abort: boolean) {
+    (document.getElementById('txnBeginBtn') as HTMLButtonElement).disabled = !begin;
+    (document.getElementById('txnSendBtn') as HTMLButtonElement).disabled = !send;
+    (document.getElementById('txnCommitBtn') as HTMLButtonElement).disabled = !commit;
+    (document.getElementById('txnAbortBtn') as HTMLButtonElement).disabled = !abort;
+  }
+
+  function txnSetState(label: string, cls: string) {
+    const badge = document.getElementById('txnState')!;
+    badge.textContent = label;
+    badge.className = `txn-state-badge ${cls}`;
+  }
+
+  document.getElementById('txnBeginBtn')?.addEventListener('click', () => {
+    txnActive = true;
+    txnSendCount = 0;
+    txnSetState('IN_TRANSACTION', 'active');
+    txnSetBtnState(false, true, true, true);
+    txnLog('txnApiLog', '→ beginTransaction()', 'api');
+    txnLog('txnCoordLog', 'TXN state: Empty → Ongoing', 'coord');
+  });
+
+  document.getElementById('txnSendBtn')?.addEventListener('click', () => {
+    if (!txnActive) return;
+    txnMsgCounter++;
+    txnSendCount++;
+    const parts = ['P0', 'P1', 'P2'];
+    const targetPart = parts[(txnSendCount - 1) % 3];
+    const msgName = `txn-${txnMsgCounter}`;
+    txnPartMsgs[targetPart].push({ msg: msgName, status: 'uncommitted' });
+    renderTxnPartitions();
+    txnLog('txnApiLog', `→ send("${msgName}") → ${targetPart}`, 'api');
+    txnLog('txnCoordLog', `AddPartition: ${targetPart}`, 'coord');
+  });
+
+  document.getElementById('txnCommitBtn')?.addEventListener('click', () => {
+    if (!txnActive) return;
+    txnSetState('COMMITTING', 'committing');
+    txnLog('txnApiLog', '→ commitTransaction()', 'api');
+    txnLog('txnCoordLog', 'TXN state: Ongoing → PrepareCommit', 'coord');
+
+    const currentTxnMsgs: Array<{part: string; msg: string}> = [];
+    ['P0', 'P1', 'P2'].forEach(p => {
+      txnPartMsgs[p].forEach(m => {
+        if (m.status === 'uncommitted') {
+          m.status = 'committed';
+          currentTxnMsgs.push({ part: p, msg: m.msg });
+        }
+      });
+    });
+    txnHistory.push({ msgs: currentTxnMsgs, status: 'committed' });
+
+    setTimeout(() => {
+      renderTxnPartitions();
+      txnLog('txnCoordLog', 'Write COMMIT markers to partitions', 'ok');
+      txnLog('txnCoordLog', 'TXN state: PrepareCommit → CompleteCommit', 'ok');
+      txnSetState('IDLE', '');
+      txnActive = false;
+      txnSetBtnState(true, false, false, false);
+      renderTxnConsumer();
+    }, 500);
+  });
+
+  document.getElementById('txnAbortBtn')?.addEventListener('click', () => {
+    if (!txnActive) return;
+    txnSetState('ABORTING', 'aborting');
+    txnLog('txnApiLog', '→ abortTransaction()', 'api');
+    txnLog('txnCoordLog', 'TXN state: Ongoing → PrepareAbort', 'coord');
+
+    const currentTxnMsgs: Array<{part: string; msg: string}> = [];
+    ['P0', 'P1', 'P2'].forEach(p => {
+      txnPartMsgs[p].forEach(m => {
+        if (m.status === 'uncommitted') {
+          m.status = 'aborted';
+          currentTxnMsgs.push({ part: p, msg: m.msg });
+        }
+      });
+    });
+    txnHistory.push({ msgs: currentTxnMsgs, status: 'aborted' });
+
+    setTimeout(() => {
+      renderTxnPartitions();
+      txnLog('txnCoordLog', 'Write ABORT markers to partitions', 'err');
+      txnLog('txnCoordLog', 'TXN state: PrepareAbort → CompleteAbort', 'err');
+      txnSetState('IDLE', '');
+      txnActive = false;
+      txnSetBtnState(true, false, false, false);
+      renderTxnConsumer();
+    }, 500);
+  });
+
+  document.querySelectorAll('.iso-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.iso-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      txnIsolation = (btn as HTMLElement).dataset.iso!;
+      renderTxnConsumer();
+    });
+  });
+
+  document.getElementById('txnResetBtn')?.addEventListener('click', () => {
+    txnActive = false;
+    txnSendCount = 0;
+    txnMsgCounter = 0;
+    txnPartMsgs = { P0: [], P1: [], P2: [] };
+    txnHistory = [];
+    txnSetState('IDLE', '');
+    txnSetBtnState(true, false, false, false);
+    document.getElementById('txnApiLog')!.innerHTML = '';
+    document.getElementById('txnCoordLog')!.innerHTML = '';
+    renderTxnPartitions();
+    renderTxnConsumer();
+  });
+
+  // ========== READ-PROCESS-WRITE ==========
+  let rpwInputMsgs = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8'];
+  let rpwInputIdx = 0;
+  let rpwOutputMsgs: string[] = [];
+  let rpwOffsetVal = 0;
+
+  function renderRpw() {
+    const inputEl = document.getElementById('rpwInput')!;
+    inputEl.innerHTML = rpwInputMsgs.map((m, i) =>
+      `<span class="rpw-msg ${i < rpwInputIdx ? 'processed' : 'pending'}">${m}</span>`
+    ).join('');
+
+    document.getElementById('rpwOutput')!.innerHTML = rpwOutputMsgs.map(m =>
+      `<span class="rpw-msg processed">${m}</span>`
+    ).join('');
+
+    document.getElementById('rpwOffsets')!.innerHTML = rpwOffsetVal > 0
+      ? `<span class="rpw-msg processed">offset=${rpwOffsetVal}</span>`
+      : '';
+  }
+
+  document.getElementById('rpwRunBtn')?.addEventListener('click', async () => {
+    if (rpwInputIdx >= rpwInputMsgs.length) {
+      document.getElementById('rpwResult')!.textContent = '✅ All messages processed!';
+      return;
+    }
+
+    const batchSize = Math.min(2, rpwInputMsgs.length - rpwInputIdx);
+    const batch = rpwInputMsgs.slice(rpwInputIdx, rpwInputIdx + batchSize);
+    const statusEl = document.getElementById('rpwProcStatus')!;
+    const detailEl = document.getElementById('rpwProcDetail')!;
+    const badgeEl = document.getElementById('rpwTxnText')!;
+
+    // Step 1: consume
+    statusEl.textContent = 'Consuming...';
+    statusEl.className = 'rpw-proc-status processing';
+    detailEl.textContent = `poll() → [${batch.join(', ')}]`;
+    badgeEl.textContent = 'beginTransaction()';
+    await new Promise(r => setTimeout(r, 400));
+
+    // Step 2: process
+    statusEl.textContent = 'Processing...';
+    detailEl.textContent = `transform(${batch.join(', ')}) → [${batch.map(b => b + "'").join(', ')}]`;
+    await new Promise(r => setTimeout(r, 400));
+
+    // Step 3: produce + commit
+    statusEl.textContent = 'Producing + Committing...';
+    badgeEl.textContent = 'send() + sendOffsetsToTransaction() + commitTransaction()';
+    await new Promise(r => setTimeout(r, 400));
+
+    rpwInputIdx += batchSize;
+    batch.forEach(b => rpwOutputMsgs.push(b + "'"));
+    rpwOffsetVal = rpwInputIdx;
+
+    statusEl.textContent = 'Done ✓';
+    statusEl.className = 'rpw-proc-status done';
+    detailEl.textContent = `committed offset=${rpwOffsetVal}`;
+    badgeEl.textContent = 'All three operations happen in ONE transaction';
+    renderRpw();
+    document.getElementById('rpwResult')!.textContent = `✅ Batch [${batch.join(', ')}] processed atomically. Offset committed to ${rpwOffsetVal}.`;
+  });
+
+  document.getElementById('rpwCrashBtn')?.addEventListener('click', async () => {
+    if (rpwInputIdx >= rpwInputMsgs.length) return;
+    const statusEl = document.getElementById('rpwProcStatus')!;
+    const detailEl = document.getElementById('rpwProcDetail')!;
+    const badgeEl = document.getElementById('rpwTxnText')!;
+
+    const batch = rpwInputMsgs.slice(rpwInputIdx, rpwInputIdx + 2);
+    statusEl.textContent = 'Processing...';
+    statusEl.className = 'rpw-proc-status processing';
+    detailEl.textContent = `transform(${batch.join(', ')})`;
+    badgeEl.textContent = 'beginTransaction() → send()...';
+    await new Promise(r => setTimeout(r, 500));
+
+    statusEl.textContent = '💥 CRASHED!';
+    statusEl.className = 'rpw-proc-status crashed';
+    detailEl.textContent = 'Transaction aborted — no partial writes';
+    badgeEl.textContent = 'Transaction never committed → all writes rolled back';
+    document.getElementById('rpwResult')!.textContent = `💥 Crash! Transaction aborted. Offset still at ${rpwOffsetVal}. On restart, batch [${batch.join(', ')}] will be reprocessed — exactly once!`;
+  });
+
+  document.getElementById('rpwResetBtn')?.addEventListener('click', () => {
+    rpwInputIdx = 0;
+    rpwOutputMsgs = [];
+    rpwOffsetVal = 0;
+    document.getElementById('rpwProcStatus')!.textContent = 'Idle';
+    document.getElementById('rpwProcStatus')!.className = 'rpw-proc-status';
+    document.getElementById('rpwProcDetail')!.textContent = '';
+    document.getElementById('rpwTxnText')!.textContent = 'All three operations happen in ONE transaction';
+    document.getElementById('rpwResult')!.textContent = '';
+    renderRpw();
+  });
+
+  // ========== PERFORMANCE TRADEOFFS ==========
+  let perfTxnOn = true;
+
+  function updatePerf() {
+    const batch = parseInt((document.getElementById('perfBatchSlider') as HTMLInputElement).value);
+    const timeout = parseInt((document.getElementById('perfTimeoutSlider') as HTMLInputElement).value);
+
+    // Model: without txn ~1M msgs/s, with txn overhead depends on batch size
+    let throughputPct: number, latencyMs: number, cpuPct: number;
+
+    if (!perfTxnOn) {
+      // Idempotence only (always on since Kafka 3.0)
+      throughputPct = 95;
+      latencyMs = 5;
+      cpuPct = 3;
+    } else {
+      // Transactions on: overhead inversely proportional to batch size
+      const batchFactor = Math.min(1, batch / 500); // 0-1, higher = less overhead
+      throughputPct = 50 + 45 * batchFactor; // 50-95%
+      latencyMs = 5 + 80 * (1 - batchFactor); // 5-85ms
+      cpuPct = 3 + 20 * (1 - batchFactor); // 3-23%
+    }
+
+    document.getElementById('perfThroughput')!.style.width = throughputPct + '%';
+    document.getElementById('perfThroughputVal')!.textContent = `~${Math.round(throughputPct * 10)}K msgs/sec`;
+    document.getElementById('perfLatency')!.style.width = Math.min(100, latencyMs) + '%';
+    document.getElementById('perfLatencyVal')!.textContent = `~${Math.round(latencyMs)}ms`;
+    document.getElementById('perfCpu')!.style.width = cpuPct + '%';
+    document.getElementById('perfCpuVal')!.textContent = `~${Math.round(cpuPct)}%`;
+
+    // Update tip
+    const tip = document.getElementById('perfTip')!;
+    if (!perfTxnOn) {
+      tip.innerHTML = '💡 <strong>Tip:</strong> Idempotence alone adds <2% overhead (just PID+seq tracking). Kafka 3.0+ enables it by default.';
+    } else if (batch < 10) {
+      tip.innerHTML = '⚠️ <strong>Warning:</strong> Tiny batches with transactions = high overhead. Each commit is a 2PC round-trip. Batch more messages per transaction!';
+    } else if (batch < 100) {
+      tip.innerHTML = '💡 <strong>Tip:</strong> Increasing batch size will significantly reduce per-message overhead. Aim for 100+ messages per transaction.';
+    } else {
+      tip.innerHTML = '💡 <strong>Tip:</strong> At this batch size, transaction overhead is well amortized. The throughput cost is minimal (~3-5%).';
+    }
+  }
+
+  document.getElementById('perfBatchSlider')?.addEventListener('input', (e) => {
+    document.getElementById('perfBatchLabel')!.textContent = (e.target as HTMLInputElement).value;
+    updatePerf();
+  });
+
+  document.getElementById('perfTimeoutSlider')?.addEventListener('input', (e) => {
+    document.getElementById('perfTimeoutLabel')!.textContent = (e.target as HTMLInputElement).value;
+    updatePerf();
+  });
+
+  document.getElementById('perfTxnToggle')?.addEventListener('click', () => {
+    perfTxnOn = !perfTxnOn;
+    const btn = document.getElementById('perfTxnToggle')!;
+    btn.dataset.on = String(perfTxnOn);
+    btn.querySelector('.toggle-label')!.textContent = perfTxnOn ? 'ON' : 'OFF';
+    updatePerf();
+  });
+
+  // ========== INIT ==========
+  renderRpw();
+  renderTxnPartitions();
+  updatePerf();
+</script>
+</BaseLayout>
