@@ -1,0 +1,625 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kubernetes Pod Lifecycle" 
+  description="Interactive visualization of Kubernetes pod lifecycle phases, container states, probes, graceful shutdown, and restart policies"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Pod Lifecycle", href: "/kubernetes/pod-lifecycle/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔄 Pod Lifecycle</h1>
+      <p class="subtitle">From Pending to Running to Terminated — Every State a Pod Can Be In</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A Pod goes through well-defined <strong>phases</strong>: Pending → Running → Succeeded/Failed.
+          Within each phase, individual containers have their own <strong>states</strong>: Waiting, Running, Terminated.
+          Kubernetes uses <em>probes</em> (liveness, readiness, startup) to determine health and traffic routing.
+          Understanding this lifecycle is essential for debugging stuck deployments, OOMKills, and graceful shutdowns.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pod Phase State Machine -->
+    <section class="phases-section">
+      <h2>📊 Pod Phases</h2>
+      <p class="section-desc">Click a phase to learn about it. Then simulate a pod journey below.</p>
+
+      <div class="phase-diagram">
+        <div class="phase-node pending" data-phase="Pending" id="phasePending">
+          <div class="phase-icon">⏳</div>
+          <div class="phase-name">Pending</div>
+        </div>
+        <div class="phase-arrow">→</div>
+        <div class="phase-node running" data-phase="Running" id="phaseRunning">
+          <div class="phase-icon">▶️</div>
+          <div class="phase-name">Running</div>
+        </div>
+        <div class="phase-fork">
+          <div class="phase-fork-branch">
+            <div class="phase-arrow">→</div>
+            <div class="phase-node succeeded" data-phase="Succeeded" id="phaseSucceeded">
+              <div class="phase-icon">✅</div>
+              <div class="phase-name">Succeeded</div>
+            </div>
+          </div>
+          <div class="phase-fork-branch">
+            <div class="phase-arrow">→</div>
+            <div class="phase-node failed" data-phase="Failed" id="phaseFailed">
+              <div class="phase-icon">❌</div>
+              <div class="phase-name">Failed</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-desc" id="phaseDesc">
+        <strong>Pending:</strong> Pod accepted by the cluster but not yet running. Waiting for scheduling, image pulls, or init containers. Common causes of stuck Pending: insufficient resources, unresolvable PVC, node affinity mismatch.
+      </div>
+    </section>
+
+    <!-- Interactive Pod Simulation -->
+    <section class="sim-section">
+      <h2>🎮 Pod Lifecycle Simulator</h2>
+      <p class="section-desc">Step through a real pod lifecycle or trigger failure scenarios.</p>
+
+      <div class="sim-viz">
+        <div class="sim-pod" id="simPod">
+          <div class="sim-pod-header">
+            <span class="sim-pod-name">my-app-7d4f8b6c9-x2kl4</span>
+            <span class="sim-pod-phase" id="simPhase">Pending</span>
+          </div>
+
+          <div class="sim-containers">
+            <div class="sim-init-container" id="simInit">
+              <div class="sim-cont-label">Init Container: db-migrate</div>
+              <div class="sim-cont-state" id="simInitState">Waiting</div>
+              <div class="sim-cont-bar"><div class="sim-cont-progress" id="simInitProgress"></div></div>
+            </div>
+            <div class="sim-container" id="simMain">
+              <div class="sim-cont-label">Container: app</div>
+              <div class="sim-cont-state" id="simMainState">Waiting</div>
+              <div class="sim-cont-bar"><div class="sim-cont-progress" id="simMainProgress"></div></div>
+            </div>
+            <div class="sim-container" id="simSidecar">
+              <div class="sim-cont-label">Sidecar: envoy-proxy</div>
+              <div class="sim-cont-state" id="simSidecarState">Waiting</div>
+              <div class="sim-cont-bar"><div class="sim-cont-progress" id="simSidecarProgress"></div></div>
+            </div>
+          </div>
+
+          <div class="sim-probes">
+            <div class="sim-probe" id="simStartupProbe">
+              <span class="probe-icon">🔍</span>
+              <span class="probe-name">Startup</span>
+              <span class="probe-status" id="simStartupStatus">—</span>
+            </div>
+            <div class="sim-probe" id="simLivenessProbe">
+              <span class="probe-icon">❤️</span>
+              <span class="probe-name">Liveness</span>
+              <span class="probe-status" id="simLivenessStatus">—</span>
+            </div>
+            <div class="sim-probe" id="simReadinessProbe">
+              <span class="probe-icon">🎯</span>
+              <span class="probe-name">Readiness</span>
+              <span class="probe-status" id="simReadinessStatus">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sim-events" id="simEvents">
+          <div class="sim-events-label">Events</div>
+        </div>
+      </div>
+
+      <div class="sim-actions">
+        <button id="simStepBtn" class="action-btn primary-btn">⏭ Next Step</button>
+        <button id="simOOMBtn" class="action-btn danger-btn">💥 OOMKill</button>
+        <button id="simCrashBtn" class="action-btn danger-btn">🔄 CrashLoopBackOff</button>
+        <button id="simGracefulBtn" class="action-btn secondary-btn">🛑 Graceful Shutdown</button>
+        <button id="simResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Graceful Shutdown -->
+    <section class="shutdown-section">
+      <h2>🛑 Graceful Shutdown Sequence</h2>
+      <p class="section-desc">What happens when Kubernetes terminates a pod. The order matters.</p>
+
+      <div class="shutdown-timeline" id="shutdownTimeline">
+        <div class="sd-step" data-step="0">
+          <div class="sd-step-num">1</div>
+          <div class="sd-step-content">
+            <div class="sd-step-title">Pod set to Terminating</div>
+            <div class="sd-step-desc">Pod removed from Service endpoints. New traffic stops immediately.</div>
+          </div>
+        </div>
+        <div class="sd-step" data-step="1">
+          <div class="sd-step-num">2</div>
+          <div class="sd-step-content">
+            <div class="sd-step-title">preStop hook executes</div>
+            <div class="sd-step-desc">Custom cleanup: drain connections, deregister from service mesh, flush buffers.</div>
+          </div>
+        </div>
+        <div class="sd-step" data-step="2">
+          <div class="sd-step-num">3</div>
+          <div class="sd-step-content">
+            <div class="sd-step-title">SIGTERM sent to PID 1</div>
+            <div class="sd-step-desc">Your application receives SIGTERM. Start graceful shutdown: finish in-flight requests, close DB connections.</div>
+          </div>
+        </div>
+        <div class="sd-step" data-step="3">
+          <div class="sd-step-num">4</div>
+          <div class="sd-step-content">
+            <div class="sd-step-title">Grace period countdown</div>
+            <div class="sd-step-desc">Default: 30 seconds. Configure via <code>terminationGracePeriodSeconds</code>.</div>
+          </div>
+        </div>
+        <div class="sd-step" data-step="4">
+          <div class="sd-step-num">5</div>
+          <div class="sd-step-content">
+            <div class="sd-step-title">SIGKILL (if still running)</div>
+            <div class="sd-step-desc">Forced kill. No cleanup possible. If you hit this, increase the grace period or speed up shutdown.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="shutdown-controls">
+        <div class="slider-group">
+          <label>terminationGracePeriodSeconds: <strong id="graceLabel">30</strong></label>
+          <input type="range" id="graceSlider" min="5" max="120" value="30" step="5">
+        </div>
+        <button id="shutdownRunBtn" class="action-btn primary-btn">▶ Simulate Shutdown</button>
+        <button id="shutdownResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="shutdown-timer" id="shutdownTimer" style="display:none">
+        <div class="sd-timer-bar"><div class="sd-timer-fill" id="sdTimerFill"></div></div>
+        <div class="sd-timer-text" id="sdTimerText">30s remaining</div>
+      </div>
+    </section>
+
+    <!-- Restart Policies -->
+    <section class="restart-section">
+      <h2>🔁 Restart Policies</h2>
+      <p class="section-desc">How Kubernetes handles container exits.</p>
+
+      <div class="restart-cards">
+        <div class="restart-card">
+          <h3>Always <span class="restart-default">(default)</span></h3>
+          <p>Container is restarted regardless of exit code. Used by Deployments, StatefulSets. Backoff delay: 10s, 20s, 40s… up to 5 min.</p>
+          <div class="restart-viz">
+            <span class="rv-exit">Exit(1)</span> → <span class="rv-action restart">Restart</span>
+            <span class="rv-exit">Exit(0)</span> → <span class="rv-action restart">Restart</span>
+          </div>
+        </div>
+        <div class="restart-card">
+          <h3>OnFailure</h3>
+          <p>Restart only on non-zero exit code. Used by Jobs that should retry on failure but not on success.</p>
+          <div class="restart-viz">
+            <span class="rv-exit">Exit(1)</span> → <span class="rv-action restart">Restart</span>
+            <span class="rv-exit">Exit(0)</span> → <span class="rv-action stop">Stop</span>
+          </div>
+        </div>
+        <div class="restart-card">
+          <h3>Never</h3>
+          <p>Never restart. Used by one-shot Jobs. Pod moves to Failed or Succeeded based on exit code.</p>
+          <div class="restart-viz">
+            <span class="rv-exit">Exit(1)</span> → <span class="rv-action stop">Failed</span>
+            <span class="rv-exit">Exit(0)</span> → <span class="rv-action stop">Succeeded</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 CrashLoopBackOff Explained</h3>
+          <p>
+            Not a "state" — it's a <strong>restart backoff</strong>. After each crash, kubelet waits
+            longer before restarting: 10s → 20s → 40s → 80s → 160s → 300s (cap).
+            Check <code>kubectl logs --previous</code> and <code>kubectl describe pod</code>
+            for the real cause: missing config, bad image, OOM, or failed probes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔍 Probe Best Practices</h3>
+          <p>
+            <strong>Startup probe:</strong> Use for slow-starting apps. Disables liveness/readiness until it passes.
+            <strong>Liveness:</strong> "Is the process stuck?" — restarts on failure. Don't check dependencies!
+            <strong>Readiness:</strong> "Can it serve traffic?" — removes from Service endpoints on failure.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚠️ The preStop Race Condition</h3>
+          <p>
+            Endpoint removal and preStop/SIGTERM happen <em>in parallel</em>. Traffic may still
+            arrive after SIGTERM! Fix: add a small <code>sleep</code> in preStop to let endpoints propagate,
+            or keep accepting requests for a few seconds after SIGTERM.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Exit Code Cheat Sheet</h3>
+          <p>
+            <code>0</code> = success. <code>1</code> = generic error. <code>137</code> = SIGKILL (OOMKill or grace period exceeded).
+            <code>143</code> = SIGTERM (graceful shutdown). <code>139</code> = segfault.
+            <code>126</code> = permission denied. <code>127</code> = command not found.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/" target="_blank">Kubernetes Pod Lifecycle Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Kubernetes%20Pod%20Lifecycle%20Visualizer&url=https://systeminternals.dev/kubernetes/pod-lifecycle/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/kubernetes/pod-lifecycle/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/kubernetes/pod-lifecycle/&t=Interactive%20Kubernetes%20Pod%20Lifecycle%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #a78bfa, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(167,139,250,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; max-width: 400px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+
+  /* Phase Diagram */
+  .phases-section { margin-bottom: 50px; }
+  .phase-diagram { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; justify-content: center; }
+  .phase-node { padding: 16px 24px; border-radius: 14px; text-align: center; cursor: pointer; transition: all 0.3s; border: 2px solid transparent; }
+  .phase-node:hover { transform: translateY(-3px); }
+  .phase-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .phase-name { font-size: 0.9rem; font-weight: 700; }
+  .phase-node.pending { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+  .phase-node.pending:hover, .phase-node.pending.active { background: rgba(251,191,36,0.2); border-color: #fbbf24; }
+  .phase-node.running { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.3); color: #34d399; }
+  .phase-node.running:hover, .phase-node.running.active { background: rgba(52,211,153,0.2); border-color: #34d399; }
+  .phase-node.succeeded { background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.3); color: #60a5fa; }
+  .phase-node.succeeded:hover, .phase-node.succeeded.active { background: rgba(96,165,250,0.2); border-color: #60a5fa; }
+  .phase-node.failed { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); color: #ef4444; }
+  .phase-node.failed:hover, .phase-node.failed.active { background: rgba(239,68,68,0.2); border-color: #ef4444; }
+  .phase-arrow { font-size: 1.5rem; color: #555; }
+  .phase-fork { display: flex; flex-direction: column; gap: 8px; }
+  .phase-fork-branch { display: flex; align-items: center; gap: 12px; }
+  .phase-desc { padding: 14px 18px; background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; margin-bottom: 16px; }
+  .phase-desc strong { color: #60a5fa; }
+
+  /* Simulator */
+  .sim-section { margin-bottom: 50px; }
+  .sim-viz { display: flex; gap: 16px; margin-bottom: 16px; }
+  .sim-pod { flex: 1.5; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .sim-pod-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .sim-pod-name { font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; color: #888; }
+  .sim-pod-phase { padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
+  .sim-pod-phase[data-phase="Pending"] { background: rgba(251,191,36,0.2); color: #fbbf24; }
+  .sim-pod-phase[data-phase="Running"] { background: rgba(52,211,153,0.2); color: #34d399; }
+  .sim-pod-phase[data-phase="Succeeded"] { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .sim-pod-phase[data-phase="Failed"] { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .sim-pod-phase[data-phase="Terminating"] { background: rgba(167,139,250,0.2); color: #a78bfa; }
+
+  .sim-containers { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .sim-init-container, .sim-container { padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+  .sim-cont-label { font-size: 0.8rem; color: #aaa; margin-bottom: 4px; }
+  .sim-cont-state { font-size: 0.75rem; font-weight: 600; margin-bottom: 6px; }
+  .sim-cont-state[data-state="Waiting"] { color: #fbbf24; }
+  .sim-cont-state[data-state="Running"] { color: #34d399; }
+  .sim-cont-state[data-state="Terminated"] { color: #ef4444; }
+  .sim-cont-state[data-state="Completed"] { color: #60a5fa; }
+  .sim-cont-bar { height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; }
+  .sim-cont-progress { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.3s; width: 0%; }
+
+  .sim-probes { display: flex; gap: 12px; }
+  .sim-probe { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.8rem; }
+  .probe-icon { font-size: 0.9rem; }
+  .probe-name { color: #888; }
+  .probe-status { font-weight: 600; }
+
+  .sim-events { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); max-height: 350px; overflow-y: auto; }
+  .sim-events-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; text-transform: uppercase; }
+  :global(.sim-event) { padding: 6px 10px; margin-bottom: 6px; border-radius: 6px; font-size: 0.8rem; animation: msgAppear 0.3s ease-out; }
+  @keyframes msgAppear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.sim-event.info) { background: rgba(96,165,250,0.08); color: #93c5fd; border-left: 3px solid #60a5fa; }
+  :global(.sim-event.success) { background: rgba(52,211,153,0.08); color: #6ee7b7; border-left: 3px solid #34d399; }
+  :global(.sim-event.warning) { background: rgba(251,191,36,0.08); color: #fde68a; border-left: 3px solid #fbbf24; }
+  :global(.sim-event.error) { background: rgba(239,68,68,0.08); color: #fca5a5; border-left: 3px solid #ef4444; }
+
+  .sim-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* Shutdown */
+  .shutdown-section { margin-bottom: 50px; }
+  .shutdown-timeline { display: flex; flex-direction: column; gap: 0; margin-bottom: 20px; }
+  .sd-step { display: flex; gap: 16px; padding: 16px; border-left: 3px solid rgba(255,255,255,0.1); transition: all 0.4s; }
+  .sd-step.active { border-left-color: #60a5fa; background: rgba(96,165,250,0.05); border-radius: 0 10px 10px 0; }
+  .sd-step.done { border-left-color: #34d399; }
+  .sd-step.danger { border-left-color: #ef4444; background: rgba(239,68,68,0.05); }
+  .sd-step-num { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; color: #888; flex-shrink: 0; }
+  .sd-step.active .sd-step-num { background: rgba(96,165,250,0.3); color: #60a5fa; }
+  .sd-step.done .sd-step-num { background: rgba(52,211,153,0.3); color: #34d399; }
+  .sd-step-title { font-size: 0.9rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .sd-step-desc { font-size: 0.8rem; color: #888; line-height: 1.5; }
+  .sd-step-desc code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 0.8rem; color: #60a5fa; }
+
+  .shutdown-controls { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+  .slider-group { flex: 1; min-width: 200px; }
+  .slider-group label { color: #ccc; font-size: 0.95rem; display: block; margin-bottom: 8px; }
+  .slider-group strong { color: #60a5fa; }
+
+  .shutdown-timer { margin-top: 12px; }
+  .sd-timer-bar { height: 24px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; }
+  .sd-timer-fill { height: 100%; background: linear-gradient(90deg, #34d399, #fbbf24, #ef4444); border-radius: 6px; transition: width 0.5s linear; }
+  .sd-timer-text { font-size: 0.85rem; color: #aaa; margin-top: 6px; text-align: right; }
+
+  /* Restart Policies */
+  .restart-section { margin-bottom: 50px; }
+  .restart-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .restart-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .restart-card h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .restart-default { font-size: 0.75rem; color: #34d399; font-weight: 400; }
+  .restart-card p { font-size: 0.85rem; color: #aaa; line-height: 1.5; margin-bottom: 12px; }
+  .restart-viz { display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; font-family: 'Monaco','Menlo',monospace; }
+  .rv-exit { color: #888; }
+  .rv-action { padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .rv-action.restart { background: rgba(251,191,36,0.15); color: #fbbf24; }
+  .rv-action.stop { background: rgba(107,114,128,0.2); color: #9ca3af; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card em { color: #fbbf24; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(167,139,250,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .restart-cards { grid-template-columns: 1fr; }
+    .sim-viz { flex-direction: column; }
+    .phase-diagram { flex-direction: column; align-items: center; }
+    .phase-fork { flex-direction: row; }
+    .phase-fork-branch { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== PHASE DESCRIPTIONS ==========
+  const PHASE_DESCS: Record<string, string> = {
+    'Pending': '<strong>Pending:</strong> Pod accepted by the cluster but not yet running. Waiting for scheduling, image pulls, or init containers. Common causes of stuck Pending: insufficient resources, unresolvable PVC, node affinity mismatch.',
+    'Running': '<strong>Running:</strong> Pod bound to a node, all containers created. At least one container is running or starting. This is where probes become active. Pod stays Running even if readiness probe fails (just removed from Service).',
+    'Succeeded': '<strong>Succeeded:</strong> All containers exited with code 0. Pod won\'t be restarted. Typical for Jobs and init containers. The pod remains visible for log inspection until garbage collected.',
+    'Failed': '<strong>Failed:</strong> All containers terminated and at least one exited with non-zero code. With restartPolicy: Never, the pod stays Failed. With Always/OnFailure, kubelet restarts containers (CrashLoopBackOff if repeated).',
+  };
+
+  document.querySelectorAll('.phase-node').forEach(node => {
+    node.addEventListener('click', () => {
+      document.querySelectorAll('.phase-node').forEach(n => n.classList.remove('active'));
+      node.classList.add('active');
+      const phase = (node as HTMLElement).dataset.phase!;
+      document.getElementById('phaseDesc')!.innerHTML = PHASE_DESCS[phase];
+    });
+  });
+
+  // ========== POD SIMULATOR ==========
+  let simStep = 0;
+  const SIM_STEPS = [
+    { phase: 'Pending', init: 'Waiting', main: 'Waiting', sidecar: 'Waiting', initPct: 0, mainPct: 0, sidecarPct: 0, startup: '—', liveness: '—', readiness: '—', event: 'Scheduled: Successfully assigned default/my-app to node-2', eventCls: 'info' },
+    { phase: 'Pending', init: 'Running', main: 'Waiting', sidecar: 'Waiting', initPct: 50, mainPct: 0, sidecarPct: 0, startup: '—', liveness: '—', readiness: '—', event: 'Pulling image "app:latest" for init container db-migrate', eventCls: 'info' },
+    { phase: 'Pending', init: 'Completed', main: 'Waiting', sidecar: 'Waiting', initPct: 100, mainPct: 0, sidecarPct: 0, startup: '—', liveness: '—', readiness: '—', event: 'Init container db-migrate completed successfully', eventCls: 'success' },
+    { phase: 'Running', init: 'Completed', main: 'Running', sidecar: 'Running', initPct: 100, mainPct: 30, sidecarPct: 80, startup: 'probing...', liveness: '—', readiness: '—', event: 'Started containers: app, envoy-proxy', eventCls: 'success' },
+    { phase: 'Running', init: 'Completed', main: 'Running', sidecar: 'Running', initPct: 100, mainPct: 60, sidecarPct: 100, startup: '✓ pass', liveness: '✓ pass', readiness: 'probing...', event: 'Startup probe passed — liveness/readiness probes now active', eventCls: 'success' },
+    { phase: 'Running', init: 'Completed', main: 'Running', sidecar: 'Running', initPct: 100, mainPct: 100, sidecarPct: 100, startup: '✓ pass', liveness: '✓ pass', readiness: '✓ pass', event: 'Readiness probe passed — pod added to Service endpoints ✅', eventCls: 'success' },
+  ];
+
+  function setContState(id: string, state: string) {
+    const el = document.getElementById(id)!;
+    el.textContent = state;
+    el.dataset.state = state;
+  }
+
+  function setProgress(id: string, pct: number, color: string) {
+    const el = document.getElementById(id)!;
+    el.style.width = pct + '%';
+    el.style.background = color;
+  }
+
+  function addSimEvent(text: string, cls: string) {
+    const el = document.getElementById('simEvents')!;
+    el.innerHTML += `<div class="sim-event ${cls}">${text}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function renderSimStep(step: typeof SIM_STEPS[0]) {
+    const phaseEl = document.getElementById('simPhase')!;
+    phaseEl.textContent = step.phase;
+    phaseEl.dataset.phase = step.phase;
+    setContState('simInitState', step.init);
+    setContState('simMainState', step.main);
+    setContState('simSidecarState', step.sidecar);
+    const initColor = step.init === 'Completed' ? '#60a5fa' : step.init === 'Running' ? '#34d399' : '#fbbf24';
+    const mainColor = step.main === 'Running' ? '#34d399' : step.main === 'Terminated' ? '#ef4444' : '#fbbf24';
+    const sidecarColor = step.sidecar === 'Running' ? '#34d399' : '#fbbf24';
+    setProgress('simInitProgress', step.initPct, initColor);
+    setProgress('simMainProgress', step.mainPct, mainColor);
+    setProgress('simSidecarProgress', step.sidecarPct, sidecarColor);
+    document.getElementById('simStartupStatus')!.textContent = step.startup;
+    document.getElementById('simLivenessStatus')!.textContent = step.liveness;
+    document.getElementById('simReadinessStatus')!.textContent = step.readiness;
+    // Color probes
+    ['simStartupStatus', 'simLivenessStatus', 'simReadinessStatus'].forEach(id => {
+      const el = document.getElementById(id)!;
+      el.style.color = el.textContent?.includes('✓') ? '#34d399' : el.textContent?.includes('✗') ? '#ef4444' : '#888';
+    });
+    addSimEvent(step.event, step.eventCls);
+  }
+
+  document.getElementById('simStepBtn')?.addEventListener('click', () => {
+    if (simStep < SIM_STEPS.length) {
+      renderSimStep(SIM_STEPS[simStep]);
+      simStep++;
+    } else {
+      addSimEvent('Pod is healthy and serving traffic 🟢', 'success');
+    }
+  });
+
+  document.getElementById('simOOMBtn')?.addEventListener('click', () => {
+    const phaseEl = document.getElementById('simPhase')!;
+    phaseEl.textContent = 'Running'; phaseEl.dataset.phase = 'Running';
+    setContState('simMainState', 'Terminated');
+    setProgress('simMainProgress', 100, '#ef4444');
+    document.getElementById('simLivenessStatus')!.textContent = '—';
+    document.getElementById('simReadinessStatus')!.textContent = '✗ fail';
+    document.getElementById('simReadinessStatus')!.style.color = '#ef4444';
+    addSimEvent('⚠️ OOMKilled: container "app" exceeded memory limit (exit code 137)', 'error');
+    addSimEvent('Back-off restarting failed container app (CrashLoopBackOff)', 'warning');
+  });
+
+  document.getElementById('simCrashBtn')?.addEventListener('click', () => {
+    const delays = [10, 20, 40, 80];
+    let i = 0;
+    function crashCycle() {
+      if (i >= delays.length) {
+        addSimEvent('🔄 CrashLoopBackOff: backoff capped at 300s. Check logs!', 'error');
+        return;
+      }
+      setContState('simMainState', 'Terminated');
+      setProgress('simMainProgress', 100, '#ef4444');
+      addSimEvent(`💥 Container "app" exited with code 1 (attempt ${i + 1})`, 'error');
+      setTimeout(() => {
+        addSimEvent(`⏳ Back-off: waiting ${delays[i]}s before restart...`, 'warning');
+        setTimeout(() => {
+          setContState('simMainState', 'Running');
+          setProgress('simMainProgress', 50, '#34d399');
+          addSimEvent('🔄 Restarted container "app"', 'info');
+          i++;
+          setTimeout(crashCycle, 400);
+        }, 300);
+      }, 200);
+    }
+    crashCycle();
+  });
+
+  document.getElementById('simGracefulBtn')?.addEventListener('click', () => {
+    const phaseEl = document.getElementById('simPhase')!;
+    phaseEl.textContent = 'Terminating'; phaseEl.dataset.phase = 'Terminating';
+    addSimEvent('🛑 Pod marked for deletion — removed from Service endpoints', 'warning');
+    setTimeout(() => {
+      addSimEvent('preStop hook executing: draining connections...', 'info');
+      setTimeout(() => {
+        addSimEvent('SIGTERM sent to PID 1', 'warning');
+        document.getElementById('simReadinessStatus')!.textContent = '✗ removed';
+        document.getElementById('simReadinessStatus')!.style.color = '#ef4444';
+        setTimeout(() => {
+          setContState('simMainState', 'Terminated');
+          setContState('simSidecarState', 'Terminated');
+          setProgress('simMainProgress', 0, '#ef4444');
+          setProgress('simSidecarProgress', 0, '#ef4444');
+          phaseEl.textContent = 'Succeeded'; phaseEl.dataset.phase = 'Succeeded';
+          addSimEvent('✅ All containers exited cleanly (exit code 143: SIGTERM)', 'success');
+        }, 600);
+      }, 400);
+    }, 300);
+  });
+
+  document.getElementById('simResetBtn')?.addEventListener('click', () => {
+    simStep = 0;
+    const phaseEl = document.getElementById('simPhase')!;
+    phaseEl.textContent = 'Pending'; phaseEl.dataset.phase = 'Pending';
+    ['simInitState', 'simMainState', 'simSidecarState'].forEach(id => setContState(id, 'Waiting'));
+    ['simInitProgress', 'simMainProgress', 'simSidecarProgress'].forEach(id => setProgress(id, 0, '#fbbf24'));
+    ['simStartupStatus', 'simLivenessStatus', 'simReadinessStatus'].forEach(id => {
+      const el = document.getElementById(id)!;
+      el.textContent = '—'; el.style.color = '#888';
+    });
+    const events = document.getElementById('simEvents')!;
+    events.innerHTML = '<div class="sim-events-label">Events</div>';
+  });
+
+  // ========== SHUTDOWN SIMULATION ==========
+  document.getElementById('graceSlider')?.addEventListener('input', (e) => {
+    document.getElementById('graceLabel')!.textContent = (e.target as HTMLInputElement).value;
+  });
+
+  document.getElementById('shutdownRunBtn')?.addEventListener('click', async () => {
+    const grace = parseInt((document.getElementById('graceSlider') as HTMLInputElement).value);
+    const steps = document.querySelectorAll('.sd-step');
+    const timer = document.getElementById('shutdownTimer')!;
+    const timerFill = document.getElementById('sdTimerFill')!;
+    const timerText = document.getElementById('sdTimerText')!;
+
+    steps.forEach(s => { s.classList.remove('active', 'done', 'danger'); });
+
+    for (let i = 0; i < steps.length; i++) {
+      steps[i].classList.add('active');
+      if (i > 0) steps[i - 1].classList.remove('active');
+      if (i > 0) steps[i - 1].classList.add('done');
+
+      if (i === 3) {
+        // Grace period countdown
+        timer.style.display = 'block';
+        const totalSteps = 10;
+        for (let t = 0; t <= totalSteps; t++) {
+          const remaining = Math.round(grace * (1 - t / totalSteps));
+          timerFill.style.width = (t / totalSteps * 100) + '%';
+          timerText.textContent = `${remaining}s remaining`;
+          await new Promise(r => setTimeout(r, 150));
+        }
+      } else if (i === 4) {
+        steps[i].classList.add('danger');
+        steps[i].classList.remove('active');
+      } else {
+        await new Promise(r => setTimeout(r, 600));
+      }
+    }
+  });
+
+  document.getElementById('shutdownResetBtn')?.addEventListener('click', () => {
+    document.querySelectorAll('.sd-step').forEach(s => s.classList.remove('active', 'done', 'danger'));
+    document.getElementById('shutdownTimer')!.style.display = 'none';
+  });
+</script>
+</BaseLayout>

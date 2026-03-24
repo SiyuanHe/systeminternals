@@ -1,0 +1,557 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Redis Pub/Sub & Streams" 
+  description="Interactive visualization of Redis Pub/Sub messaging, Redis Streams with consumer groups, message acknowledgment, and backpressure"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Redis", href: "/redis/" },
+    { label: "Pub/Sub & Streams", href: "/redis/pub-sub-streams/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📡 Pub/Sub & Streams</h1>
+      <p class="subtitle">Fire-and-Forget vs. Durable Messaging in Redis</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Redis offers two messaging paradigms: <strong>Pub/Sub</strong> for real-time fire-and-forget
+          broadcasting, and <strong>Streams</strong> for durable, replayable message logs with consumer groups.
+          Pub/Sub is simple but lossy — if nobody's listening, the message is gone.
+          Streams give you Kafka-like semantics: persistent storage, consumer groups, acknowledgments, and
+          exactly-once processing via <code>XACK</code>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pub/Sub Section -->
+    <section class="pubsub-section">
+      <h2>📢 Pub/Sub: Fire and Forget</h2>
+      <p class="section-desc">Publishers broadcast to channels. Only currently connected subscribers receive messages. No persistence, no replay.</p>
+
+      <div class="pubsub-viz">
+        <div class="pubsub-publisher">
+          <div class="ps-label">Publisher</div>
+          <div class="ps-input-row">
+            <select id="psChannel">
+              <option value="news">news</option>
+              <option value="alerts">alerts</option>
+              <option value="chat">chat</option>
+            </select>
+            <input type="text" id="psMessage" placeholder="Hello world" value="Hello world" maxlength="40">
+          </div>
+        </div>
+
+        <div class="pubsub-channel-viz" id="psChannelViz">
+          <div class="ps-channel" data-ch="news">
+            <div class="ps-ch-name">📰 news</div>
+            <div class="ps-ch-indicator" id="psChNews"></div>
+          </div>
+          <div class="ps-channel" data-ch="alerts">
+            <div class="ps-ch-name">🚨 alerts</div>
+            <div class="ps-ch-indicator" id="psChAlerts"></div>
+          </div>
+          <div class="ps-channel" data-ch="chat">
+            <div class="ps-ch-name">💬 chat</div>
+            <div class="ps-ch-indicator" id="psChChat"></div>
+          </div>
+        </div>
+
+        <div class="pubsub-subscribers" id="psSubscribers">
+          <div class="ps-sub" data-sub="0" data-channels="news,alerts">
+            <div class="ps-sub-name">Sub-0</div>
+            <div class="ps-sub-channels">📰 🚨</div>
+            <div class="ps-sub-status online">● online</div>
+            <div class="ps-sub-log" id="psSubLog0"></div>
+          </div>
+          <div class="ps-sub" data-sub="1" data-channels="news,chat">
+            <div class="ps-sub-name">Sub-1</div>
+            <div class="ps-sub-channels">📰 💬</div>
+            <div class="ps-sub-status online">● online</div>
+            <div class="ps-sub-log" id="psSubLog1"></div>
+          </div>
+          <div class="ps-sub offline" data-sub="2" data-channels="news">
+            <div class="ps-sub-name">Sub-2</div>
+            <div class="ps-sub-channels">📰</div>
+            <div class="ps-sub-status offline-status">● offline</div>
+            <div class="ps-sub-log" id="psSubLog2"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pubsub-actions">
+        <button id="psPublishBtn" class="action-btn primary-btn">📤 PUBLISH</button>
+        <button id="psToggleSub2" class="action-btn secondary-btn">🔌 Toggle Sub-2 Online</button>
+        <button id="psResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="pubsub-result" id="psResult"></div>
+
+      <div class="pubsub-warning">
+        ⚠️ <strong>Notice:</strong> Sub-2 is offline — it will <em>never</em> receive messages published while disconnected. This is the fundamental limitation of Pub/Sub.
+      </div>
+    </section>
+
+    <!-- Streams Section -->
+    <section class="streams-section">
+      <h2>📜 Streams: Durable Message Log</h2>
+      <p class="section-desc">An append-only log with automatic IDs, consumer groups, pending entries, and acknowledgments.</p>
+
+      <div class="stream-viz">
+        <div class="stream-log-col">
+          <div class="stream-box-label">Stream: <code>mystream</code></div>
+          <div class="stream-log" id="streamLog"></div>
+          <div class="stream-stats">
+            <span>Length: <strong id="streamLen">0</strong></span>
+            <span>Groups: <strong>1</strong></span>
+          </div>
+        </div>
+
+        <div class="stream-group-col">
+          <div class="stream-box-label">Consumer Group: <code>mygroup</code></div>
+          <div class="stream-group-info">
+            <span>Last delivered: <strong id="streamLastId">0-0</strong></span>
+            <span>Pending: <strong id="streamPending">0</strong></span>
+          </div>
+
+          <div class="stream-consumers">
+            <div class="stream-consumer" id="streamC0">
+              <div class="sc-name">consumer-0</div>
+              <div class="sc-pending" id="scPending0">pending: 0</div>
+              <div class="sc-msgs" id="scMsgs0"></div>
+            </div>
+            <div class="stream-consumer" id="streamC1">
+              <div class="sc-name">consumer-1</div>
+              <div class="sc-pending" id="scPending1">pending: 0</div>
+              <div class="sc-msgs" id="scMsgs1"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stream-actions">
+        <button id="streamAddBtn" class="action-btn primary-btn">📥 XADD (produce)</button>
+        <button id="streamReadBtn" class="action-btn secondary-btn">📖 XREADGROUP (consume)</button>
+        <button id="streamAckBtn" class="action-btn commit-btn">✅ XACK (acknowledge)</button>
+        <button id="streamClaimBtn" class="action-btn danger-btn">🔄 XCLAIM (steal pending)</button>
+        <button id="streamResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="stream-result" id="streamResult"></div>
+    </section>
+
+    <!-- Comparison -->
+    <section class="compare-section">
+      <h2>⚖️ Pub/Sub vs Streams</h2>
+      <div class="compare-table">
+        <div class="compare-row compare-header">
+          <div class="compare-cell">Feature</div>
+          <div class="compare-cell pubsub-col">Pub/Sub</div>
+          <div class="compare-cell streams-col">Streams</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Persistence</div>
+          <div class="compare-cell pubsub-col">❌ None</div>
+          <div class="compare-cell streams-col">✅ Append-only log</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Replay</div>
+          <div class="compare-cell pubsub-col">❌ Impossible</div>
+          <div class="compare-cell streams-col">✅ From any ID</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Consumer Groups</div>
+          <div class="compare-cell pubsub-col">❌ No</div>
+          <div class="compare-cell streams-col">✅ Yes</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Acknowledgments</div>
+          <div class="compare-cell pubsub-col">❌ No</div>
+          <div class="compare-cell streams-col">✅ XACK</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Backpressure</div>
+          <div class="compare-cell pubsub-col">❌ None</div>
+          <div class="compare-cell streams-col">✅ MAXLEN / MINID</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Latency</div>
+          <div class="compare-cell pubsub-col">⚡ ~µs</div>
+          <div class="compare-cell streams-col">⚡ ~µs (slightly higher)</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">Use Case</div>
+          <div class="compare-cell pubsub-col">Real-time notifications, chat</div>
+          <div class="compare-cell streams-col">Event sourcing, task queues, logs</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 When to Use Which?</h3>
+          <p>
+            Use <strong>Pub/Sub</strong> for ephemeral, real-time broadcasts where missing a message is OK
+            (chat presence, live dashboards, invalidation signals).
+            Use <strong>Streams</strong> when messages must not be lost, need replay, or require
+            distributed processing across consumer groups (job queues, event logs, activity feeds).
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 XCLAIM & Dead Letters</h3>
+          <p>
+            When a consumer crashes, its pending messages stay in the PEL (Pending Entries List).
+            Other consumers can <code>XCLAIM</code> them after a timeout. Use <code>XAUTOCLAIM</code>
+            (Redis 6.2+) to automatically reclaim idle messages. For poison pills, track retry count
+            and move to a dead-letter stream.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📏 Stream Trimming</h3>
+          <p>
+            Streams grow forever by default. Use <code>XADD MAXLEN ~1000</code> (approximate trimming)
+            or <code>MINID</code> to cap by time. The <code>~</code> prefix allows Redis to trim
+            efficiently by removing whole radix tree nodes instead of individual entries.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Pub/Sub in Cluster Mode</h3>
+          <p>
+            In Redis Cluster, regular Pub/Sub broadcasts to <em>all nodes</em> — expensive at scale.
+            Use <strong>Sharded Pub/Sub</strong> (Redis 7.0+) to route messages only to the shard
+            owning the channel's hash slot. Much better for high-throughput use cases.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://redis.io/docs/latest/develop/interact/pubsub/" target="_blank">Redis Pub/Sub Documentation</a> and <a href="https://redis.io/docs/latest/develop/data-types/streams/" target="_blank">Redis Streams Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Redis%20Pub%2FSub%20%26%20Streams%20Visualizer&url=https://systeminternals.dev/redis/pub-sub-streams/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/redis/pub-sub-streams/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/redis/pub-sub-streams/&t=Interactive%20Redis%20Pub%2FSub%20%26%20Streams%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #ef4444, #f97316, #fbbf24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(239,68,68,0.1), rgba(249,115,22,0.05)); border: 1px solid rgba(239,68,68,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #ef4444; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #ef4444; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .commit-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .commit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249,115,22,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Pub/Sub */
+  .pubsub-section { margin-bottom: 50px; }
+  .pubsub-viz { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .pubsub-publisher { background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(239,68,68,0.3); min-width: 180px; }
+  .ps-label { font-size: 0.85rem; font-weight: 700; color: #ef4444; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .ps-input-row { display: flex; flex-direction: column; gap: 8px; }
+  .ps-input-row select, .ps-input-row input { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  .ps-input-row select option { background: #1a1a2e; }
+
+  .pubsub-channel-viz { display: flex; flex-direction: column; gap: 8px; min-width: 120px; }
+  .ps-channel { padding: 10px 16px; background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px; transition: all 0.3s; }
+  .ps-channel.active { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.08); }
+  .ps-ch-name { font-size: 0.85rem; font-weight: 600; color: #ccc; }
+  .ps-ch-indicator { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.1); transition: all 0.3s; }
+  .ps-channel.active .ps-ch-indicator { background: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,0.6); }
+
+  .pubsub-subscribers { display: flex; gap: 12px; flex: 1; flex-wrap: wrap; }
+  .ps-sub { background: rgba(0,0,0,0.2); border-radius: 12px; padding: 14px; border: 1px solid rgba(52,211,153,0.3); min-width: 150px; flex: 1; transition: all 0.3s; }
+  .ps-sub.offline { border-color: rgba(107,114,128,0.3); opacity: 0.5; }
+  .ps-sub-name { font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .ps-sub-channels { font-size: 0.8rem; color: #888; margin-bottom: 4px; }
+  .ps-sub-status { font-size: 0.75rem; margin-bottom: 8px; }
+  .ps-sub-status.online { color: #34d399; }
+  .ps-sub-status.offline-status { color: #6b7280; }
+  .ps-sub-log { font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; display: flex; flex-direction: column; gap: 3px; max-height: 100px; overflow-y: auto; }
+  :global(.ps-log-entry) { padding: 3px 8px; border-radius: 4px; animation: msgAppear 0.3s ease-out; }
+  :global(.ps-log-entry.received) { background: rgba(52,211,153,0.1); color: #6ee7b7; }
+  :global(.ps-log-entry.missed) { background: rgba(239,68,68,0.1); color: #fca5a5; }
+  @keyframes msgAppear { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+
+  .pubsub-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pubsub-result { font-size: 0.9rem; color: #aaa; min-height: 24px; padding: 8px; text-align: center; }
+  .pubsub-warning { padding: 12px 16px; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.25); border-radius: 10px; color: #fbbf24; font-size: 0.85rem; margin-top: 12px; }
+  .pubsub-warning strong { color: #fbbf24; }
+  .pubsub-warning em { color: #fde68a; font-style: normal; }
+
+  /* Streams */
+  .streams-section { margin-bottom: 50px; }
+  .stream-viz { display: flex; gap: 16px; margin-bottom: 16px; }
+  .stream-log-col, .stream-group-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 18px; border: 1px solid rgba(255,255,255,0.1); }
+  .stream-box-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; }
+  .stream-box-label code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #ef4444; font-size: 0.85rem; }
+
+  .stream-log { display: flex; flex-direction: column; gap: 4px; min-height: 80px; max-height: 200px; overflow-y: auto; margin-bottom: 10px; }
+  :global(.stream-entry) { padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; animation: msgAppear 0.3s ease-out; display: flex; justify-content: space-between; gap: 8px; }
+  :global(.stream-entry.unread) { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.25); color: #93c5fd; }
+  :global(.stream-entry.delivered) { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25); color: #fde68a; }
+  :global(.stream-entry.acked) { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25); color: #6ee7b7; }
+  :global(.stream-entry-id) { font-weight: 600; flex-shrink: 0; }
+  :global(.stream-entry-data) { opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .stream-stats { display: flex; gap: 16px; font-size: 0.8rem; color: #888; }
+  .stream-stats strong { color: #ef4444; }
+
+  .stream-group-info { display: flex; gap: 16px; font-size: 0.8rem; color: #888; margin-bottom: 12px; flex-wrap: wrap; }
+  .stream-group-info strong { color: #f97316; }
+
+  .stream-consumers { display: flex; flex-direction: column; gap: 8px; }
+  .stream-consumer { padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+  .sc-name { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .sc-pending { font-size: 0.75rem; color: #f97316; margin-bottom: 6px; }
+  .sc-msgs { display: flex; gap: 4px; flex-wrap: wrap; }
+  :global(.sc-msg) { padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.sc-msg.pending) { background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: #fde68a; }
+  :global(.sc-msg.acked) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); color: #6ee7b7; }
+
+  .stream-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .stream-result { font-size: 0.9rem; color: #aaa; min-height: 24px; padding: 8px; text-align: center; }
+
+  /* Comparison */
+  .compare-section { margin-bottom: 50px; }
+  .compare-table { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; overflow: hidden; }
+  .compare-row { display: flex; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .compare-row:last-child { border-bottom: none; }
+  .compare-header { background: rgba(255,255,255,0.05); }
+  .compare-header .compare-cell { font-weight: 700; color: #fff; font-size: 0.9rem; }
+  .compare-cell { flex: 1; padding: 12px 16px; font-size: 0.85rem; color: #aaa; }
+  .compare-cell:first-child { font-weight: 600; color: #ccc; flex: 0.8; }
+  .pubsub-col { background: rgba(239,68,68,0.03); }
+  .streams-col { background: rgba(52,211,153,0.03); }
+
+  /* Explain Section */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #ef4444; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #ef4444; }
+  .highlight-card { background: linear-gradient(135deg, rgba(239,68,68,0.08), rgba(249,115,22,0.08)); border-color: rgba(239,68,68,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #ef4444; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .pubsub-viz { flex-direction: column; }
+    .stream-viz { flex-direction: column; }
+    .compare-row { flex-direction: column; }
+    .compare-cell:first-child { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  }
+</style>
+
+<script>
+  // ========== PUB/SUB ==========
+  let sub2Online = false;
+  let psMsgCount = 0;
+
+  const SUB_CHANNELS: Record<string, string[]> = {
+    '0': ['news', 'alerts'],
+    '1': ['news', 'chat'],
+    '2': ['news'],
+  };
+
+  document.getElementById('psPublishBtn')?.addEventListener('click', () => {
+    const channel = (document.getElementById('psChannel') as HTMLSelectElement).value;
+    const message = (document.getElementById('psMessage') as HTMLInputElement).value || 'Hello';
+    psMsgCount++;
+
+    // Flash channel
+    document.querySelectorAll('.ps-channel').forEach(ch => ch.classList.remove('active'));
+    const chEl = document.querySelector(`.ps-channel[data-ch="${channel}"]`);
+    if (chEl) {
+      chEl.classList.add('active');
+      setTimeout(() => chEl.classList.remove('active'), 600);
+    }
+
+    // Deliver to subscribers
+    let delivered = 0;
+    ['0', '1', '2'].forEach(subId => {
+      const isOnline = subId !== '2' || sub2Online;
+      const subscribed = SUB_CHANNELS[subId].includes(channel);
+      const logEl = document.getElementById(`psSubLog${subId}`)!;
+
+      if (subscribed && isOnline) {
+        logEl.innerHTML += `<div class="ps-log-entry received">← ${channel}: "${message}"</div>`;
+        delivered++;
+        logEl.scrollTop = logEl.scrollHeight;
+      } else if (subscribed && !isOnline) {
+        logEl.innerHTML += `<div class="ps-log-entry missed">✗ missed: "${message}"</div>`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    });
+
+    document.getElementById('psResult')!.textContent = `PUBLISH ${channel} "${message}" → delivered to ${delivered} subscriber(s)`;
+  });
+
+  document.getElementById('psToggleSub2')?.addEventListener('click', () => {
+    sub2Online = !sub2Online;
+    const subEl = document.querySelector('.ps-sub[data-sub="2"]')!;
+    const statusEl = subEl.querySelector('.ps-sub-status')!;
+    if (sub2Online) {
+      subEl.classList.remove('offline');
+      statusEl.textContent = '● online';
+      statusEl.className = 'ps-sub-status online';
+      (document.getElementById('psToggleSub2') as HTMLButtonElement).textContent = '🔌 Toggle Sub-2 Offline';
+    } else {
+      subEl.classList.add('offline');
+      statusEl.textContent = '● offline';
+      statusEl.className = 'ps-sub-status offline-status';
+      (document.getElementById('psToggleSub2') as HTMLButtonElement).textContent = '🔌 Toggle Sub-2 Online';
+    }
+  });
+
+  document.getElementById('psResetBtn')?.addEventListener('click', () => {
+    ['0', '1', '2'].forEach(id => {
+      document.getElementById(`psSubLog${id}`)!.innerHTML = '';
+    });
+    document.getElementById('psResult')!.textContent = '';
+    psMsgCount = 0;
+  });
+
+  // ========== STREAMS ==========
+  interface StreamEntry { id: string; data: string; status: 'unread' | 'delivered' | 'acked'; consumer?: number; }
+  let streamEntries: StreamEntry[] = [];
+  let streamIdCounter = 0;
+  let lastDeliveredIdx = -1;
+  let nextConsumer = 0;
+
+  function streamId(): string {
+    streamIdCounter++;
+    return `1710000000000-${streamIdCounter}`;
+  }
+
+  function renderStream() {
+    const logEl = document.getElementById('streamLog')!;
+    logEl.innerHTML = streamEntries.map(e =>
+      `<div class="stream-entry ${e.status}">
+        <span class="stream-entry-id">${e.id}</span>
+        <span class="stream-entry-data">${e.data}</span>
+      </div>`
+    ).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+    document.getElementById('streamLen')!.textContent = String(streamEntries.length);
+    document.getElementById('streamLastId')!.textContent = lastDeliveredIdx >= 0 ? streamEntries[lastDeliveredIdx].id : '0-0';
+
+    const pending = streamEntries.filter(e => e.status === 'delivered').length;
+    document.getElementById('streamPending')!.textContent = String(pending);
+
+    // Render consumers
+    [0, 1].forEach(ci => {
+      const myMsgs = streamEntries.filter(e => e.consumer === ci);
+      const myPending = myMsgs.filter(e => e.status === 'delivered').length;
+      document.getElementById(`scPending${ci}`)!.textContent = `pending: ${myPending}`;
+      document.getElementById(`scMsgs${ci}`)!.innerHTML = myMsgs.map(e =>
+        `<span class="sc-msg ${e.status === 'acked' ? 'acked' : 'pending'}">${e.id.split('-')[1]}</span>`
+      ).join('');
+    });
+  }
+
+  const SAMPLE_DATA = ['user:signup', 'order:created', 'payment:ok', 'email:sent', 'cart:updated', 'item:viewed', 'session:start', 'click:button'];
+  let dataIdx = 0;
+
+  document.getElementById('streamAddBtn')?.addEventListener('click', () => {
+    const id = streamId();
+    const data = SAMPLE_DATA[dataIdx % SAMPLE_DATA.length];
+    dataIdx++;
+    streamEntries.push({ id, data, status: 'unread' });
+    renderStream();
+    document.getElementById('streamResult')!.textContent = `XADD mystream * event "${data}" → ${id}`;
+  });
+
+  document.getElementById('streamReadBtn')?.addEventListener('click', () => {
+    const unread = streamEntries.filter(e => e.status === 'unread');
+    if (unread.length === 0) {
+      document.getElementById('streamResult')!.textContent = '📭 No new messages — XREADGROUP returns empty';
+      return;
+    }
+    // Deliver next unread to next consumer
+    const entry = unread[0];
+    entry.status = 'delivered';
+    entry.consumer = nextConsumer;
+    lastDeliveredIdx = streamEntries.indexOf(entry);
+    const consName = `consumer-${nextConsumer}`;
+    nextConsumer = (nextConsumer + 1) % 2;
+    renderStream();
+    document.getElementById('streamResult')!.textContent = `XREADGROUP GROUP mygroup ${consName} → ${entry.id}: "${entry.data}" (now pending)`;
+  });
+
+  document.getElementById('streamAckBtn')?.addEventListener('click', () => {
+    const pending = streamEntries.find(e => e.status === 'delivered');
+    if (!pending) {
+      document.getElementById('streamResult')!.textContent = '✅ No pending messages to acknowledge';
+      return;
+    }
+    pending.status = 'acked';
+    renderStream();
+    document.getElementById('streamResult')!.textContent = `XACK mygroup ${pending.id} → acknowledged by consumer-${pending.consumer}`;
+  });
+
+  document.getElementById('streamClaimBtn')?.addEventListener('click', () => {
+    // Find pending message from consumer-0, give to consumer-1 (or vice versa)
+    const pending = streamEntries.find(e => e.status === 'delivered');
+    if (!pending) {
+      document.getElementById('streamResult')!.textContent = '⚠️ No pending messages to claim';
+      return;
+    }
+    const oldConsumer = pending.consumer;
+    pending.consumer = oldConsumer === 0 ? 1 : 0;
+    renderStream();
+    document.getElementById('streamResult')!.textContent = `XCLAIM mygroup consumer-${pending.consumer} 0 ${pending.id} → stolen from consumer-${oldConsumer}!`;
+  });
+
+  document.getElementById('streamResetBtn')?.addEventListener('click', () => {
+    streamEntries = [];
+    streamIdCounter = 0;
+    lastDeliveredIdx = -1;
+    nextConsumer = 0;
+    dataIdx = 0;
+    document.getElementById('streamResult')!.textContent = '';
+    renderStream();
+  });
+
+  // Init
+  renderStream();
+</script>
+</BaseLayout>
