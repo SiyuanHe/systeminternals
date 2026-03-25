@@ -1,0 +1,390 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="TLS & mTLS in Envoy" 
+  description="Interactive visualization of TLS termination, mTLS between services, certificate rotation, SDS, and SPIFFE identity in Envoy proxy"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Envoy", href: "/envoy/" },
+    { label: "TLS & mTLS", href: "/envoy/tls-mtls/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔒 TLS & mTLS</h1>
+      <p class="subtitle">Mutual Authentication, Certificate Management, and Zero-Trust Networking</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          In a service mesh, <strong>mTLS</strong> (mutual TLS) ensures both client and server authenticate each other
+          with certificates. Envoy handles TLS transparently — applications speak plain HTTP while Envoy encrypts
+          everything on the wire. Certificates are delivered via <em>SDS</em> (Secret Discovery Service) and rotated
+          without restarts. <strong>SPIFFE</strong> identities (spiffe://cluster/ns/svc) replace IP-based trust.
+        </p>
+      </div>
+    </section>
+
+    <!-- TLS vs mTLS -->
+    <section class="compare-section">
+      <h2>🔀 TLS vs mTLS</h2>
+      <p class="section-desc">Click to compare one-way TLS and mutual TLS handshakes.</p>
+
+      <div class="compare-tabs">
+        <button class="tab-btn active" data-tab="tls" id="tabTls">🔒 TLS (one-way)</button>
+        <button class="tab-btn" data-tab="mtls" id="tabMtls">🔐 mTLS (mutual)</button>
+      </div>
+
+      <div class="handshake-viz" id="handshakeViz">
+        <div class="hs-party client-party">
+          <div class="hs-icon">👤</div>
+          <div class="hs-name">Client</div>
+        </div>
+        <div class="hs-steps" id="hsSteps">
+          <div class="hs-step" id="hs0">
+            <div class="hs-arrow right">→</div>
+            <div class="hs-msg">ClientHello (supported ciphers)</div>
+          </div>
+          <div class="hs-step" id="hs1">
+            <div class="hs-arrow left">←</div>
+            <div class="hs-msg">ServerHello + Server Certificate</div>
+          </div>
+          <div class="hs-step" id="hs2">
+            <div class="hs-arrow right">→</div>
+            <div class="hs-msg">Client verifies server cert ✓</div>
+          </div>
+          <div class="hs-step" id="hs3">
+            <div class="hs-arrow right">→</div>
+            <div class="hs-msg">Key exchange → encrypted session</div>
+          </div>
+        </div>
+        <div class="hs-party server-party">
+          <div class="hs-icon">🖥️</div>
+          <div class="hs-name">Server (Envoy)</div>
+        </div>
+      </div>
+
+      <div class="hs-controls">
+        <button id="hsAnimateBtn" class="action-btn primary-btn">▶ Animate Handshake</button>
+        <button id="hsResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hs-result" id="hsResult"></div>
+    </section>
+
+    <!-- Certificate Chain -->
+    <section class="cert-section">
+      <h2>📜 Certificate Chain</h2>
+      <p class="section-desc">How trust is established from root CA to workload identity.</p>
+
+      <div class="cert-chain">
+        <div class="cert-card root">
+          <div class="cc-level">Root CA</div>
+          <div class="cc-name">cluster-root-ca</div>
+          <div class="cc-detail">Self-signed, offline, rotated yearly</div>
+          <div class="cc-trust">🔐 Trust anchor</div>
+        </div>
+        <div class="cert-arrow">↓ signs</div>
+        <div class="cert-card intermediate">
+          <div class="cc-level">Intermediate CA</div>
+          <div class="cc-name">istio-ca (citadel)</div>
+          <div class="cc-detail">Issues workload certs, 30-day expiry</div>
+          <div class="cc-trust">📝 Signing authority</div>
+        </div>
+        <div class="cert-arrow">↓ signs</div>
+        <div class="cert-card workload">
+          <div class="cc-level">Workload Certificate</div>
+          <div class="cc-name">spiffe://cluster.local/ns/default/sa/frontend</div>
+          <div class="cc-detail">Auto-rotated every 24h, no human intervention</div>
+          <div class="cc-trust">🆔 Service identity</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SDS & Rotation -->
+    <section class="sds-section">
+      <h2>🔄 Secret Discovery & Rotation</h2>
+      <p class="section-desc">Certificates are delivered and rotated without restarting Envoy.</p>
+
+      <div class="sds-flow">
+        <div class="sds-step" id="sds0">
+          <div class="ss-num">1</div>
+          <div class="ss-text">Envoy starts → requests cert from SDS (istiod/SPIRE)</div>
+        </div>
+        <div class="sds-step" id="sds1">
+          <div class="ss-num">2</div>
+          <div class="ss-text">Control plane verifies pod identity (K8s ServiceAccount)</div>
+        </div>
+        <div class="sds-step" id="sds2">
+          <div class="ss-num">3</div>
+          <div class="ss-text">Generates SVID cert (SPIFFE Verifiable Identity Document)</div>
+        </div>
+        <div class="sds-step" id="sds3">
+          <div class="ss-num">4</div>
+          <div class="ss-text">Pushes cert to Envoy via gRPC stream</div>
+        </div>
+        <div class="sds-step highlight" id="sds4">
+          <div class="ss-num">5</div>
+          <div class="ss-text">Before expiry: new cert pushed automatically — <strong>zero downtime</strong></div>
+        </div>
+      </div>
+
+      <div class="sds-controls">
+        <button id="sdsAnimateBtn" class="action-btn primary-btn">▶ Animate Rotation</button>
+        <button id="sdsResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="rotation-timer" id="rotationTimer" style="display:none">
+        <div class="rot-bar"><div class="rot-fill" id="rotFill"></div></div>
+        <div class="rot-text" id="rotText">Certificate valid: 24h remaining</div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why mTLS Everywhere?</h3>
+          <p>
+            In a Kubernetes cluster, any pod can talk to any other pod by default. <strong>mTLS</strong> ensures
+            only authenticated services communicate. Even if an attacker gets into the network, they can't
+            impersonate a service without its certificate. This is <em>zero-trust networking</em> — never trust the network, always verify identity.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🎯 SPIFFE Identity</h3>
+          <p>
+            SPIFFE provides a standard identity format: <code>spiffe://trust-domain/path</code>. In Kubernetes:
+            <code>spiffe://cluster.local/ns/default/sa/frontend</code>. This decouples identity from IP addresses,
+            which change constantly in dynamic environments. Authorization policies reference SPIFFE IDs, not IPs.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Permissive Mode</h3>
+          <p>
+            Rolling out mTLS across a whole cluster at once is risky. <strong>Permissive mode</strong> accepts both
+            plaintext and mTLS connections. Migrate service by service, monitoring for failures. Once all services
+            support mTLS, switch to <em>strict mode</em> to reject plaintext.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 Short-Lived Certs</h3>
+          <p>
+            Traditional certs last 1-2 years and require manual rotation. Service mesh certs last <strong>24 hours</strong>
+            (configurable). If a cert is compromised, it's useless within a day. No need for CRL/OCSP — just wait
+            for expiry. The automation makes short lifetimes practical.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/security/ssl" target="_blank">Envoy TLS Documentation</a> and <a href="https://spiffe.io/" target="_blank">SPIFFE</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20TLS%20%26%20mTLS%20in%20Envoy%20Visualizer&url=https://systeminternals.dev/envoy/tls-mtls/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/envoy/tls-mtls/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/envoy/tls-mtls/&t=Interactive%20TLS%20%26%20mTLS%20in%20Envoy%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Compare */
+  .compare-section { margin-bottom: 50px; }
+  .compare-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab-btn { padding: 8px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.05); color: #ccc; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; }
+  .tab-btn.active { background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.4); color: #34d399; font-weight: 600; }
+
+  .handshake-viz { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+  .hs-party { text-align: center; min-width: 100px; padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; }
+  .hs-icon { font-size: 2rem; margin-bottom: 4px; }
+  .hs-name { font-size: 0.85rem; font-weight: 700; color: #ccc; }
+  .hs-steps { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .hs-step { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; transition: all 0.4s; opacity: 0.3; }
+  .hs-step.active { opacity: 1; border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.05); }
+  .hs-step.done { opacity: 1; }
+  .hs-arrow { font-size: 0.9rem; min-width: 20px; }
+  .hs-arrow.right { color: #60a5fa; }
+  .hs-arrow.left { color: #34d399; }
+  .hs-msg { font-size: 0.8rem; color: #ccc; }
+  .hs-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .hs-result { font-size: 0.9rem; color: #888; text-align: center; min-height: 24px; }
+
+  /* Certificate Chain */
+  .cert-section { margin-bottom: 50px; }
+  .cert-chain { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .cert-card { padding: 16px 24px; border-radius: 12px; text-align: center; min-width: 300px; }
+  .cert-card.root { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
+  .cert-card.intermediate { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); }
+  .cert-card.workload { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.3); }
+  .cc-level { font-size: 0.75rem; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .cc-name { font-size: 0.9rem; font-weight: 700; color: #fff; margin: 4px 0; font-family: 'Monaco','Menlo',monospace; }
+  .cc-detail { font-size: 0.75rem; color: #888; }
+  .cc-trust { font-size: 0.8rem; margin-top: 6px; }
+  .cert-arrow { color: #555; font-size: 0.85rem; padding: 4px 0; }
+
+  /* SDS */
+  .sds-section { margin-bottom: 50px; }
+  .sds-flow { display: flex; flex-direction: column; gap: 0; margin-bottom: 16px; }
+  .sds-step { display: flex; gap: 14px; padding: 12px 16px; border-left: 3px solid rgba(255,255,255,0.1); transition: all 0.4s; }
+  .sds-step.active { border-left-color: #60a5fa; background: rgba(96,165,250,0.05); border-radius: 0 10px 10px 0; }
+  .sds-step.done { border-left-color: #34d399; }
+  .sds-step.highlight { border-left-color: rgba(52,211,153,0.4); }
+  .ss-num { width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #888; flex-shrink: 0; }
+  .sds-step.active .ss-num { background: rgba(96,165,250,0.3); color: #60a5fa; }
+  .sds-step.done .ss-num { background: rgba(52,211,153,0.3); color: #34d399; }
+  .ss-text { font-size: 0.9rem; color: #ccc; }
+  .ss-text strong { color: #34d399; }
+  .sds-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+
+  .rotation-timer { margin-top: 12px; }
+  .rot-bar { height: 20px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; }
+  .rot-fill { height: 100%; background: linear-gradient(90deg, #34d399, #fbbf24, #ef4444); border-radius: 6px; transition: width 0.3s; }
+  .rot-text { font-size: 0.8rem; color: #888; margin-top: 6px; text-align: right; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .handshake-viz { flex-direction: column; }
+    .cert-card { min-width: auto; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== TLS vs mTLS ==========
+  let currentTab = 'tls';
+  const TLS_STEPS = [
+    { arrow: 'right', msg: 'ClientHello (supported ciphers, TLS version)' },
+    { arrow: 'left', msg: 'ServerHello + Server Certificate' },
+    { arrow: 'right', msg: 'Client verifies server cert ✓' },
+    { arrow: 'right', msg: 'Key exchange → encrypted session ✅' },
+  ];
+  const MTLS_STEPS = [
+    { arrow: 'right', msg: 'ClientHello (supported ciphers, TLS version)' },
+    { arrow: 'left', msg: 'ServerHello + Server Certificate + CertificateRequest' },
+    { arrow: 'right', msg: 'Client verifies server cert ✓' },
+    { arrow: 'right', msg: 'Client Certificate (SPIFFE SVID)' },
+    { arrow: 'left', msg: 'Server verifies client cert ✓' },
+    { arrow: 'right', msg: 'Key exchange → mutual encrypted session 🔐' },
+  ];
+
+  function renderHandshake(steps: typeof TLS_STEPS) {
+    const container = document.getElementById('hsSteps')!;
+    container.innerHTML = steps.map((s, i) =>
+      `<div class="hs-step" id="hs${i}">
+        <div class="hs-arrow ${s.arrow}">${s.arrow === 'right' ? '→' : '←'}</div>
+        <div class="hs-msg">${s.msg}</div>
+      </div>`
+    ).join('');
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTab = (btn as HTMLElement).dataset.tab!;
+      renderHandshake(currentTab === 'tls' ? TLS_STEPS : MTLS_STEPS);
+      document.getElementById('hsResult')!.textContent = '';
+    });
+  });
+
+  document.getElementById('hsAnimateBtn')?.addEventListener('click', async () => {
+    const steps = currentTab === 'tls' ? TLS_STEPS : MTLS_STEPS;
+    for (let i = 0; i < steps.length; i++) {
+      const el = document.getElementById(`hs${i}`)!;
+      if (i > 0) document.getElementById(`hs${i - 1}`)!.classList.remove('active');
+      if (i > 0) document.getElementById(`hs${i - 1}`)!.classList.add('done');
+      el.classList.add('active');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    const last = document.getElementById(`hs${steps.length - 1}`)!;
+    last.classList.remove('active'); last.classList.add('done');
+    document.getElementById('hsResult')!.textContent = currentTab === 'tls'
+      ? '🔒 TLS established — server authenticated, traffic encrypted'
+      : '🔐 mTLS established — both sides authenticated, traffic encrypted';
+  });
+
+  document.getElementById('hsResetBtn')?.addEventListener('click', () => {
+    const steps = currentTab === 'tls' ? TLS_STEPS : MTLS_STEPS;
+    renderHandshake(steps);
+    document.getElementById('hsResult')!.textContent = '';
+  });
+
+  // ========== SDS ANIMATION ==========
+  document.getElementById('sdsAnimateBtn')?.addEventListener('click', async () => {
+    const steps = ['sds0', 'sds1', 'sds2', 'sds3', 'sds4'];
+    steps.forEach(id => document.getElementById(id)!.classList.remove('active', 'done'));
+
+    for (let i = 0; i < steps.length; i++) {
+      if (i > 0) { document.getElementById(steps[i - 1])!.classList.remove('active'); document.getElementById(steps[i - 1])!.classList.add('done'); }
+      document.getElementById(steps[i])!.classList.add('active');
+      await new Promise(r => setTimeout(r, 600));
+    }
+    document.getElementById(steps[steps.length - 1])!.classList.remove('active');
+    document.getElementById(steps[steps.length - 1])!.classList.add('done');
+
+    // Show rotation timer
+    const timer = document.getElementById('rotationTimer')!;
+    timer.style.display = 'block';
+    const fill = document.getElementById('rotFill')!;
+    const text = document.getElementById('rotText')!;
+    for (let pct = 0; pct <= 100; pct += 5) {
+      fill.style.width = pct + '%';
+      const remaining = Math.round(24 * (1 - pct / 100));
+      text.textContent = pct < 95 ? `Certificate valid: ${remaining}h remaining` : '🔄 Rotating — new cert pushed!';
+      await new Promise(r => setTimeout(r, 100));
+    }
+    text.textContent = '✅ New certificate active — zero downtime rotation complete';
+  });
+
+  document.getElementById('sdsResetBtn')?.addEventListener('click', () => {
+    ['sds0', 'sds1', 'sds2', 'sds3', 'sds4'].forEach(id => document.getElementById(id)!.classList.remove('active', 'done'));
+    document.getElementById('rotationTimer')!.style.display = 'none';
+  });
+
+  // Init
+  renderHandshake(TLS_STEPS);
+</script>
+</BaseLayout>

@@ -1,0 +1,319 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="ClickHouse Materialized Views" 
+  description="Interactive visualization of ClickHouse materialized views: real-time aggregation pipelines, projection chains, and incremental computation"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "ClickHouse", href: "/clickhouse/" },
+    { label: "Materialized Views", href: "/clickhouse/materialized-views/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📊 Materialized Views</h1>
+      <p class="subtitle">Real-Time Aggregation Pipelines — Pre-Compute at Insert Time</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          ClickHouse materialized views are <strong>insert triggers</strong> — when data arrives in a source table,
+          the MV's SELECT runs against the new block and writes results to a target table. This enables
+          <em>real-time aggregation</em>: raw events flow in, pre-computed metrics flow out. Combined with
+          <strong>AggregatingMergeTree</strong>, partial aggregates merge incrementally. The result: queries on
+          aggregated data are <em>100-1000x faster</em> than scanning raw events.
+        </p>
+      </div>
+    </section>
+
+    <!-- MV Pipeline Simulator -->
+    <section class="pipeline-section">
+      <h2>🔀 Aggregation Pipeline</h2>
+      <p class="section-desc">Insert raw events and watch materialized views compute aggregates in real time.</p>
+
+      <div class="pipeline-viz">
+        <div class="pv-source">
+          <div class="pv-label">Source: events_raw</div>
+          <div class="pv-table" id="pvSource"></div>
+          <div class="pv-count">Rows: <strong id="pvSourceCount">0</strong></div>
+        </div>
+        <div class="pv-arrow">MV trigger →</div>
+        <div class="pv-target">
+          <div class="pv-label">Target: events_hourly_mv</div>
+          <div class="pv-sql">SELECT toStartOfHour(ts) as hour, event_type, count() as cnt, uniqState(user_id) as users FROM events_raw GROUP BY hour, event_type</div>
+          <div class="pv-table" id="pvTarget"></div>
+          <div class="pv-count">Rows: <strong id="pvTargetCount">0</strong></div>
+        </div>
+      </div>
+
+      <div class="pipeline-controls">
+        <button id="insertBatchBtn" class="action-btn primary-btn">📥 Insert 100 Events</button>
+        <button id="insertStreamBtn" class="action-btn secondary-btn">🌊 Stream Events</button>
+        <button id="pipelineResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="pipeline-comparison" id="pipelineComparison">
+        <div class="pc-item">
+          <div class="pc-label">Query raw (1M rows)</div>
+          <div class="pc-time bad">~2.3s</div>
+        </div>
+        <div class="pc-item">
+          <div class="pc-label">Query MV (24 rows)</div>
+          <div class="pc-time good">~3ms</div>
+        </div>
+        <div class="pc-item">
+          <div class="pc-label">Speedup</div>
+          <div class="pc-time good">766x faster ⚡</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Chain Pattern -->
+    <section class="chain-section">
+      <h2>🔗 MV Chains</h2>
+      <p class="section-desc">MVs can feed other MVs — building multi-level aggregation pipelines.</p>
+
+      <div class="chain-viz">
+        <div class="chain-node source">
+          <div class="cn-name">events_raw</div>
+          <div class="cn-desc">Every click, view, purchase</div>
+          <div class="cn-volume">~10M rows/hour</div>
+        </div>
+        <div class="chain-arrow">→ MV</div>
+        <div class="chain-node mv1">
+          <div class="cn-name">events_minutely</div>
+          <div class="cn-desc">Per-minute counts by type</div>
+          <div class="cn-volume">~600 rows/hour</div>
+        </div>
+        <div class="chain-arrow">→ MV</div>
+        <div class="chain-node mv2">
+          <div class="cn-name">events_hourly</div>
+          <div class="cn-desc">Per-hour rollups</div>
+          <div class="cn-volume">~24 rows/hour</div>
+        </div>
+        <div class="chain-arrow">→ MV</div>
+        <div class="chain-node mv3">
+          <div class="cn-name">events_daily</div>
+          <div class="cn-desc">Daily summary</div>
+          <div class="cn-volume">~1 row/day</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 MVs Are NOT Caches</h3>
+          <p>
+            Unlike PostgreSQL materialized views that refresh on demand, ClickHouse MVs are <strong>live triggers</strong>.
+            Data flows through them on INSERT — no REFRESH needed. The tradeoff: MVs can't query historical data,
+            only new inserts. To backfill, insert historical data into the source table.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🧮 AggregatingMergeTree</h3>
+          <p>
+            For <code>count()</code>, <code>sum()</code>, <code>uniq()</code> — use <strong>AggregatingMergeTree</strong>
+            as the target engine with <code>-State</code> combinators. Partial aggregates from each insert batch are
+            stored separately and merged on query using <code>-Merge</code> combinators. Exact results, incremental computation.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚠️ Gotchas</h3>
+          <p>
+            1) MVs see individual insert <strong>blocks</strong>, not the whole table — GROUP BY only groups within
+            a block. 2) If the MV SELECT fails, the source INSERT still succeeds (data in, aggregation lost).
+            3) Dropping a MV doesn't drop its target table — clean up manually.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Common Patterns</h3>
+          <p>
+            <strong>Rollups:</strong> minute → hour → day. <strong>Dedup:</strong> ReplacingMergeTree target for upserts.
+            <strong>Routing:</strong> MV with WHERE clause sends subsets to different tables.
+            <strong>Enrichment:</strong> JOIN with a dictionary in the MV SELECT.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://clickhouse.com/docs/en/sql-reference/statements/create/view#materialized-view" target="_blank">ClickHouse Materialized View Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20ClickHouse%20Materialized%20Views%20Visualizer&url=https://systeminternals.dev/clickhouse/materialized-views/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/clickhouse/materialized-views/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/clickhouse/materialized-views/&t=Interactive%20ClickHouse%20Materialized%20Views%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #fbbf24, #f97316, #ef4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(251,191,36,0.1), rgba(249,115,22,0.05)); border: 1px solid rgba(251,191,36,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #fbbf24; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #fbbf24; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #1a1a2e; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(251,191,36,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Pipeline */
+  .pipeline-section { margin-bottom: 50px; }
+  .pipeline-viz { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .pv-source, .pv-target { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 14px; }
+  .pv-label { font-size: 0.85rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; }
+  .pv-sql { font-size: 0.65rem; font-family: 'Monaco','Menlo',monospace; color: #888; background: rgba(0,0,0,0.2); padding: 6px 8px; border-radius: 6px; margin-bottom: 8px; line-height: 1.4; }
+  .pv-table { max-height: 150px; overflow-y: auto; font-size: 0.7rem; font-family: 'Monaco','Menlo',monospace; }
+  :global(.pvr) { display: flex; gap: 6px; padding: 2px 4px; animation: fadeIn 0.2s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  :global(.pvr span) { flex: 1; color: #aaa; }
+  :global(.pvr.header span) { color: #fbbf24; font-weight: 600; }
+  .pv-count { font-size: 0.8rem; color: #888; margin-top: 6px; }
+  .pv-count strong { color: #fbbf24; }
+  .pv-arrow { color: #fbbf24; font-weight: 700; font-size: 0.8rem; padding-top: 40px; min-width: 80px; text-align: center; }
+
+  .pipeline-controls { display: flex; gap: 12px; margin-bottom: 16px; }
+
+  .pipeline-comparison { display: flex; gap: 16px; padding: 14px 18px; background: rgba(0,0,0,0.2); border-radius: 12px; }
+  .pc-item { flex: 1; text-align: center; }
+  .pc-label { font-size: 0.8rem; color: #888; margin-bottom: 4px; }
+  .pc-time { font-size: 1.1rem; font-weight: 700; }
+  .pc-time.bad { color: #ef4444; }
+  .pc-time.good { color: #34d399; }
+
+  /* Chain */
+  .chain-section { margin-bottom: 50px; }
+  .chain-viz { display: flex; align-items: center; gap: 8px; overflow-x: auto; padding: 10px 0; }
+  .chain-node { padding: 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; min-width: 130px; }
+  .chain-node.source { border-color: rgba(249,115,22,0.3); }
+  .chain-node.mv1 { border-color: rgba(251,191,36,0.3); }
+  .chain-node.mv2 { border-color: rgba(52,211,153,0.3); }
+  .chain-node.mv3 { border-color: rgba(96,165,250,0.3); }
+  .cn-name { font-size: 0.85rem; font-weight: 700; color: #fff; font-family: 'Monaco','Menlo',monospace; }
+  .cn-desc { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .cn-volume { font-size: 0.7rem; color: #fbbf24; margin-top: 4px; }
+  .chain-arrow { color: #555; font-size: 0.8rem; white-space: nowrap; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #fbbf24; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #fbbf24; }
+  .highlight-card { background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(249,115,22,0.08)); border-color: rgba(251,191,36,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #fbbf24; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .pipeline-viz { flex-direction: column; }
+    .pv-arrow { transform: rotate(90deg); padding: 0; }
+    .chain-viz { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== PIPELINE SIMULATOR ==========
+  const EVENT_TYPES = ['click', 'view', 'purchase', 'signup', 'logout'];
+  const HOURS = ['2024-01-15 10:00', '2024-01-15 11:00', '2024-01-15 12:00'];
+  let sourceRows = 0;
+  let targetData: Record<string, { hour: string; type: string; cnt: number }> = {};
+  let streaming = false;
+
+  function renderSource(batch: { ts: string; type: string; uid: number }[]) {
+    const el = document.getElementById('pvSource')!;
+    if (sourceRows === 0) {
+      el.innerHTML = '<div class="pvr header"><span>ts</span><span>type</span><span>user</span></div>';
+    }
+    // Show last 8
+    const html = batch.slice(-8).map(r =>
+      `<div class="pvr"><span>${r.ts}</span><span>${r.type}</span><span>u${r.uid}</span></div>`
+    ).join('');
+    el.innerHTML = '<div class="pvr header"><span>ts</span><span>type</span><span>user</span></div>' + html;
+    sourceRows += batch.length;
+    document.getElementById('pvSourceCount')!.textContent = sourceRows.toLocaleString();
+  }
+
+  function updateTarget(batch: { ts: string; type: string; uid: number }[]) {
+    batch.forEach(r => {
+      const hour = r.ts.slice(0, 13) + ':00';
+      const key = `${hour}|${r.type}`;
+      if (!targetData[key]) targetData[key] = { hour, type: r.type, cnt: 0 };
+      targetData[key].cnt++;
+    });
+
+    const el = document.getElementById('pvTarget')!;
+    const rows = Object.values(targetData).sort((a, b) => a.hour.localeCompare(b.hour) || a.type.localeCompare(b.type));
+    el.innerHTML = '<div class="pvr header"><span>hour</span><span>type</span><span>cnt</span></div>' +
+      rows.map(r => `<div class="pvr"><span>${r.hour}</span><span>${r.type}</span><span>${r.cnt}</span></div>`).join('');
+    document.getElementById('pvTargetCount')!.textContent = String(rows.length);
+  }
+
+  function generateBatch(count: number) {
+    const batch = [];
+    for (let i = 0; i < count; i++) {
+      const hour = HOURS[Math.floor(Math.random() * HOURS.length)];
+      const min = String(Math.floor(Math.random() * 60)).padStart(2, '0');
+      batch.push({
+        ts: `${hour.slice(0, 13)}:${min}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
+        type: EVENT_TYPES[Math.floor(Math.random() * EVENT_TYPES.length)],
+        uid: Math.floor(Math.random() * 1000),
+      });
+    }
+    return batch;
+  }
+
+  document.getElementById('insertBatchBtn')?.addEventListener('click', () => {
+    const batch = generateBatch(100);
+    renderSource(batch);
+    updateTarget(batch);
+  });
+
+  document.getElementById('insertStreamBtn')?.addEventListener('click', async () => {
+    if (streaming) return;
+    streaming = true;
+    for (let i = 0; i < 10; i++) {
+      const batch = generateBatch(50);
+      renderSource(batch);
+      updateTarget(batch);
+      await new Promise(r => setTimeout(r, 300));
+    }
+    streaming = false;
+  });
+
+  document.getElementById('pipelineResetBtn')?.addEventListener('click', () => {
+    sourceRows = 0;
+    targetData = {};
+    document.getElementById('pvSource')!.innerHTML = '';
+    document.getElementById('pvTarget')!.innerHTML = '';
+    document.getElementById('pvSourceCount')!.textContent = '0';
+    document.getElementById('pvTargetCount')!.textContent = '0';
+  });
+</script>
+</BaseLayout>

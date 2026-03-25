@@ -1,0 +1,397 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="PromQL Evaluation" 
+  description="Interactive visualization of PromQL query evaluation: instant vectors, range vectors, aggregation, and how queries scan TSDB blocks"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Prometheus", href: "/prometheus/" },
+    { label: "PromQL", href: "/prometheus/promql/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📊 PromQL Evaluation</h1>
+      <p class="subtitle">How Prometheus Queries Scan, Select, and Aggregate Time Series</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          PromQL queries operate on <strong>time series</strong> — streams of timestamped values identified by
+          a metric name and labels. An <em>instant vector</em> is one sample per series at a point in time.
+          A <em>range vector</em> is a window of samples per series. Functions like <code>rate()</code> and
+          <code>increase()</code> operate on range vectors. Aggregations like <code>sum()</code> and
+          <code>avg()</code> combine series. Under the hood, Prometheus scans <strong>TSDB blocks</strong>,
+          uses the <em>inverted index</em> to find matching series, and iterates through chunks.
+        </p>
+      </div>
+    </section>
+
+    <!-- Vector Types -->
+    <section class="vectors-section">
+      <h2>📐 Vector Types</h2>
+      <p class="section-desc">Click to see the difference between instant and range vectors.</p>
+
+      <div class="vector-tabs">
+        <button class="vt-btn active" data-type="instant">⚡ Instant Vector</button>
+        <button class="vt-btn" data-type="range">📊 Range Vector</button>
+      </div>
+
+      <div class="vector-viz" id="vectorViz">
+        <div class="vv-series">
+          <div class="vvs-label">http_requests_total&#123;method="GET", status="200"&#125;</div>
+          <div class="vvs-points" id="vvPoints0"></div>
+        </div>
+        <div class="vv-series">
+          <div class="vvs-label">http_requests_total&#123;method="POST", status="200"&#125;</div>
+          <div class="vvs-points" id="vvPoints1"></div>
+        </div>
+        <div class="vv-series">
+          <div class="vvs-label">http_requests_total&#123;method="GET", status="500"&#125;</div>
+          <div class="vvs-points" id="vvPoints2"></div>
+        </div>
+      </div>
+
+      <div class="vector-desc" id="vectorDesc">
+        <strong>Instant Vector:</strong> One sample per series at the evaluation timestamp. This is what you get from
+        <code>http_requests_total&#123;status="200"&#125;</code> — the most recent value for each matching series.
+      </div>
+    </section>
+
+    <!-- Query Simulator -->
+    <section class="query-section">
+      <h2>🔍 Query Simulator</h2>
+      <p class="section-desc">Select a PromQL query and watch how it evaluates step by step.</p>
+
+      <div class="query-presets">
+        <button class="qp-btn active" data-query="instant">http_requests_total&#123;status="200"&#125;</button>
+        <button class="qp-btn" data-query="rate">rate(http_requests_total[5m])</button>
+        <button class="qp-btn" data-query="sum">sum by(method)(rate(http_requests_total[5m]))</button>
+        <button class="qp-btn" data-query="topk">topk(2, rate(http_requests_total[5m]))</button>
+      </div>
+
+      <div class="eval-steps" id="evalSteps"></div>
+
+      <div class="eval-controls">
+        <button id="evalRunBtn" class="action-btn primary-btn">▶ Evaluate</button>
+        <button id="evalResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="eval-result" id="evalResult"></div>
+    </section>
+
+    <!-- TSDB Scan -->
+    <section class="scan-section">
+      <h2>💾 TSDB Block Scanning</h2>
+      <p class="section-desc">How Prometheus finds data: inverted index → postings → chunks → samples.</p>
+
+      <div class="scan-flow">
+        <div class="scan-step" id="sc0">
+          <div class="scs-icon">🔍</div>
+          <div class="scs-label">Query: &#123;status="200"&#125;</div>
+          <div class="scs-detail">Parse label matchers</div>
+        </div>
+        <div class="scan-step" id="sc1">
+          <div class="scs-icon">📑</div>
+          <div class="scs-label">Inverted Index Lookup</div>
+          <div class="scs-detail">status="200" → series IDs [1, 2, 5, 8]</div>
+        </div>
+        <div class="scan-step" id="sc2">
+          <div class="scs-icon">📦</div>
+          <div class="scs-label">Intersect Postings</div>
+          <div class="scs-detail">method=&quot;GET&quot; ∩ status=&quot;200&quot; → [1, 5]</div>
+        </div>
+        <div class="scan-step" id="sc3">
+          <div class="scs-icon">🧱</div>
+          <div class="scs-label">Load Chunks</div>
+          <div class="scs-detail">Gorilla-compressed, 120 samples/chunk</div>
+        </div>
+        <div class="scan-step" id="sc4">
+          <div class="scs-icon">📊</div>
+          <div class="scs-label">Iterate Samples</div>
+          <div class="scs-detail">Seek to time range, decode values</div>
+        </div>
+        <div class="scan-step" id="sc5">
+          <div class="scs-icon">✅</div>
+          <div class="scs-label">Return Result</div>
+          <div class="scs-detail">2 series, 42 samples scanned</div>
+        </div>
+      </div>
+
+      <div class="scan-controls">
+        <button id="scanRunBtn" class="action-btn primary-btn">▶ Animate Scan</button>
+        <button id="scanResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 rate() vs increase()</h3>
+          <p>
+            <code>rate(m[5m])</code> = per-second rate over 5 minutes. <code>increase(m[5m])</code> = total
+            increase over 5 minutes. They're related: <code>increase() = rate() × window</code>.
+            Both handle counter resets automatically. Use <strong>rate()</strong> for alerting (per-second),
+            <strong>increase()</strong> for dashboards (total count).
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚠️ Staleness</h3>
+          <p>
+            If no sample exists within the last 5 minutes (default lookback), the series is considered
+            <strong>stale</strong> and excluded from results. This prevents phantom series from showing up
+            after a target goes down. Tune with <code>--query.lookback-delta</code>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Recording Rules</h3>
+          <p>
+            Expensive queries (like <code>sum by(cluster)(rate(...))</code> across millions of series)
+            should be pre-computed as <strong>recording rules</strong>. They run periodically and store
+            results as new time series. Dashboard queries hit pre-computed data instead of scanning raw metrics.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔥 High Cardinality</h3>
+          <p>
+            Each unique label combination creates a new time series. Labels like <code>user_id</code> or
+            <code>request_id</code> explode cardinality. 10M+ series degrades Prometheus performance.
+            Use <strong>relabeling</strong> to drop high-cardinality labels at ingestion time.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://prometheus.io/docs/prometheus/latest/querying/basics/" target="_blank">PromQL Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20PromQL%20Evaluation%20Visualizer&url=https://systeminternals.dev/prometheus/promql/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/prometheus/promql/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/prometheus/promql/&t=Interactive%20PromQL%20Evaluation%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f97316, #ef4444, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(249,115,22,0.1), rgba(239,68,68,0.05)); border: 1px solid rgba(249,115,22,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #f97316; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249,115,22,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Vectors */
+  .vectors-section { margin-bottom: 50px; }
+  .vector-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .vt-btn { padding: 8px 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.05); color: #ccc; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; }
+  .vt-btn.active { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); color: #f97316; font-weight: 600; }
+
+  .vector-viz { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .vv-series { margin-bottom: 12px; }
+  .vvs-label { font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #888; margin-bottom: 6px; }
+  .vvs-points { display: flex; gap: 4px; height: 30px; align-items: flex-end; }
+  :global(.vv-point) { width: 8px; border-radius: 2px; transition: all 0.3s; }
+  :global(.vv-point.normal) { background: rgba(249,115,22,0.2); }
+  :global(.vv-point.selected) { background: rgba(249,115,22,0.7); box-shadow: 0 0 6px rgba(249,115,22,0.4); }
+  :global(.vv-point.range) { background: rgba(96,165,250,0.5); border: 1px solid rgba(96,165,250,0.7); }
+
+  .vector-desc { padding: 12px 16px; background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .vector-desc strong { color: #f97316; }
+  .vector-desc code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; color: #f97316; font-size: 0.85rem; }
+
+  /* Query */
+  .query-section { margin-bottom: 50px; }
+  .query-presets { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .qp-btn { padding: 6px 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.05); color: #ccc; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; cursor: pointer; transition: all 0.2s; }
+  .qp-btn.active { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.4); color: #f97316; }
+
+  .eval-steps { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; min-height: 40px; }
+  :global(.eval-step) { padding: 8px 14px; border-radius: 8px; font-size: 0.8rem; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  :global(.eval-step.select) { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.2); color: #93c5fd; }
+  :global(.eval-step.compute) { background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.2); color: #fdba74; }
+  :global(.eval-step.result) { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.2); color: #6ee7b7; }
+
+  .eval-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .eval-result { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; color: #ccc; min-height: 40px; }
+
+  /* Scan */
+  .scan-section { margin-bottom: 50px; }
+  .scan-flow { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+  .scan-step { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; transition: all 0.4s; }
+  .scan-step.active { border-color: rgba(249,115,22,0.4); background: rgba(249,115,22,0.05); }
+  .scan-step.done { border-color: rgba(52,211,153,0.3); }
+  .scs-icon { font-size: 1.1rem; }
+  .scs-label { font-size: 0.85rem; font-weight: 600; color: #ccc; }
+  .scs-detail { font-size: 0.75rem; color: #888; margin-left: auto; }
+  .scan-controls { display: flex; gap: 12px; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #f97316; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #f97316; }
+  .highlight-card { background: linear-gradient(135deg, rgba(249,115,22,0.08), rgba(239,68,68,0.08)); border-color: rgba(249,115,22,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #f97316; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .query-presets { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== VECTOR TYPES ==========
+  let vectorType = 'instant';
+
+  function renderVectors() {
+    for (let s = 0; s < 3; s++) {
+      const el = document.getElementById(`vvPoints${s}`)!;
+      const baseHeight = [20, 15, 8][s];
+      el.innerHTML = '';
+      for (let i = 0; i < 30; i++) {
+        const h = baseHeight + Math.floor(Math.random() * 12);
+        const isLast = i === 29;
+        const inRange = i >= 24;
+        let cls = 'normal';
+        if (vectorType === 'instant' && isLast) cls = 'selected';
+        else if (vectorType === 'range' && inRange) cls = 'range';
+        el.innerHTML += `<div class="vv-point ${cls}" style="height:${h}px"></div>`;
+      }
+    }
+  }
+
+  document.querySelectorAll('.vt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.vt-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      vectorType = (btn as HTMLElement).dataset.type!;
+      renderVectors();
+      document.getElementById('vectorDesc')!.innerHTML = vectorType === 'instant'
+        ? '<strong>Instant Vector:</strong> One sample per series at the evaluation timestamp. This is what you get from <code>http_requests_total{status="200"&#125;</code> — the most recent value for each matching series.'
+        : '<strong>Range Vector:</strong> A window of samples per series (highlighted in blue). <code>http_requests_total[5m]</code> returns the last 5 minutes of samples. Range vectors are input to functions like <code>rate()</code> and <code>increase()</code>.';
+    });
+  });
+
+  // ========== QUERY EVALUATION ==========
+  let currentQuery = 'instant';
+
+  const QUERY_EVALS: Record<string, { steps: { text: string; cls: string }[]; result: string }> = {
+    instant: {
+      steps: [
+        { text: '1. Parse: http_requests_total{status="200"&#125;', cls: 'select' },
+        { text: '2. Index lookup: status="200" → 3 matching series', cls: 'select' },
+        { text: '3. For each series: get latest sample before eval time', cls: 'compute' },
+        { text: '4. Return instant vector with 3 elements', cls: 'result' },
+      ],
+      result: '{method="GET", status="200"&#125; → 15234\n{method="POST", status="200"&#125; → 8921\n{method="PUT", status="200"&#125; → 1205',
+    },
+    rate: {
+      steps: [
+        { text: '1. Parse: rate(http_requests_total[5m])', cls: 'select' },
+        { text: '2. Inner selector: http_requests_total → 5 series', cls: 'select' },
+        { text: '3. For each: load samples from [now-5m, now] range', cls: 'compute' },
+        { text: '4. rate() = (last - first) / time_diff, handle resets', cls: 'compute' },
+        { text: '5. Return instant vector of per-second rates', cls: 'result' },
+      ],
+      result: '{method="GET", status="200"&#125; → 42.3/s\n{method="POST", status="200"&#125; → 18.7/s\n{method="GET", status="500"&#125; → 0.8/s',
+    },
+    sum: {
+      steps: [
+        { text: '1. Parse: sum by(method)(rate(http_requests_total[5m]))', cls: 'select' },
+        { text: '2. Evaluate inner: rate(http_requests_total[5m]) → 5 series', cls: 'compute' },
+        { text: '3. Group by "method" label', cls: 'compute' },
+        { text: '4. sum() within each group', cls: 'compute' },
+        { text: '5. Return aggregated instant vector', cls: 'result' },
+      ],
+      result: '{method="GET"} → 43.1/s  (200 + 500 combined)\n{method="POST"} → 18.7/s\n{method="PUT"} → 2.1/s',
+    },
+    topk: {
+      steps: [
+        { text: '1. Parse: topk(2, rate(http_requests_total[5m]))', cls: 'select' },
+        { text: '2. Evaluate inner: rate() → 5 series with rates', cls: 'compute' },
+        { text: '3. Sort by value descending', cls: 'compute' },
+        { text: '4. Keep top 2', cls: 'compute' },
+        { text: '5. Return 2-element instant vector', cls: 'result' },
+      ],
+      result: '{method="GET", status="200"&#125; → 42.3/s  (top 1)\n{method="POST", status="200"&#125; → 18.7/s  (top 2)',
+    },
+  };
+
+  document.querySelectorAll('.qp-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.qp-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentQuery = (btn as HTMLElement).dataset.query!;
+      document.getElementById('evalSteps')!.innerHTML = '';
+      document.getElementById('evalResult')!.textContent = '';
+    });
+  });
+
+  document.getElementById('evalRunBtn')?.addEventListener('click', async () => {
+    const cfg = QUERY_EVALS[currentQuery];
+    const stepsEl = document.getElementById('evalSteps')!;
+    stepsEl.innerHTML = '';
+    document.getElementById('evalResult')!.textContent = '';
+
+    for (const step of cfg.steps) {
+      stepsEl.innerHTML += `<div class="eval-step ${step.cls}">${step.text}</div>`;
+      await new Promise(r => setTimeout(r, 400));
+    }
+    document.getElementById('evalResult')!.textContent = cfg.result;
+  });
+
+  document.getElementById('evalResetBtn')?.addEventListener('click', () => {
+    document.getElementById('evalSteps')!.innerHTML = '';
+    document.getElementById('evalResult')!.textContent = '';
+  });
+
+  // ========== TSDB SCAN ==========
+  document.getElementById('scanRunBtn')?.addEventListener('click', async () => {
+    const steps = ['sc0', 'sc1', 'sc2', 'sc3', 'sc4', 'sc5'];
+    steps.forEach(id => document.getElementById(id)!.classList.remove('active', 'done'));
+    for (let i = 0; i < steps.length; i++) {
+      if (i > 0) { document.getElementById(steps[i - 1])!.classList.remove('active'); document.getElementById(steps[i - 1])!.classList.add('done'); }
+      document.getElementById(steps[i])!.classList.add('active');
+      await new Promise(r => setTimeout(r, 500));
+    }
+    document.getElementById(steps[steps.length - 1])!.classList.remove('active');
+    document.getElementById(steps[steps.length - 1])!.classList.add('done');
+  });
+
+  document.getElementById('scanResetBtn')?.addEventListener('click', () => {
+    ['sc0', 'sc1', 'sc2', 'sc3', 'sc4', 'sc5'].forEach(id => document.getElementById(id)!.classList.remove('active', 'done'));
+  });
+
+  // Init
+  renderVectors();
+</script>
+</BaseLayout>
