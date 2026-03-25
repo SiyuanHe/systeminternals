@@ -1,0 +1,381 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Elasticsearch Cluster Management" 
+  description="Interactive visualization of Elasticsearch cluster management: sharding, rebalancing, split-brain prevention, and node roles"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Elasticsearch", href: "/elasticsearch/" },
+    { label: "Cluster Management", href: "/elasticsearch/cluster-management/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔍 Cluster Management</h1>
+      <p class="subtitle">Shards, Replicas, Rebalancing — How Elasticsearch Stays Healthy</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          An Elasticsearch index is split into <strong>primary shards</strong> (each holding a portion of the data)
+          and <strong>replica shards</strong> (copies for fault tolerance and read throughput). The
+          <em>master node</em> manages cluster state — shard allocation, index creation, and node membership.
+          When nodes join or leave, shards <strong>rebalance</strong> automatically. The
+          <em>minimum_master_nodes</em> setting (or voting configuration) prevents <strong>split-brain</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Cluster Health Simulator -->
+    <section class="health-section">
+      <h2>🏥 Cluster Health</h2>
+      <p class="section-desc">Simulate node failures and watch cluster health change. Green → Yellow → Red.</p>
+
+      <div class="health-viz">
+        <div class="health-indicator" id="healthIndicator">
+          <div class="hi-dot green" id="hiDot"></div>
+          <div class="hi-label" id="hiLabel">GREEN</div>
+          <div class="hi-desc" id="hiDesc">All primary and replica shards assigned</div>
+        </div>
+
+        <div class="cluster-nodes" id="clusterNodes">
+          <div class="es-node master" id="esNode0">
+            <div class="en-status">🟢</div>
+            <div class="en-name">node-1 (master)</div>
+            <div class="en-shards" id="enShards0">P0 P1 R2 R3 R4</div>
+          </div>
+          <div class="es-node" id="esNode1">
+            <div class="en-status">🟢</div>
+            <div class="en-name">node-2 (data)</div>
+            <div class="en-shards" id="enShards1">P2 P3 R0 R1</div>
+          </div>
+          <div class="es-node" id="esNode2">
+            <div class="en-status">🟢</div>
+            <div class="en-name">node-3 (data)</div>
+            <div class="en-shards" id="enShards2">P4 R0 R2 R3</div>
+          </div>
+        </div>
+
+        <div class="shard-legend">
+          <span><span class="sl-dot primary"></span> Primary</span>
+          <span><span class="sl-dot replica"></span> Replica</span>
+          <span><span class="sl-dot unassigned"></span> Unassigned</span>
+        </div>
+      </div>
+
+      <div class="health-controls">
+        <button id="killNode2Btn" class="action-btn danger-btn">💀 Kill node-2</button>
+        <button id="killNode3Btn" class="action-btn danger-btn">💀 Kill node-3</button>
+        <button id="recoverBtn" class="action-btn secondary-btn">🔄 Recover All</button>
+        <button id="healthResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="health-log" id="healthLog"></div>
+    </section>
+
+    <!-- Shard Allocation -->
+    <section class="alloc-section">
+      <h2>📦 Shard Allocation</h2>
+      <p class="section-desc">Create an index and watch shards get distributed across nodes.</p>
+
+      <div class="alloc-controls">
+        <div class="alloc-input">
+          <label>Primary Shards:</label>
+          <input type="range" id="primarySlider" min="1" max="10" value="5" step="1">
+          <strong id="primaryLabel">5</strong>
+        </div>
+        <div class="alloc-input">
+          <label>Replicas:</label>
+          <input type="range" id="replicaSlider" min="0" max="3" value="1" step="1">
+          <strong id="replicaLabel">1</strong>
+        </div>
+        <button id="allocBtn" class="action-btn primary-btn">📦 Create Index</button>
+      </div>
+
+      <div class="alloc-result" id="allocResult"></div>
+
+      <div class="alloc-stats" id="allocStats">
+        <div class="as-item">Total Shards: <strong id="asTotalShards">0</strong></div>
+        <div class="as-item">Per Node: <strong id="asPerNode">0</strong></div>
+        <div class="as-item">Disk Usage: <strong id="asDisk">0 GB</strong></div>
+      </div>
+    </section>
+
+    <!-- Node Roles -->
+    <section class="roles-section">
+      <h2>🎭 Node Roles</h2>
+      <div class="roles-grid">
+        <div class="role-card">
+          <div class="rc-icon">👑</div>
+          <h3>Master</h3>
+          <p>Manages cluster state, shard allocation, index metadata. Lightweight — doesn't need much RAM/disk. Run 3+ dedicated masters for HA.</p>
+        </div>
+        <div class="role-card">
+          <div class="rc-icon">💾</div>
+          <h3>Data</h3>
+          <p>Stores shards, executes searches and aggregations. Needs lots of RAM (heap + OS cache) and fast disks (SSD). The workhorse.</p>
+        </div>
+        <div class="role-card">
+          <div class="rc-icon">🔀</div>
+          <h3>Coordinating</h3>
+          <p>Routes requests, merges results from data nodes. No data storage. Useful as a load balancer for heavy aggregation workloads.</p>
+        </div>
+        <div class="role-card">
+          <div class="rc-icon">📥</div>
+          <h3>Ingest</h3>
+          <p>Runs ingest pipelines (transform, enrich) before indexing. Offloads CPU-heavy preprocessing from data nodes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Split-Brain Prevention</h3>
+          <p>
+            If network partitions split the cluster, each side might elect its own master — <strong>split-brain</strong>.
+            The fix: require a majority (quorum) for master election. With 3 master-eligible nodes,
+            you need 2 to agree. A 2-node partition can't elect a master, so it goes read-only. Always use an odd number of master nodes.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚖️ Shard Sizing Best Practices</h3>
+          <p>
+            Target <strong>10-50 GB per shard</strong>. Too small = overhead from too many shards. Too large = slow recovery and merges.
+            For time-series data, use ILM (Index Lifecycle Management) with rollover: create a new index when it hits 50GB or 30 days.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Delayed Allocation</h3>
+          <p>
+            When a node temporarily disconnects, Elasticsearch waits <code>index.unassigned.node_left.delayed_timeout</code>
+            (default 1 minute) before reallocating its shards. If the node comes back quickly, no expensive rebalancing needed.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Cluster State</h3>
+          <p>
+            The cluster state includes all index metadata, shard locations, mappings, and settings. It's replicated to every node.
+            Too many indices/shards bloat cluster state and slow master operations. Rule of thumb: &lt;1000 shards per node, &lt;20 shards per GB of heap.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/modules-cluster.html" target="_blank">Elasticsearch Cluster Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Elasticsearch%20Cluster%20Management%20Visualizer&url=https://systeminternals.dev/elasticsearch/cluster-management/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/elasticsearch/cluster-management/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/elasticsearch/cluster-management/&t=Interactive%20Elasticsearch%20Cluster%20Management%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 150px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #34d399; cursor: pointer; }
+
+  /* Health */
+  .health-section { margin-bottom: 50px; }
+  .health-viz { margin-bottom: 16px; }
+  .health-indicator { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: rgba(0,0,0,0.2); border-radius: 12px; margin-bottom: 16px; }
+  .hi-dot { width: 20px; height: 20px; border-radius: 50%; }
+  .hi-dot.green { background: #34d399; box-shadow: 0 0 12px rgba(52,211,153,0.5); }
+  .hi-dot.yellow { background: #fbbf24; box-shadow: 0 0 12px rgba(251,191,36,0.5); }
+  .hi-dot.red { background: #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.5); }
+  .hi-label { font-size: 1.1rem; font-weight: 700; color: #fff; }
+  .hi-desc { font-size: 0.85rem; color: #888; }
+
+  .cluster-nodes { display: flex; gap: 12px; margin-bottom: 12px; }
+  .es-node { flex: 1; padding: 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; transition: all 0.4s; }
+  .es-node.dead { opacity: 0.3; border-color: rgba(239,68,68,0.3); }
+  .es-node.master { border-color: rgba(251,191,36,0.3); }
+  .en-status { font-size: 1rem; margin-bottom: 4px; }
+  .en-name { font-size: 0.85rem; font-weight: 700; color: #ccc; margin-bottom: 6px; }
+  .en-shards { font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #888; display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .shard-legend { display: flex; gap: 16px; font-size: 0.8rem; color: #888; }
+  .sl-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .sl-dot.primary { background: rgba(52,211,153,0.5); border: 1px solid #34d399; }
+  .sl-dot.replica { background: rgba(96,165,250,0.3); border: 1px solid #60a5fa; }
+  .sl-dot.unassigned { background: rgba(239,68,68,0.3); border: 1px solid #ef4444; }
+
+  .health-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .health-log { font-size: 0.8rem; color: #888; max-height: 80px; overflow-y: auto; }
+  :global(.hlog) { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Allocation */
+  .alloc-section { margin-bottom: 50px; }
+  .alloc-controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+  .alloc-input { display: flex; align-items: center; gap: 8px; }
+  .alloc-input label { font-size: 0.9rem; color: #ccc; }
+  .alloc-input strong { color: #34d399; min-width: 20px; }
+  .alloc-result { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; min-height: 60px; margin-bottom: 12px; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; color: #ccc; }
+  .alloc-stats { display: flex; gap: 20px; font-size: 0.85rem; color: #888; }
+  .alloc-stats strong { color: #34d399; }
+
+  /* Roles */
+  .roles-section { margin-bottom: 50px; }
+  .roles-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .role-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; text-align: center; }
+  .rc-icon { font-size: 2rem; margin-bottom: 6px; }
+  .role-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .role-card p { font-size: 0.8rem; color: #aaa; line-height: 1.5; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .cluster-nodes { flex-direction: column; }
+    .roles-grid { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== CLUSTER HEALTH ==========
+  let nodesAlive = [true, true, true];
+
+  function updateHealth() {
+    const alive = nodesAlive.filter(Boolean).length;
+    const dot = document.getElementById('hiDot')!;
+    const label = document.getElementById('hiLabel')!;
+    const desc = document.getElementById('hiDesc')!;
+
+    if (alive === 3) {
+      dot.className = 'hi-dot green'; label.textContent = 'GREEN'; label.style.color = '#34d399';
+      desc.textContent = 'All primary and replica shards assigned';
+    } else if (alive === 2) {
+      dot.className = 'hi-dot yellow'; label.textContent = 'YELLOW'; label.style.color = '#fbbf24';
+      desc.textContent = 'All primaries assigned, some replicas unassigned';
+    } else {
+      dot.className = 'hi-dot red'; label.textContent = 'RED'; label.style.color = '#ef4444';
+      desc.textContent = 'Some primary shards unassigned — data loss risk!';
+    }
+  }
+
+  function killNode(idx: number) {
+    if (!nodesAlive[idx]) return;
+    nodesAlive[idx] = false;
+    const el = document.getElementById(`esNode${idx}`)!;
+    el.classList.add('dead');
+    el.querySelector('.en-status')!.textContent = '🔴';
+    const logEl = document.getElementById('healthLog')!;
+    logEl.innerHTML += `<div class="hlog">💀 node-${idx + 1} went down — reassigning its shards...</div>`;
+    logEl.innerHTML += `<div class="hlog">⚠️ Replicas from node-${idx + 1} unassigned</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    updateHealth();
+  }
+
+  document.getElementById('killNode2Btn')?.addEventListener('click', () => killNode(1));
+  document.getElementById('killNode3Btn')?.addEventListener('click', () => killNode(2));
+
+  document.getElementById('recoverBtn')?.addEventListener('click', () => {
+    nodesAlive = [true, true, true];
+    [0, 1, 2].forEach(i => {
+      const el = document.getElementById(`esNode${i}`)!;
+      el.classList.remove('dead');
+      el.querySelector('.en-status')!.textContent = '🟢';
+    });
+    const logEl = document.getElementById('healthLog')!;
+    logEl.innerHTML += `<div class="hlog">✅ All nodes recovered — rebalancing shards...</div>`;
+    logEl.innerHTML += `<div class="hlog">✅ Cluster health: GREEN</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    updateHealth();
+  });
+
+  document.getElementById('healthResetBtn')?.addEventListener('click', () => {
+    nodesAlive = [true, true, true];
+    [0, 1, 2].forEach(i => {
+      const el = document.getElementById(`esNode${i}`)!;
+      el.classList.remove('dead');
+      el.querySelector('.en-status')!.textContent = '🟢';
+    });
+    document.getElementById('healthLog')!.innerHTML = '';
+    updateHealth();
+  });
+
+  // ========== SHARD ALLOCATION ==========
+  document.getElementById('primarySlider')?.addEventListener('input', (e) => {
+    document.getElementById('primaryLabel')!.textContent = (e.target as HTMLInputElement).value;
+  });
+  document.getElementById('replicaSlider')?.addEventListener('input', (e) => {
+    document.getElementById('replicaLabel')!.textContent = (e.target as HTMLInputElement).value;
+  });
+
+  document.getElementById('allocBtn')?.addEventListener('click', () => {
+    const primaries = parseInt((document.getElementById('primarySlider') as HTMLInputElement).value);
+    const replicas = parseInt((document.getElementById('replicaSlider') as HTMLInputElement).value);
+    const total = primaries * (1 + replicas);
+    const nodes = 3;
+    const perNode = Math.ceil(total / nodes);
+
+    // Distribute shards
+    const allocation: string[][] = [[], [], []];
+    for (let p = 0; p < primaries; p++) {
+      const node = p % nodes;
+      allocation[node].push(`P${p}`);
+      for (let r = 0; r < replicas; r++) {
+        const repNode = (node + 1 + r) % nodes;
+        allocation[repNode].push(`R${p}`);
+      }
+    }
+
+    const result = document.getElementById('allocResult')!;
+    result.innerHTML = allocation.map((shards, i) =>
+      `<div style="margin-bottom:4px"><span style="color:#34d399">node-${i + 1}:</span> ${shards.map(s => `<span style="color:${s.startsWith('P') ? '#34d399' : '#60a5fa'}">${s}</span>`).join(' ')}</div>`
+    ).join('');
+
+    document.getElementById('asTotalShards')!.textContent = String(total);
+    document.getElementById('asPerNode')!.textContent = `~${perNode}`;
+    document.getElementById('asDisk')!.textContent = `${(total * 10).toLocaleString()} GB (est. 10GB/shard)`;
+  });
+
+  // Init
+  updateHealth();
+</script>
+</BaseLayout>

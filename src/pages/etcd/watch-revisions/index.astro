@@ -1,0 +1,383 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="etcd Watch & Revisions" 
+  description="Interactive visualization of etcd watch API, MVCC revisions, event streaming, compaction, and consistency guarantees"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "etcd", href: "/etcd/" },
+    { label: "Watch & Revisions", href: "/etcd/watch-revisions/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>👁️ Watch & Revisions</h1>
+      <p class="subtitle">MVCC, Event Streaming, and Never Missing a Change</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          etcd uses <strong>MVCC</strong> (Multi-Version Concurrency Control) — every write increments a global
+          <em>revision number</em>. Old versions are kept until <strong>compaction</strong>. The <em>Watch API</em>
+          lets clients subscribe to key changes starting from any revision. Watches are <strong>ordered</strong>,
+          <strong>reliable</strong> (no gaps), and <strong>efficient</strong> (server-push, not polling).
+          This is how Kubernetes knows the instant a Pod changes.
+        </p>
+      </div>
+    </section>
+
+    <!-- MVCC Revision Simulator -->
+    <section class="mvcc-section">
+      <h2>📝 MVCC Revisions</h2>
+      <p class="section-desc">Every write creates a new revision. Old versions are preserved until compaction.</p>
+
+      <div class="mvcc-viz">
+        <div class="mvcc-input-row">
+          <select id="mvccKey">
+            <option value="/pods/nginx">/pods/nginx</option>
+            <option value="/pods/redis">/pods/redis</option>
+            <option value="/config/db">/config/db</option>
+          </select>
+          <input type="text" id="mvccValue" value="running" maxlength="20">
+          <button id="mvccPutBtn" class="action-btn primary-btn">PUT</button>
+          <button id="mvccDeleteBtn" class="action-btn danger-btn">DELETE</button>
+        </div>
+
+        <div class="revision-timeline" id="revTimeline">
+          <div class="rt-label">Revision Timeline</div>
+          <div class="rt-entries" id="rtEntries"></div>
+        </div>
+
+        <div class="mvcc-current">
+          Current Revision: <strong id="mvccRevision">0</strong>
+          <span class="mvcc-compact">Compacted through: <strong id="mvccCompacted">0</strong></span>
+        </div>
+      </div>
+
+      <div class="mvcc-controls">
+        <button id="mvccCompactBtn" class="action-btn secondary-btn">🗜️ Compact (remove old revisions)</button>
+        <button id="mvccResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Watch Simulator -->
+    <section class="watch-section">
+      <h2>👁️ Watch Simulator</h2>
+      <p class="section-desc">Create watches on key prefixes. Then make changes and see events stream in real time.</p>
+
+      <div class="watch-viz">
+        <div class="watch-setup">
+          <div class="ws-label">Active Watches</div>
+          <div class="watch-list" id="watchList">
+            <div class="watch-item active" id="watch0">
+              <div class="wi-prefix">👁️ /pods/ (prefix)</div>
+              <div class="wi-rev">from rev: 1</div>
+              <div class="wi-events" id="w0Events">0 events</div>
+            </div>
+            <div class="watch-item" id="watch1">
+              <div class="wi-prefix">👁️ /config/db (exact)</div>
+              <div class="wi-rev">from rev: 1</div>
+              <div class="wi-events" id="w1Events">0 events</div>
+            </div>
+          </div>
+          <button id="addWatchBtn" class="action-btn secondary-btn" style="margin-top:8px;font-size:0.8rem;padding:6px 12px;">+ Add Watch on /services/</button>
+        </div>
+
+        <div class="watch-events">
+          <div class="ws-label">Event Stream</div>
+          <div class="event-log" id="eventLog">
+            <div class="ev-empty">Make changes above — events will appear here</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Watch From Revision -->
+    <section class="replay-section">
+      <h2>⏪ Watch From Revision</h2>
+      <p class="section-desc">Replay missed events by starting a watch from a specific revision. No events are ever lost.</p>
+
+      <div class="replay-viz">
+        <div class="replay-scenario">
+          <div class="rs-step">
+            <div class="rs-num">1</div>
+            <div class="rs-text">Client watches /pods/ from revision 1</div>
+          </div>
+          <div class="rs-step">
+            <div class="rs-num">2</div>
+            <div class="rs-text">Client disconnects (crash, network issue)</div>
+          </div>
+          <div class="rs-step">
+            <div class="rs-num">3</div>
+            <div class="rs-text">Changes happen at revisions 5, 6, 7</div>
+          </div>
+          <div class="rs-step highlight">
+            <div class="rs-num">4</div>
+            <div class="rs-text">Client reconnects: Watch /pods/ <strong>from revision 5</strong></div>
+          </div>
+          <div class="rs-step">
+            <div class="rs-num">5</div>
+            <div class="rs-text">Receives events 5, 6, 7 → no gaps!</div>
+          </div>
+        </div>
+
+        <div class="replay-note">
+          ⚠️ If revision 5 has been <strong>compacted</strong>, the watch returns an error. The client must do a full re-list (like Kubernetes' relist) to rebuild state.
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 How Kubernetes Uses Watch</h3>
+          <p>
+            Every Kubernetes controller (Deployment, ReplicaSet, etc.) watches the API server, which watches etcd.
+            When you <code>kubectl apply</code>, etcd increments the revision, the API server's watch fires,
+            and the controller reconciles. This is why Kubernetes is "eventually consistent" — the watch-reconcile
+            loop runs continuously.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🗜️ Compaction Strategy</h3>
+          <p>
+            etcd grows forever without compaction. Kubernetes auto-compacts every 5 minutes, keeping only the
+            latest revision. For custom apps, compact based on time or revision count. After compaction, run
+            <code>etcdctl defrag</code> to reclaim disk space.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Watch Multiplexing</h3>
+          <p>
+            A single gRPC stream can carry multiple watches (different keys/prefixes). The server multiplexes
+            events efficiently. etcd 3.4+ uses a shared watch event loop — watching 10,000 keys costs
+            nearly the same as watching 1.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Progress Notifications</h3>
+          <p>
+            If no events happen for a while, how do you know the watch is still alive? etcd sends
+            <strong>progress notifications</strong> — periodic heartbeats with the latest revision.
+            The client knows it hasn't missed anything and the connection is healthy.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://etcd.io/docs/v3.5/learning/api/#watch-api" target="_blank">etcd Watch API Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20etcd%20Watch%20%26%20Revisions%20Visualizer&url=https://systeminternals.dev/etcd/watch-revisions/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/etcd/watch-revisions/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/etcd/watch-revisions/&t=Interactive%20etcd%20Watch%20%26%20Revisions%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #34d399, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(52,211,153,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #60a5fa; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* MVCC */
+  .mvcc-section { margin-bottom: 50px; }
+  .mvcc-input-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .mvcc-input-row select, .mvcc-input-row input { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-family: 'Monaco','Menlo',monospace; font-size: 0.85rem; }
+  .mvcc-input-row select option { background: #1a1a2e; }
+
+  .revision-timeline { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .rt-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; }
+  .rt-entries { display: flex; gap: 4px; overflow-x: auto; padding: 4px 0; min-height: 50px; align-items: flex-end; }
+  :global(.rt-entry) { min-width: 70px; padding: 6px 10px; border-radius: 8px; font-size: 0.7rem; font-family: 'Monaco','Menlo',monospace; text-align: center; animation: entryAppear 0.3s ease-out; flex-shrink: 0; }
+  @keyframes entryAppear { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.rt-entry.put) { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25); color: #6ee7b7; }
+  :global(.rt-entry.delete) { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
+  :global(.rt-entry.compacted) { opacity: 0.25; }
+  :global(.rt-rev) { font-weight: 700; font-size: 0.75rem; }
+  :global(.rt-key) { font-size: 0.6rem; color: #888; }
+
+  .mvcc-current { padding: 10px 16px; background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.2); border-radius: 10px; font-size: 0.9rem; color: #ccc; margin-bottom: 12px; }
+  .mvcc-current strong { color: #60a5fa; }
+  .mvcc-compact { float: right; font-size: 0.85rem; color: #888; }
+  .mvcc-compact strong { color: #f97316; }
+
+  .mvcc-controls { display: flex; gap: 12px; }
+
+  /* Watch */
+  .watch-section { margin-bottom: 50px; }
+  .watch-viz { display: flex; gap: 16px; }
+  .watch-setup { flex: 1; }
+  .watch-events { flex: 1.5; }
+  .ws-label { font-size: 0.85rem; font-weight: 700; color: #34d399; margin-bottom: 10px; text-transform: uppercase; }
+  .watch-list { display: flex; flex-direction: column; gap: 6px; }
+  .watch-item { padding: 10px 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; transition: all 0.3s; }
+  .watch-item.active { border-color: rgba(52,211,153,0.3); }
+  .wi-prefix { font-size: 0.85rem; font-weight: 600; color: #ccc; }
+  .wi-rev { font-size: 0.7rem; color: #888; }
+  .wi-events { font-size: 0.75rem; color: #34d399; margin-top: 4px; }
+
+  .event-log { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 14px; max-height: 250px; overflow-y: auto; }
+  .ev-empty { color: #555; font-size: 0.85rem; text-align: center; padding: 40px 0; }
+  :global(.ev-entry) { padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; margin-bottom: 4px; animation: entryAppear 0.3s; }
+  :global(.ev-entry.PUT) { background: rgba(52,211,153,0.08); border-left: 3px solid #34d399; color: #6ee7b7; }
+  :global(.ev-entry.DELETE) { background: rgba(239,68,68,0.08); border-left: 3px solid #ef4444; color: #fca5a5; }
+
+  /* Replay */
+  .replay-section { margin-bottom: 50px; }
+  .replay-scenario { display: flex; flex-direction: column; gap: 0; margin-bottom: 16px; }
+  .rs-step { display: flex; gap: 14px; padding: 12px 16px; border-left: 3px solid rgba(255,255,255,0.1); }
+  .rs-step.highlight { border-left-color: #34d399; background: rgba(52,211,153,0.05); border-radius: 0 10px 10px 0; }
+  .rs-num { width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #888; flex-shrink: 0; }
+  .rs-step.highlight .rs-num { background: rgba(52,211,153,0.3); color: #34d399; }
+  .rs-text { font-size: 0.9rem; color: #ccc; }
+  .rs-text strong { color: #34d399; }
+  .replay-note { padding: 12px 16px; background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.2); border-radius: 10px; font-size: 0.85rem; color: #fbbf24; }
+  .replay-note strong { color: #fbbf24; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(52,211,153,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .watch-viz { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== MVCC ==========
+  let revision = 0;
+  let compactedThrough = 0;
+  interface RevEntry { rev: number; key: string; value: string; type: 'put' | 'delete'; }
+  let revisions: RevEntry[] = [];
+  let watchEvents: [number, number] = [0, 0]; // event counts for watch 0, 1
+  let hasWatch2 = false;
+
+  function renderRevisions() {
+    const el = document.getElementById('rtEntries')!;
+    el.innerHTML = revisions.map(r =>
+      `<div class="rt-entry ${r.type} ${r.rev <= compactedThrough ? 'compacted' : ''}">
+        <div class="rt-rev">r${r.rev}</div>
+        <div class="rt-key">${r.key}</div>
+        <div style="font-size:0.6rem;color:#aaa">${r.type === 'put' ? r.value : '🗑️'}</div>
+      </div>`
+    ).join('');
+    el.scrollLeft = el.scrollWidth;
+    document.getElementById('mvccRevision')!.textContent = String(revision);
+    document.getElementById('mvccCompacted')!.textContent = String(compactedThrough);
+  }
+
+  function fireWatchEvent(key: string, type: string, value: string) {
+    const eventLog = document.getElementById('eventLog')!;
+    if (eventLog.querySelector('.ev-empty')) eventLog.innerHTML = '';
+
+    // Check which watches match
+    if (key.startsWith('/pods/')) {
+      watchEvents[0]++;
+      document.getElementById('w0Events')!.textContent = `${watchEvents[0]} events`;
+      eventLog.innerHTML = `<div class="ev-entry ${type}">👁️ /pods/* → ${type} ${key} = "${value}" (rev ${revision})</div>` + eventLog.innerHTML;
+    }
+    if (key === '/config/db') {
+      watchEvents[1]++;
+      document.getElementById('w1Events')!.textContent = `${watchEvents[1]} events`;
+      eventLog.innerHTML = `<div class="ev-entry ${type}">👁️ /config/db → ${type} ${key} = "${value}" (rev ${revision})</div>` + eventLog.innerHTML;
+    }
+    if (hasWatch2 && key.startsWith('/services/')) {
+      eventLog.innerHTML = `<div class="ev-entry ${type}">👁️ /services/* → ${type} ${key} = "${value}" (rev ${revision})</div>` + eventLog.innerHTML;
+    }
+  }
+
+  document.getElementById('mvccPutBtn')?.addEventListener('click', () => {
+    const key = (document.getElementById('mvccKey') as HTMLSelectElement).value;
+    const value = (document.getElementById('mvccValue') as HTMLInputElement).value || 'value';
+    revision++;
+    revisions.push({ rev: revision, key, value, type: 'put' });
+    renderRevisions();
+    fireWatchEvent(key, 'PUT', value);
+  });
+
+  document.getElementById('mvccDeleteBtn')?.addEventListener('click', () => {
+    const key = (document.getElementById('mvccKey') as HTMLSelectElement).value;
+    revision++;
+    revisions.push({ rev: revision, key, value: '', type: 'delete' });
+    renderRevisions();
+    fireWatchEvent(key, 'DELETE', '');
+  });
+
+  document.getElementById('mvccCompactBtn')?.addEventListener('click', () => {
+    if (revision <= 1) return;
+    compactedThrough = revision - 1;
+    renderRevisions();
+    const eventLog = document.getElementById('eventLog')!;
+    eventLog.innerHTML = `<div class="ev-entry PUT" style="border-left-color:#fbbf24;color:#fde68a">🗜️ Compacted through revision ${compactedThrough} — old versions removed</div>` + eventLog.innerHTML;
+  });
+
+  document.getElementById('mvccResetBtn')?.addEventListener('click', () => {
+    revision = 0;
+    compactedThrough = 0;
+    revisions = [];
+    watchEvents = [0, 0];
+    renderRevisions();
+    document.getElementById('eventLog')!.innerHTML = '<div class="ev-empty">Make changes above — events will appear here</div>';
+    document.getElementById('w0Events')!.textContent = '0 events';
+    document.getElementById('w1Events')!.textContent = '0 events';
+  });
+
+  document.getElementById('addWatchBtn')?.addEventListener('click', () => {
+    if (hasWatch2) return;
+    hasWatch2 = true;
+    const list = document.getElementById('watchList')!;
+    list.innerHTML += `<div class="watch-item active" id="watch2"><div class="wi-prefix">👁️ /services/ (prefix)</div><div class="wi-rev">from rev: ${revision + 1}</div><div class="wi-events">0 events</div></div>`;
+    (document.getElementById('addWatchBtn') as HTMLButtonElement).disabled = true;
+    // Add /services/api to key selector
+    const select = document.getElementById('mvccKey') as HTMLSelectElement;
+    const opt = document.createElement('option');
+    opt.value = '/services/api';
+    opt.textContent = '/services/api';
+    select.appendChild(opt);
+  });
+
+  // Init
+  renderRevisions();
+</script>
+</BaseLayout>

@@ -1,0 +1,535 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Proof of Stake & Consensus" 
+  description="Interactive visualization of Ethereum's Proof of Stake: slots, epochs, attestations, validator lifecycle, and finality"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Ethereum", href: "/ethereum/" },
+    { label: "Proof of Stake", href: "/ethereum/proof-of-stake/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔒 Proof of Stake & Consensus</h1>
+      <p class="subtitle">Slots, Epochs, Attestations — How Ethereum Agrees on the Chain</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Since The Merge (Sept 2022), Ethereum uses <strong>Proof of Stake</strong> instead of mining.
+          Validators stake 32 ETH as collateral and are randomly selected to <em>propose blocks</em> (one per slot)
+          or <em>attest</em> to blocks they see. Time is divided into <strong>slots</strong> (12 seconds) and
+          <strong>epochs</strong> (32 slots = 6.4 minutes). The <em>LMD-GHOST</em> fork choice rule picks the
+          heaviest branch, and <em>Casper FFG</em> provides finality — once finalized, a block can't be reverted
+          without slashing ≥1/3 of all staked ETH.
+        </p>
+      </div>
+    </section>
+
+    <!-- Slot & Epoch Timeline -->
+    <section class="timeline-section">
+      <h2>⏱️ Slots & Epochs</h2>
+      <p class="section-desc">Each slot is 12 seconds. 32 slots form an epoch. Watch the chain progress.</p>
+
+      <div class="epoch-viz">
+        <div class="epoch-label">Epoch <strong id="epochNum">0</strong></div>
+        <div class="slots-grid" id="slotsGrid"></div>
+        <div class="epoch-stats">
+          <span>Slot: <strong id="currentSlot">0</strong>/31</span>
+          <span>Proposer: <strong id="currentProposer">—</strong></span>
+          <span>Attestations: <strong id="attCount">0</strong></span>
+          <span>Participation: <strong id="participation">0%</strong></span>
+        </div>
+      </div>
+
+      <div class="timeline-controls">
+        <button id="slotStepBtn" class="action-btn primary-btn">⏭ Next Slot (12s)</button>
+        <button id="epochRunBtn" class="action-btn secondary-btn">▶ Run Epoch</button>
+        <button id="missSlotBtn" class="action-btn danger-btn">💤 Miss Next Slot</button>
+        <button id="timelineResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="slot-log" id="slotLog"></div>
+    </section>
+
+    <!-- Validator Lifecycle -->
+    <section class="validator-section">
+      <h2>👤 Validator Lifecycle</h2>
+      <p class="section-desc">Click each state to learn about it.</p>
+
+      <div class="val-states">
+        <div class="val-state active" data-state="pending">
+          <div class="vs-icon">⏳</div>
+          <div class="vs-name">Pending</div>
+        </div>
+        <div class="val-arrow">→</div>
+        <div class="val-state" data-state="active">
+          <div class="vs-icon">✅</div>
+          <div class="vs-name">Active</div>
+        </div>
+        <div class="val-arrow">→</div>
+        <div class="val-state" data-state="exiting">
+          <div class="vs-icon">🚪</div>
+          <div class="vs-name">Exiting</div>
+        </div>
+        <div class="val-arrow">→</div>
+        <div class="val-state" data-state="withdrawn">
+          <div class="vs-icon">💰</div>
+          <div class="vs-name">Withdrawn</div>
+        </div>
+      </div>
+
+      <div class="val-slashed-path">
+        <span class="vsp-label">or</span>
+        <div class="val-state" data-state="slashed">
+          <div class="vs-icon">🔪</div>
+          <div class="vs-name">Slashed</div>
+        </div>
+      </div>
+
+      <div class="val-desc" id="valDesc">
+        <strong>Pending:</strong> Validator deposited 32 ETH. Waiting in the activation queue — can take hours to days depending on queue length. The entry rate is limited to prevent rapid validator set changes.
+      </div>
+    </section>
+
+    <!-- Attestation Simulator -->
+    <section class="attest-section">
+      <h2>📝 Attestation Flow</h2>
+      <p class="section-desc">Each slot, a committee of validators attests to the head of the chain.</p>
+
+      <div class="attest-viz">
+        <div class="attest-block" id="attestBlock">
+          <div class="ab-label">Proposed Block (Slot <span id="abSlot">N</span>)</div>
+          <div class="ab-hash">0xabc1...def2</div>
+        </div>
+
+        <div class="attest-committee" id="attestCommittee">
+          <div class="ac-label">Committee (128 validators)</div>
+          <div class="ac-grid" id="acGrid"></div>
+          <div class="ac-stats">
+            <span>Attested: <strong id="acAttested">0</strong>/128</span>
+            <span>Weight: <strong id="acWeight">0 ETH</strong></span>
+          </div>
+        </div>
+
+        <div class="attest-result" id="attestResult">
+          Click "Collect Attestations" to see validators vote
+        </div>
+      </div>
+
+      <div class="attest-controls">
+        <button id="collectAttBtn" class="action-btn primary-btn">📝 Collect Attestations</button>
+        <button id="attestResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Finality -->
+    <section class="finality-section">
+      <h2>🏁 Finality (Casper FFG)</h2>
+      <p class="section-desc">Two epochs of supermajority (2/3) attestations = finality. Irreversible.</p>
+
+      <div class="finality-viz">
+        <div class="fin-epoch" id="finEpoch0">
+          <div class="fe-label">Epoch N</div>
+          <div class="fe-status" id="feStatus0">Unfinalized</div>
+          <div class="fe-bar"><div class="fe-fill" id="feFill0" style="width:0%"></div></div>
+          <div class="fe-pct" id="fePct0">0%</div>
+        </div>
+        <div class="fin-arrow">→</div>
+        <div class="fin-epoch" id="finEpoch1">
+          <div class="fe-label">Epoch N+1</div>
+          <div class="fe-status" id="feStatus1">Unfinalized</div>
+          <div class="fe-bar"><div class="fe-fill" id="feFill1" style="width:0%"></div></div>
+          <div class="fe-pct" id="fePct1">0%</div>
+        </div>
+        <div class="fin-arrow">→</div>
+        <div class="fin-result" id="finResult">
+          <div class="fr-icon">⏳</div>
+          <div class="fr-text">Waiting for attestations...</div>
+        </div>
+      </div>
+
+      <div class="finality-controls">
+        <button id="finSimBtn" class="action-btn primary-btn">▶ Simulate Finality</button>
+        <button id="finFailBtn" class="action-btn danger-btn">💥 Simulate Finality Failure</button>
+        <button id="finResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Key Numbers -->
+    <section class="numbers-section">
+      <h2>📊 Key Numbers</h2>
+      <div class="numbers-grid">
+        <div class="num-card"><div class="num-value">32 ETH</div><div class="num-label">Minimum stake</div></div>
+        <div class="num-card"><div class="num-value">12 sec</div><div class="num-label">Slot time</div></div>
+        <div class="num-card"><div class="num-value">32 slots</div><div class="num-label">Per epoch (6.4 min)</div></div>
+        <div class="num-card"><div class="num-value">~1M</div><div class="num-label">Active validators</div></div>
+        <div class="num-card"><div class="num-value">~12.8 min</div><div class="num-label">Time to finality</div></div>
+        <div class="num-card"><div class="num-value">1/3</div><div class="num-label">Stake to halt finality</div></div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Slashing Conditions</h3>
+          <p>
+            Validators get slashed (lose ETH + forced exit) for two offenses:
+            <strong>Double proposing</strong> (two blocks in same slot) and
+            <strong>surround voting</strong> (contradictory attestations that could enable double-spend).
+            The penalty scales with how many others are slashed simultaneously — if 1/3 gets slashed, they lose their entire 32 ETH.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔀 Fork Choice: LMD-GHOST</h3>
+          <p>
+            "Latest Message Driven - Greedy Heaviest Observed Sub-Tree." When the chain forks, validators follow the branch with the most attestation weight. Each validator's <em>latest</em> attestation counts (not all historical ones). This makes the fork choice responsive to current network conditions.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🏠 Solo Staking vs Pools</h3>
+          <p>
+            Solo staking (32 ETH + your own hardware) is the gold standard for decentralization. <strong>Liquid staking</strong> (Lido, Rocket Pool) lets you stake any amount and get a tradeable receipt token (stETH, rETH). Lido alone controls ~28% of staked ETH — a centralization concern.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Single Slot Finality (SSF)</h3>
+          <p>
+            Currently, finality takes ~12.8 minutes (2 epochs). <strong>SSF</strong> is a research goal to finalize blocks within a single slot (12 seconds). This requires aggregating signatures from ~1M validators in real-time — a massive cryptographic and networking challenge.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://ethereum.org/en/developers/docs/consensus-mechanisms/pos/" target="_blank">Ethereum PoS Documentation</a> and <a href="https://eth2book.info/" target="_blank">Upgrading Ethereum</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Ethereum%20Proof%20of%20Stake%20Visualizer&url=https://systeminternals.dev/ethereum/proof-of-stake/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/ethereum/proof-of-stake/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/ethereum/proof-of-stake/&t=Interactive%20Ethereum%20Proof%20of%20Stake%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #818cf8, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(129,140,248,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #818cf8; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #818cf8, #6366f1); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(129,140,248,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Slots Grid */
+  .timeline-section { margin-bottom: 50px; }
+  .epoch-viz { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .epoch-label { font-size: 0.85rem; font-weight: 700; color: #818cf8; margin-bottom: 10px; }
+  .slots-grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-bottom: 10px; }
+  :global(.slot-cell) { aspect-ratio: 1; border-radius: 4px; transition: all 0.3s; cursor: default; }
+  :global(.slot-cell.empty) { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); }
+  :global(.slot-cell.proposed) { background: rgba(52,211,153,0.25); border: 1px solid rgba(52,211,153,0.4); }
+  :global(.slot-cell.missed) { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.35); }
+  :global(.slot-cell.current) { background: rgba(129,140,248,0.3); border: 1px solid rgba(129,140,248,0.5); box-shadow: 0 0 8px rgba(129,140,248,0.3); }
+  .epoch-stats { display: flex; gap: 20px; font-size: 0.85rem; color: #888; flex-wrap: wrap; }
+  .epoch-stats strong { color: #818cf8; }
+  .timeline-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .slot-log { font-size: 0.8rem; max-height: 80px; overflow-y: auto; color: #888; }
+  :global(.slog) { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+  /* Validator States */
+  .validator-section { margin-bottom: 50px; }
+  .val-states { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 8px; }
+  .val-state { padding: 14px 20px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.3s; min-width: 80px; }
+  .val-state:hover { transform: translateY(-2px); }
+  .val-state.active { border-color: rgba(129,140,248,0.5); background: rgba(129,140,248,0.08); }
+  .vs-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .vs-name { font-size: 0.85rem; font-weight: 700; color: #fff; }
+  .val-arrow { color: #555; font-size: 1.3rem; }
+  .val-slashed-path { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 16px; }
+  .vsp-label { color: #555; font-size: 0.8rem; }
+  .val-desc { padding: 14px 18px; background: rgba(129,140,248,0.06); border: 1px solid rgba(129,140,248,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .val-desc strong { color: #818cf8; }
+
+  /* Attestation */
+  .attest-section { margin-bottom: 50px; }
+  .attest-viz { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .attest-block { background: rgba(129,140,248,0.1); border: 1px solid rgba(129,140,248,0.3); border-radius: 12px; padding: 16px; text-align: center; min-width: 160px; }
+  .ab-label { font-size: 0.85rem; font-weight: 700; color: #818cf8; margin-bottom: 4px; }
+  .ab-hash { font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #888; }
+  .attest-committee { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; }
+  .ac-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 8px; }
+  .ac-grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-bottom: 8px; }
+  :global(.ac-dot) { aspect-ratio: 1; border-radius: 3px; transition: all 0.15s; }
+  :global(.ac-dot.waiting) { background: rgba(255,255,255,0.05); }
+  :global(.ac-dot.attested) { background: rgba(52,211,153,0.4); }
+  :global(.ac-dot.missed) { background: rgba(239,68,68,0.3); }
+  .ac-stats { display: flex; gap: 16px; font-size: 0.8rem; color: #888; }
+  .ac-stats strong { color: #34d399; }
+  .attest-result { min-width: 160px; padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; font-size: 0.85rem; color: #888; text-align: center; }
+  .attest-controls { display: flex; gap: 12px; }
+
+  /* Finality */
+  .finality-section { margin-bottom: 50px; }
+  .finality-viz { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+  .fin-epoch { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; text-align: center; transition: all 0.5s; }
+  .fin-epoch.justified { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.05); }
+  .fin-epoch.finalized { border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.05); }
+  .fe-label { font-size: 0.8rem; color: #888; margin-bottom: 4px; }
+  .fe-status { font-size: 0.85rem; font-weight: 700; color: #888; margin-bottom: 8px; }
+  .fe-bar { height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+  .fe-fill { height: 100%; border-radius: 4px; transition: width 0.5s; background: linear-gradient(90deg, #818cf8, #60a5fa); }
+  .fe-pct { font-size: 0.8rem; color: #888; }
+  .fin-arrow { color: #555; font-size: 1.3rem; }
+  .fin-result { min-width: 140px; text-align: center; padding: 16px; }
+  .fr-icon { font-size: 2rem; margin-bottom: 4px; }
+  .fr-text { font-size: 0.85rem; color: #888; }
+  .finality-controls { display: flex; gap: 12px; }
+
+  /* Numbers */
+  .numbers-section { margin-bottom: 50px; }
+  .numbers-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .num-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; text-align: center; }
+  .num-value { font-size: 1.3rem; font-weight: 700; color: #818cf8; margin-bottom: 4px; }
+  .num-label { font-size: 0.75rem; color: #888; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #818cf8; }
+  .explain-card em { color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(129,140,248,0.08), rgba(96,165,250,0.08)); border-color: rgba(129,140,248,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #818cf8; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .slots-grid { grid-template-columns: repeat(8, 1fr); }
+    .val-states { flex-wrap: wrap; }
+    .attest-viz { flex-direction: column; }
+    .finality-viz { flex-direction: column; }
+    .numbers-grid { grid-template-columns: repeat(3, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== SLOTS TIMELINE ==========
+  let currentSlot = 0;
+  let slotStates: ('empty' | 'proposed' | 'missed')[] = new Array(32).fill('empty');
+  let missNext = false;
+  const PROPOSERS = ['Lido-1', 'CoinBase-3', 'Solo-47', 'RocketPool-12', 'Kiln-8', 'Solo-182', 'Figment-2', 'Allnodes-5'];
+
+  function initSlots() {
+    const grid = document.getElementById('slotsGrid')!;
+    grid.innerHTML = '';
+    for (let i = 0; i < 32; i++) {
+      grid.innerHTML += `<div class="slot-cell empty" id="slot${i}" title="Slot ${i}"></div>`;
+    }
+  }
+
+  function renderSlots() {
+    for (let i = 0; i < 32; i++) {
+      const el = document.getElementById(`slot${i}`)!;
+      el.className = `slot-cell ${slotStates[i]}`;
+      if (i === currentSlot && slotStates[i] === 'empty') el.className = 'slot-cell current';
+    }
+    document.getElementById('currentSlot')!.textContent = String(currentSlot);
+    const proposed = slotStates.filter(s => s === 'proposed').length;
+    const total = slotStates.filter(s => s !== 'empty').length;
+    document.getElementById('participation')!.textContent = total > 0 ? (proposed / total * 100).toFixed(0) + '%' : '0%';
+    document.getElementById('attCount')!.textContent = String(proposed * Math.floor(80 + Math.random() * 48));
+  }
+
+  document.getElementById('slotStepBtn')?.addEventListener('click', () => {
+    if (currentSlot >= 32) return;
+    const proposer = PROPOSERS[Math.floor(Math.random() * PROPOSERS.length)];
+    if (missNext) {
+      slotStates[currentSlot] = 'missed';
+      const logEl = document.getElementById('slotLog')!;
+      logEl.innerHTML += `<div class="slog">💤 Slot ${currentSlot}: MISSED (proposer ${proposer} offline)</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+      missNext = false;
+    } else {
+      slotStates[currentSlot] = 'proposed';
+      document.getElementById('currentProposer')!.textContent = proposer;
+      const logEl = document.getElementById('slotLog')!;
+      logEl.innerHTML += `<div class="slog">✅ Slot ${currentSlot}: proposed by ${proposer} (${Math.floor(100 + Math.random() * 200)} txs)</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    currentSlot++;
+    renderSlots();
+
+    if (currentSlot >= 32) {
+      const logEl = document.getElementById('slotLog')!;
+      logEl.innerHTML += `<div class="slog">🏁 Epoch complete! ${slotStates.filter(s => s === 'proposed').length}/32 slots proposed.</div>`;
+    }
+  });
+
+  document.getElementById('epochRunBtn')?.addEventListener('click', async () => {
+    while (currentSlot < 32) {
+      const proposer = PROPOSERS[Math.floor(Math.random() * PROPOSERS.length)];
+      const miss = Math.random() < 0.05;
+      slotStates[currentSlot] = miss ? 'missed' : 'proposed';
+      if (!miss) document.getElementById('currentProposer')!.textContent = proposer;
+      currentSlot++;
+      renderSlots();
+      await new Promise(r => setTimeout(r, 80));
+    }
+    const logEl = document.getElementById('slotLog')!;
+    logEl.innerHTML += `<div class="slog">🏁 Epoch complete! ${slotStates.filter(s => s === 'proposed').length}/32 slots proposed.</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('missSlotBtn')?.addEventListener('click', () => { missNext = true; });
+
+  document.getElementById('timelineResetBtn')?.addEventListener('click', () => {
+    currentSlot = 0;
+    slotStates = new Array(32).fill('empty');
+    missNext = false;
+    document.getElementById('slotLog')!.innerHTML = '';
+    document.getElementById('currentProposer')!.textContent = '—';
+    document.getElementById('epochNum')!.textContent = String(parseInt(document.getElementById('epochNum')!.textContent!) + 1);
+    renderSlots();
+  });
+
+  // ========== VALIDATOR STATES ==========
+  const VAL_DESCS: Record<string, string> = {
+    pending: '<strong>Pending:</strong> Validator deposited 32 ETH. Waiting in the activation queue — can take hours to days depending on queue length. The entry rate is limited to prevent rapid validator set changes.',
+    active: '<strong>Active:</strong> Validator is part of the active set. Gets randomly assigned to propose blocks and attest every epoch. Earns ~3-5% APR on staked ETH. Must stay online or face inactivity penalties.',
+    exiting: '<strong>Exiting:</strong> Validator initiated voluntary exit. Must wait through the exit queue (same rate limit as entry). During exit, still expected to perform duties. Takes 4+ epochs minimum.',
+    withdrawn: '<strong>Withdrawn:</strong> Validator\'s stake is unlocked and returned. Since Shanghai/Capella upgrade, withdrawals are automatic — no action needed. Full withdrawal returns 32 ETH + rewards.',
+    slashed: '<strong>Slashed:</strong> Validator committed a slashable offense (double propose or surround vote). Loses at least 1/32 of stake immediately, plus a correlation penalty based on how many others were slashed in the same period. Forced exit with ~36 day delay.',
+  };
+
+  document.querySelectorAll('.val-state').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.val-state').forEach(e => e.classList.remove('active'));
+      el.classList.add('active');
+      document.getElementById('valDesc')!.innerHTML = VAL_DESCS[(el as HTMLElement).dataset.state!];
+    });
+  });
+
+  // ========== ATTESTATION ==========
+  function initAttestGrid() {
+    const grid = document.getElementById('acGrid')!;
+    grid.innerHTML = '';
+    for (let i = 0; i < 128; i++) {
+      grid.innerHTML += `<div class="ac-dot waiting" id="acdot${i}"></div>`;
+    }
+  }
+
+  document.getElementById('collectAttBtn')?.addEventListener('click', async () => {
+    let attested = 0;
+    for (let i = 0; i < 128; i++) {
+      const el = document.getElementById(`acdot${i}`)!;
+      const didAttest = Math.random() < 0.96;
+      el.className = `ac-dot ${didAttest ? 'attested' : 'missed'}`;
+      if (didAttest) attested++;
+      if (i % 8 === 0) await new Promise(r => setTimeout(r, 30));
+    }
+    document.getElementById('acAttested')!.textContent = String(attested);
+    document.getElementById('acWeight')!.textContent = `${attested * 32} ETH`;
+    const result = document.getElementById('attestResult')!;
+    result.innerHTML = attested >= 86 ? `✅ Supermajority! ${attested}/128 attested (${(attested/128*100).toFixed(0)}%)` : `⚠️ Low participation: ${attested}/128`;
+    result.style.color = attested >= 86 ? '#34d399' : '#fbbf24';
+  });
+
+  document.getElementById('attestResetBtn')?.addEventListener('click', () => {
+    initAttestGrid();
+    document.getElementById('acAttested')!.textContent = '0';
+    document.getElementById('acWeight')!.textContent = '0 ETH';
+    document.getElementById('attestResult')!.innerHTML = 'Click "Collect Attestations" to see validators vote';
+    document.getElementById('attestResult')!.style.color = '#888';
+  });
+
+  // ========== FINALITY ==========
+  document.getElementById('finSimBtn')?.addEventListener('click', async () => {
+    // Epoch N: justified
+    for (let pct = 0; pct <= 72; pct += 4) {
+      document.getElementById('feFill0')!.style.width = pct + '%';
+      document.getElementById('fePct0')!.textContent = pct + '%';
+      await new Promise(r => setTimeout(r, 50));
+    }
+    document.getElementById('feStatus0')!.textContent = '✓ Justified';
+    document.getElementById('feStatus0')!.style.color = '#fbbf24';
+    document.getElementById('finEpoch0')!.classList.add('justified');
+
+    // Epoch N+1: justified → N finalized
+    for (let pct = 0; pct <= 69; pct += 3) {
+      document.getElementById('feFill1')!.style.width = pct + '%';
+      document.getElementById('fePct1')!.textContent = pct + '%';
+      await new Promise(r => setTimeout(r, 50));
+    }
+    document.getElementById('feStatus1')!.textContent = '✓ Justified';
+    document.getElementById('feStatus1')!.style.color = '#fbbf24';
+    document.getElementById('finEpoch1')!.classList.add('justified');
+
+    // Finalized!
+    document.getElementById('feStatus0')!.textContent = '🔒 FINALIZED';
+    document.getElementById('feStatus0')!.style.color = '#34d399';
+    document.getElementById('finEpoch0')!.classList.remove('justified');
+    document.getElementById('finEpoch0')!.classList.add('finalized');
+    document.getElementById('finResult')!.innerHTML = '<div class="fr-icon">🔒</div><div class="fr-text" style="color:#34d399;font-weight:700">Epoch N is FINALIZED<br><span style="font-weight:400;font-size:0.75rem">Reverting requires slashing ≥1/3 of all stake</span></div>';
+  });
+
+  document.getElementById('finFailBtn')?.addEventListener('click', async () => {
+    for (let pct = 0; pct <= 55; pct += 5) {
+      document.getElementById('feFill0')!.style.width = pct + '%';
+      document.getElementById('fePct0')!.textContent = pct + '%';
+      await new Promise(r => setTimeout(r, 50));
+    }
+    document.getElementById('feStatus0')!.textContent = '❌ Not justified (55%)';
+    document.getElementById('feStatus0')!.style.color = '#ef4444';
+    document.getElementById('finResult')!.innerHTML = '<div class="fr-icon">⚠️</div><div class="fr-text" style="color:#ef4444;font-weight:700">Finality failure!<br><span style="font-weight:400;font-size:0.75rem">Need 66.7% — inactivity leak begins</span></div>';
+  });
+
+  document.getElementById('finResetBtn')?.addEventListener('click', () => {
+    ['finEpoch0', 'finEpoch1'].forEach(id => {
+      document.getElementById(id)!.classList.remove('justified', 'finalized');
+    });
+    ['feFill0', 'feFill1'].forEach(id => { document.getElementById(id)!.style.width = '0%'; });
+    ['fePct0', 'fePct1'].forEach(id => { document.getElementById(id)!.textContent = '0%'; });
+    ['feStatus0', 'feStatus1'].forEach(id => {
+      const el = document.getElementById(id)!;
+      el.textContent = 'Unfinalized';
+      el.style.color = '#888';
+    });
+    document.getElementById('finResult')!.innerHTML = '<div class="fr-icon">⏳</div><div class="fr-text">Waiting for attestations...</div>';
+  });
+
+  // Init
+  initSlots();
+  renderSlots();
+  initAttestGrid();
+</script>
+</BaseLayout>

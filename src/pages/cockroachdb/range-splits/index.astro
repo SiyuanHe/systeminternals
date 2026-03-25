@@ -1,0 +1,752 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Range Splits & Merges"
+  description="Interactive visualization of CockroachDB range splits, merges, rebalancing, and leaseholder transfers"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "CockroachDB", href: "/cockroachdb/" },
+    { label: "Range Splits & Merges", href: "/cockroachdb/range-splits/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>✂️ Range Splits & Merges</h1>
+    <p class="subtitle">How CockroachDB Splits, Merges, and Rebalances 512MB Ranges Across Nodes</p>
+  </header>
+
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        CockroachDB organizes all data into contiguous <strong>ranges</strong>, each targeting
+        <em>512MB</em> by default. When a range grows beyond its threshold, it <strong>splits</strong>
+        into two halves at a key boundary. When adjacent ranges shrink below a minimum, they
+        <strong>merge</strong> back together. Each range is replicated via <em>Raft</em> across
+        multiple nodes (default replication factor of 3). A <strong>leaseholder</strong> serves
+        all reads and proposes all writes for its range. The <em>store rebalancer</em> continuously
+        moves ranges across nodes to maintain even distribution of data and load.
+      </p>
+    </div>
+  </section>
+
+  <!-- 1. Range Keyspace -->
+  <section class="flow-section">
+    <h2>🗂️ Range Keyspace</h2>
+    <p class="section-desc">The entire keyspace is divided into contiguous ranges. Click a range to see its key boundaries and metadata.</p>
+
+    <div class="flow-controls">
+      <button id="ksInsertBtn" class="action-btn primary-btn">📝 Insert Data</button>
+      <button id="ksInsert10Btn" class="action-btn step-btn">⚡ Insert ×10</button>
+      <button id="ksResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="keyspace-viz" id="keyspaceViz"></div>
+    <div class="range-info" id="rangeInfo">
+      <span class="info-placeholder">Click a range to inspect</span>
+    </div>
+  </section>
+
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📏 Range Size Target</h3>
+        <p>
+          Default target is <strong>512MB</strong> (<code>range_max_bytes</code>). When a range exceeds
+          this, the system finds a split key near the midpoint of the data. Splits are fast — they're
+          just metadata operations in the Raft log, no data is physically moved.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔗 Contiguous & Sorted</h3>
+        <p>
+          Ranges cover the <em>entire</em> keyspace with no gaps. Every key belongs to exactly one range.
+          Range boundaries are chosen at key boundaries, so related rows (same table prefix) tend to
+          stay together, enabling efficient <strong>range scans</strong>.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📊 Range Metadata</h3>
+        <p>
+          Each range tracks: <strong>start/end key</strong>, <strong>leaseholder node</strong>,
+          <strong>replica locations</strong>, <strong>Raft leader</strong>, and <strong>MVCC stats</strong>
+          (live bytes, intent count, GC threshold). This metadata lives in special system ranges.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Split Animation -->
+  <section class="flow-section">
+    <h2>✂️ Range Splitting</h2>
+    <p class="section-desc">Watch a range grow beyond 512MB and automatically split. The split key is chosen near the data midpoint.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Split threshold: <strong id="splitThreshLabel">512</strong>MB</label>
+        <input type="range" id="splitThreshSlider" min="128" max="1024" step="128" value="512" class="slot-slider">
+      </div>
+      <button id="splitAddBtn" class="action-btn primary-btn">📦 Add 64MB</button>
+      <button id="splitAdd256Btn" class="action-btn step-btn">⚡ Add 256MB</button>
+      <button id="splitResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="splitStatus">
+      <span class="status-badge idle" id="splitBadge">1 RANGE</span>
+      <span class="status-text" id="splitStatusText">Range R1: 0 MB / 512 MB</span>
+    </div>
+
+    <div class="split-viz" id="splitViz"></div>
+    <div class="failover-timeline" id="splitTimeline"></div>
+  </section>
+
+  <!-- 3. Merge Animation -->
+  <section class="flow-section">
+    <h2>🔗 Range Merging</h2>
+    <p class="section-desc">Adjacent ranges below the minimum size are merged. Delete data to trigger merges.</p>
+
+    <div class="flow-controls">
+      <button id="mergeDeleteBtn" class="action-btn danger-btn">🗑️ Delete Data</button>
+      <button id="mergeTriggerBtn" class="action-btn step-btn">🔗 Trigger Merge Check</button>
+      <button id="mergeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="merge-viz" id="mergeViz"></div>
+    <div class="failover-timeline" id="mergeTimeline"></div>
+  </section>
+
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📉 Merge Threshold</h3>
+        <p>
+          Ranges below <code>range_min_bytes</code> (default <strong>128MB</strong>) are candidates for
+          merging with an adjacent range. Both ranges must be on the <em>same node</em> and their combined
+          size must stay under the max threshold. Merges reduce range count overhead.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>⏱️ Merge Queue</h3>
+        <p>
+          The <strong>merge queue</strong> runs periodically on each store. It identifies adjacent undersized
+          ranges, verifies they share a leaseholder, and proposes a merge via Raft. Merges are atomic —
+          both ranges' Raft groups must agree.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Rebalancing -->
+  <section class="flow-section">
+    <h2>⚖️ Rebalancing Across Nodes</h2>
+    <p class="section-desc">The store rebalancer moves ranges to maintain even distribution. Add/remove nodes to see rebalancing in action.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Nodes: <strong id="rebalNodeLabel">3</strong></label>
+        <input type="range" id="rebalNodeSlider" min="2" max="7" value="3" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Ranges: <strong id="rebalRangeLabel">12</strong></label>
+        <input type="range" id="rebalRangeSlider" min="6" max="30" value="12" class="slot-slider">
+      </div>
+      <button id="rebalBtn" class="action-btn primary-btn">⚖️ Rebalance</button>
+      <button id="rebalAddNodeBtn" class="action-btn step-btn">+ Add Node</button>
+      <button id="rebalResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="rebal-viz" id="rebalViz"></div>
+    <div class="rebal-stats" id="rebalStats"></div>
+    <div class="failover-timeline" id="rebalTimeline"></div>
+  </section>
+
+  <!-- 5. Leaseholder Transfers -->
+  <section class="flow-section">
+    <h2>🏷️ Leaseholder Transfers</h2>
+    <p class="section-desc">The leaseholder serves reads and coordinates writes. See how leases transfer to balance load.</p>
+
+    <div class="calculator-container">
+      <div class="lease-cluster" id="leaseCluster"></div>
+      <div class="flow-controls" style="margin-top:12px;">
+        <button id="leaseSimBtn" class="action-btn primary-btn">🔄 Simulate Load</button>
+        <button id="leaseTransferBtn" class="action-btn step-btn">📤 Transfer Lease</button>
+        <button id="leaseResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="failover-timeline" id="leaseTimeline"></div>
+    </div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://www.cockroachlabs.com/docs/stable/architecture/distribution-layer" target="_blank">CockroachDB Distribution Layer</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20CockroachDB%20Range%20Splits%20%26%20Rebalancing%20Visualizer&url=https://systeminternals.dev/cockroachdb/range-splits/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/cockroachdb/range-splits/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/cockroachdb/range-splits/&t=CockroachDB%20Range%20Splits%20%26%20Rebalancing" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 {
+    font-size: 2.5rem; margin-bottom: 10px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 1rem; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.05));
+    border: 1px solid rgba(99,102,241,0.3); border-radius: 16px;
+    padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #818cf8; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: #f0f0f0; }
+
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(99,102,241,0.4); }
+  .step-btn { background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; }
+  .step-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(168,85,247,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .flow-section { margin-bottom: 50px; }
+  .flow-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+  .flow-status {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+    padding: 12px 16px; background: rgba(255,255,255,0.03);
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .status-badge {
+    padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+  }
+  .status-badge.idle { background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .status-badge.splitting { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .status-badge.healthy { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .status-text { color: #aaa; font-size: 0.95rem; }
+
+  .slider-group { display: flex; align-items: center; gap: 8px; }
+  .slider-group label { font-size: 0.9rem; color: #aaa; white-space: nowrap; }
+  .slot-slider { width: 100px; accent-color: #6366f1; }
+
+  .calculator-container {
+    background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;
+  }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .explain-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px; padding: 20px;
+  }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { font-size: 0.92rem; color: #999; line-height: 1.7; }
+  .explain-card strong { color: #ddd; }
+  .explain-card em { color: #818cf8; font-style: normal; }
+  .explain-card code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+
+  .failover-timeline {
+    max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
+  }
+  :global(.timeline-entry) {
+    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    color: #aaa; animation: fadeIn 0.3s ease-out;
+  }
+  :global(.timeline-entry.info-step) { border-left: 3px solid #6366f1; }
+  :global(.timeline-entry.success-step) { border-left: 3px solid #22c55e; }
+  :global(.timeline-entry.warn-step) { border-left: 3px solid #eab308; }
+  :global(.timeline-entry.danger-step) { border-left: 3px solid #ef4444; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* Keyspace */
+  .keyspace-viz {
+    display: flex; gap: 2px; margin-bottom: 12px; min-height: 70px; flex-wrap: wrap;
+  }
+  :global(.ks-range) {
+    flex: 1; min-width: 60px; border-radius: 8px; padding: 10px 8px;
+    text-align: center; cursor: pointer; transition: all 0.3s; border: 2px solid transparent;
+  }
+  :global(.ks-range:hover) { transform: translateY(-2px); }
+  :global(.ks-range.selected) { border-color: #fff; }
+  :global(.ks-range .ks-name) { font-weight: 700; font-size: 0.85rem; color: #fff; }
+  :global(.ks-range .ks-size) { font-size: 0.7rem; margin-top: 4px; }
+
+  .range-info {
+    padding: 12px 16px; border-radius: 10px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08); font-size: 0.85rem; color: #888;
+    font-family: 'Monaco','Menlo',monospace; min-height: 40px;
+  }
+  .info-placeholder { color: #555; }
+
+  /* Split viz */
+  .split-viz {
+    display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; align-items: flex-end;
+  }
+  :global(.split-range) {
+    border-radius: 8px; padding: 12px; text-align: center; transition: all 0.4s;
+    min-width: 80px; position: relative;
+  }
+  :global(.split-range .sr-name) { font-weight: 700; font-size: 0.9rem; color: #fff; }
+  :global(.split-range .sr-size) { font-size: 0.75rem; margin-top: 4px; }
+  :global(.split-range.oversized) { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  /* Merge viz */
+  .merge-viz {
+    display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  :global(.merge-range) {
+    border-radius: 8px; padding: 12px 16px; text-align: center; transition: all 0.4s; min-width: 80px;
+  }
+  :global(.merge-range .mr-name) { font-weight: 700; font-size: 0.85rem; color: #fff; }
+  :global(.merge-range .mr-size) { font-size: 0.7rem; margin-top: 4px; }
+  :global(.merge-range.small) { border: 2px dashed rgba(234,179,8,0.5); }
+
+  /* Rebalance */
+  .rebal-viz {
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px;
+  }
+  :global(.rebal-node) {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 14px; min-width: 120px; text-align: center; transition: all 0.3s;
+  }
+  :global(.rebal-node .rn-header) { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 8px; }
+  :global(.rebal-node .rn-ranges) { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+  :global(.rn-chip) {
+    padding: 3px 8px; border-radius: 5px; font-size: 0.7rem; font-weight: 600;
+    background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.3);
+  }
+  .rebal-stats {
+    display: flex; gap: 24px; flex-wrap: wrap; padding: 10px 14px;
+    background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.85rem; color: #888;
+    margin-bottom: 12px;
+  }
+  :global(.rebal-stats strong) { color: #fff; margin-right: 4px; }
+
+  /* Lease */
+  .lease-cluster {
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+  }
+  :global(.lease-node) {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 14px 18px; text-align: center; transition: all 0.3s; min-width: 130px;
+  }
+  :global(.lease-node.leaseholder) {
+    border-color: rgba(34,197,94,0.5); background: rgba(34,197,94,0.05);
+  }
+  :global(.lease-node .ln-name) { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; }
+  :global(.lease-node .ln-role) { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; display: inline-block; }
+  :global(.ln-role.is-lease) { background: rgba(34,197,94,0.2); color: #22c55e; }
+  :global(.ln-role.is-follower) { background: rgba(107,114,128,0.2); color: #9ca3af; }
+  :global(.lease-node .ln-qps) { font-size: 0.75rem; color: #666; margin-top: 6px; }
+
+  .viz-footer {
+    text-align: center; padding: 30px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 40px;
+  }
+  .viz-footer a { color: #818cf8; }
+  .share-buttons {
+    display: flex; gap: 12px; align-items: center; justify-content: center;
+    padding: 20px 0; flex-wrap: wrap; font-size: 0.9rem; color: #666;
+  }
+  .share-btn {
+    padding: 6px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 500;
+    background: rgba(255,255,255,0.06); color: #aaa; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;
+  }
+  .share-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+</style>
+
+<script>
+  var RANGE_COLORS = ['#6366f1', '#a855f7', '#22c55e', '#00d4ff', '#ef4444', '#f97316', '#eab308', '#ec4899', '#06b6d4', '#84cc16'];
+
+  function addTimelineEntry(container, text, cls) {
+    var el = document.createElement('div');
+    el.className = 'timeline-entry ' + (cls || 'info-step');
+    el.textContent = text;
+    container.prepend(el);
+    if (container.children.length > 20) container.removeChild(container.lastChild);
+  }
+
+  // ===== 1. Range Keyspace =====
+  (function() {
+    var vizEl = document.getElementById('keyspaceViz');
+    var infoEl = document.getElementById('rangeInfo');
+    var insertBtn = document.getElementById('ksInsertBtn');
+    var insert10Btn = document.getElementById('ksInsert10Btn');
+    var resetBtn = document.getElementById('ksResetBtn');
+
+    var ranges = [
+      { id: 'R1', start: '/Min', end: '/Table/53', sizeMB: 245, leaseholder: 'n1', replicas: ['n1','n2','n3'] },
+      { id: 'R2', start: '/Table/53', end: '/Table/53/idx/2', sizeMB: 389, leaseholder: 'n2', replicas: ['n1','n2','n3'] },
+      { id: 'R3', start: '/Table/53/idx/2', end: '/Table/54', sizeMB: 156, leaseholder: 'n3', replicas: ['n1','n2','n3'] },
+      { id: 'R4', start: '/Table/54', end: '/Max', sizeMB: 78, leaseholder: 'n1', replicas: ['n1','n2','n3'] },
+    ];
+
+    function render() {
+      vizEl.innerHTML = '';
+      for (var i = 0; i < ranges.length; i++) {
+        var r = ranges[i];
+        var color = RANGE_COLORS[i % RANGE_COLORS.length];
+        var el = document.createElement('div');
+        el.className = 'ks-range';
+        el.style.background = color + '20';
+        el.style.borderColor = 'transparent';
+        el.innerHTML = '<div class="ks-name">' + r.id + '</div><div class="ks-size" style="color:' + color + '">' + r.sizeMB + ' MB</div>';
+        el.dataset.idx = i;
+        el.addEventListener('click', function() {
+          var idx = parseInt(this.dataset.idx);
+          var rr = ranges[idx];
+          document.querySelectorAll('.ks-range').forEach(function(e) { e.classList.remove('selected'); });
+          this.classList.add('selected');
+          infoEl.innerHTML = '<strong>' + rr.id + '</strong> | Start: <code>' + rr.start + '</code> | End: <code>' + rr.end + '</code> | Size: <strong>' + rr.sizeMB + 'MB</strong> | Leaseholder: <strong>' + rr.leaseholder + '</strong> | Replicas: ' + rr.replicas.join(', ');
+        });
+        vizEl.appendChild(el);
+      }
+    }
+
+    insertBtn.addEventListener('click', function() {
+      var idx = Math.floor(Math.random() * ranges.length);
+      ranges[idx].sizeMB += Math.floor(Math.random() * 40) + 10;
+      render();
+    });
+
+    insert10Btn.addEventListener('click', function() {
+      for (var i = 0; i < 10; i++) {
+        var idx = Math.floor(Math.random() * ranges.length);
+        ranges[idx].sizeMB += Math.floor(Math.random() * 30) + 5;
+      }
+      render();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      ranges[0].sizeMB = 245; ranges[1].sizeMB = 389; ranges[2].sizeMB = 156; ranges[3].sizeMB = 78;
+      infoEl.innerHTML = '<span class="info-placeholder">Click a range to inspect</span>';
+      render();
+    });
+
+    render();
+  })();
+
+  // ===== 2. Range Splitting =====
+  (function() {
+    var vizEl = document.getElementById('splitViz');
+    var threshSlider = document.getElementById('splitThreshSlider');
+    var threshLabel = document.getElementById('splitThreshLabel');
+    var addBtn = document.getElementById('splitAddBtn');
+    var add256Btn = document.getElementById('splitAdd256Btn');
+    var resetBtn = document.getElementById('splitResetBtn');
+    var badge = document.getElementById('splitBadge');
+    var statusText = document.getElementById('splitStatusText');
+    var timeline = document.getElementById('splitTimeline');
+
+    var ranges = [{ id: 'R1', sizeMB: 128 }];
+    var nextId = 2;
+
+    function getThresh() { return parseInt(threshSlider.value); }
+
+    function render() {
+      vizEl.innerHTML = '';
+      for (var i = 0; i < ranges.length; i++) {
+        var r = ranges[i];
+        var color = RANGE_COLORS[i % RANGE_COLORS.length];
+        var oversized = r.sizeMB > getThresh();
+        var el = document.createElement('div');
+        el.className = 'split-range' + (oversized ? ' oversized' : '');
+        el.style.background = color + '20';
+        el.style.border = '2px solid ' + (oversized ? '#ef4444' : color);
+        el.style.flex = Math.max(1, r.sizeMB / 100);
+        el.innerHTML = '<div class="sr-name">' + r.id + '</div><div class="sr-size" style="color:' + color + '">' + r.sizeMB + ' MB</div>';
+        vizEl.appendChild(el);
+      }
+      badge.textContent = ranges.length + ' RANGE' + (ranges.length > 1 ? 'S' : '');
+      statusText.textContent = ranges.map(function(r) { return r.id + ': ' + r.sizeMB + 'MB'; }).join(' | ');
+    }
+
+    function checkSplits() {
+      var thresh = getThresh();
+      var didSplit = false;
+      for (var i = 0; i < ranges.length; i++) {
+        if (ranges[i].sizeMB > thresh) {
+          var old = ranges[i];
+          var half = Math.floor(old.sizeMB / 2);
+          var newR = { id: 'R' + nextId++, sizeMB: old.sizeMB - half };
+          old.sizeMB = half;
+          ranges.splice(i + 1, 0, newR);
+          addTimelineEntry(timeline, '✂️ ' + old.id + ' split → ' + old.id + ' (' + old.sizeMB + 'MB) + ' + newR.id + ' (' + newR.sizeMB + 'MB)', 'warn-step');
+          didSplit = true;
+          i--; // recheck
+        }
+      }
+      if (didSplit) render();
+    }
+
+    function addData(mb) {
+      // Add to a random range
+      var idx = Math.floor(Math.random() * ranges.length);
+      ranges[idx].sizeMB += mb;
+      addTimelineEntry(timeline, '📦 Added ' + mb + 'MB to ' + ranges[idx].id + ' (now ' + ranges[idx].sizeMB + 'MB)', 'info-step');
+      render();
+      setTimeout(checkSplits, 300);
+    }
+
+    addBtn.addEventListener('click', function() { addData(64); });
+    add256Btn.addEventListener('click', function() { addData(256); });
+    threshSlider.addEventListener('input', function() {
+      threshLabel.textContent = threshSlider.value;
+      render();
+      checkSplits();
+    });
+    resetBtn.addEventListener('click', function() {
+      ranges = [{ id: 'R1', sizeMB: 128 }]; nextId = 2;
+      timeline.innerHTML = ''; render();
+    });
+
+    render();
+  })();
+
+  // ===== 3. Range Merging =====
+  (function() {
+    var vizEl = document.getElementById('mergeViz');
+    var deleteBtn = document.getElementById('mergeDeleteBtn');
+    var mergeBtn = document.getElementById('mergeTriggerBtn');
+    var resetBtn = document.getElementById('mergeResetBtn');
+    var timeline = document.getElementById('mergeTimeline');
+
+    var ranges = [
+      { id: 'R1', sizeMB: 310 },
+      { id: 'R2', sizeMB: 250 },
+      { id: 'R3', sizeMB: 180 },
+      { id: 'R4', sizeMB: 220 },
+      { id: 'R5', sizeMB: 90 },
+    ];
+
+    function render() {
+      vizEl.innerHTML = '';
+      for (var i = 0; i < ranges.length; i++) {
+        var r = ranges[i];
+        var color = RANGE_COLORS[i % RANGE_COLORS.length];
+        var small = r.sizeMB < 128;
+        var el = document.createElement('div');
+        el.className = 'merge-range' + (small ? ' small' : '');
+        el.style.background = color + '15';
+        el.style.flex = Math.max(1, r.sizeMB / 100);
+        if (!small) el.style.border = '1px solid ' + color + '60';
+        el.innerHTML = '<div class="mr-name">' + r.id + '</div><div class="mr-size" style="color:' + color + '">' + r.sizeMB + ' MB</div>';
+        vizEl.appendChild(el);
+      }
+    }
+
+    deleteBtn.addEventListener('click', function() {
+      if (ranges.length === 0) return;
+      var idx = Math.floor(Math.random() * ranges.length);
+      var amount = Math.floor(Math.random() * 80) + 30;
+      ranges[idx].sizeMB = Math.max(10, ranges[idx].sizeMB - amount);
+      addTimelineEntry(timeline, '🗑️ Deleted ' + amount + 'MB from ' + ranges[idx].id + ' (now ' + ranges[idx].sizeMB + 'MB)', 'danger-step');
+      render();
+    });
+
+    mergeBtn.addEventListener('click', function() {
+      var merged = false;
+      for (var i = 0; i < ranges.length - 1; i++) {
+        if (ranges[i].sizeMB < 128 && ranges[i+1].sizeMB < 128 && ranges[i].sizeMB + ranges[i+1].sizeMB <= 512) {
+          var combined = ranges[i].sizeMB + ranges[i+1].sizeMB;
+          addTimelineEntry(timeline, '🔗 Merged ' + ranges[i].id + ' (' + ranges[i].sizeMB + 'MB) + ' + ranges[i+1].id + ' (' + ranges[i+1].sizeMB + 'MB) → ' + ranges[i].id + ' (' + combined + 'MB)', 'success-step');
+          ranges[i].sizeMB = combined;
+          ranges.splice(i + 1, 1);
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        addTimelineEntry(timeline, '✓ No adjacent ranges below 128MB threshold — nothing to merge', 'info-step');
+      }
+      render();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      ranges = [
+        { id: 'R1', sizeMB: 310 }, { id: 'R2', sizeMB: 250 },
+        { id: 'R3', sizeMB: 180 }, { id: 'R4', sizeMB: 220 }, { id: 'R5', sizeMB: 90 },
+      ];
+      timeline.innerHTML = ''; render();
+    });
+
+    render();
+  })();
+
+  // ===== 4. Rebalancing =====
+  (function() {
+    var vizEl = document.getElementById('rebalViz');
+    var statsEl = document.getElementById('rebalStats');
+    var nodeSlider = document.getElementById('rebalNodeSlider');
+    var rangeSlider = document.getElementById('rebalRangeSlider');
+    var nodeLabel = document.getElementById('rebalNodeLabel');
+    var rangeLabel = document.getElementById('rebalRangeLabel');
+    var rebalBtn = document.getElementById('rebalBtn');
+    var addNodeBtn = document.getElementById('rebalAddNodeBtn');
+    var resetBtn = document.getElementById('rebalResetBtn');
+    var timeline = document.getElementById('rebalTimeline');
+
+    var assignment = []; // rangeIdx -> nodeIdx
+
+    function build() {
+      var nn = parseInt(nodeSlider.value);
+      var nr = parseInt(rangeSlider.value);
+      assignment = [];
+      // Uneven initial distribution
+      for (var i = 0; i < nr; i++) {
+        assignment.push(i < Math.ceil(nr * 0.5) ? 0 : (i % nn));
+      }
+      render();
+    }
+
+    function render() {
+      var nn = parseInt(nodeSlider.value);
+      var nr = parseInt(rangeSlider.value);
+      vizEl.innerHTML = '';
+      var nodeCounts = [];
+      for (var n = 0; n < nn; n++) nodeCounts.push(0);
+
+      for (var i = 0; i < assignment.length; i++) {
+        if (assignment[i] < nn) nodeCounts[assignment[i]]++;
+      }
+
+      for (var n = 0; n < nn; n++) {
+        var node = document.createElement('div');
+        node.className = 'rebal-node';
+        node.innerHTML = '<div class="rn-header">Node ' + n + '</div>';
+        var rangesDiv = document.createElement('div');
+        rangesDiv.className = 'rn-ranges';
+        for (var i = 0; i < assignment.length; i++) {
+          if (assignment[i] === n) {
+            var chip = document.createElement('span');
+            chip.className = 'rn-chip';
+            chip.textContent = 'R' + i;
+            rangesDiv.appendChild(chip);
+          }
+        }
+        node.appendChild(rangesDiv);
+        vizEl.appendChild(node);
+      }
+
+      var avg = (nr / nn).toFixed(1);
+      var max = Math.max.apply(null, nodeCounts);
+      var min = Math.min.apply(null, nodeCounts);
+      statsEl.innerHTML = '<strong>Avg:</strong> ' + avg + ' ranges/node | <strong>Max:</strong> ' + max + ' | <strong>Min:</strong> ' + min + ' | <strong>Imbalance:</strong> ' + (max - min);
+    }
+
+    rebalBtn.addEventListener('click', function() {
+      var nn = parseInt(nodeSlider.value);
+      var nr = assignment.length;
+      // Even distribution
+      for (var i = 0; i < nr; i++) {
+        assignment[i] = i % nn;
+      }
+      addTimelineEntry(timeline, '⚖️ Rebalanced ' + nr + ' ranges across ' + nn + ' nodes', 'success-step');
+      render();
+    });
+
+    addNodeBtn.addEventListener('click', function() {
+      var val = parseInt(nodeSlider.value) + 1;
+      if (val > 7) return;
+      nodeSlider.value = val;
+      nodeLabel.textContent = val;
+      addTimelineEntry(timeline, '➕ Node ' + (val - 1) + ' joined the cluster', 'info-step');
+      render();
+    });
+
+    nodeSlider.addEventListener('input', function() { nodeLabel.textContent = nodeSlider.value; build(); });
+    rangeSlider.addEventListener('input', function() { rangeLabel.textContent = rangeSlider.value; build(); });
+    resetBtn.addEventListener('click', function() { timeline.innerHTML = ''; build(); });
+
+    build();
+  })();
+
+  // ===== 5. Leaseholder Transfers =====
+  (function() {
+    var clusterEl = document.getElementById('leaseCluster');
+    var simBtn = document.getElementById('leaseSimBtn');
+    var transferBtn = document.getElementById('leaseTransferBtn');
+    var resetBtn = document.getElementById('leaseResetBtn');
+    var timeline = document.getElementById('leaseTimeline');
+
+    var nodes = [
+      { name: 'Node 0', isLease: true, qps: 1200 },
+      { name: 'Node 1', isLease: false, qps: 150 },
+      { name: 'Node 2', isLease: false, qps: 80 },
+    ];
+
+    function render() {
+      clusterEl.innerHTML = '';
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        var el = document.createElement('div');
+        el.className = 'lease-node' + (n.isLease ? ' leaseholder' : '');
+        el.innerHTML = '<div class="ln-name">' + n.name + '</div>' +
+          '<span class="ln-role ' + (n.isLease ? 'is-lease' : 'is-follower') + '">' + (n.isLease ? '★ Leaseholder' : 'Follower') + '</span>' +
+          '<div class="ln-qps">' + n.qps + ' QPS</div>';
+        clusterEl.appendChild(el);
+      }
+    }
+
+    simBtn.addEventListener('click', function() {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].isLease) {
+          nodes[i].qps += Math.floor(Math.random() * 200) + 100;
+        } else {
+          nodes[i].qps += Math.floor(Math.random() * 30);
+        }
+      }
+      addTimelineEntry(timeline, '📈 Load increased — leaseholder at ' + nodes.find(function(n) { return n.isLease; }).qps + ' QPS', 'info-step');
+      render();
+    });
+
+    transferBtn.addEventListener('click', function() {
+      var currentLease = nodes.findIndex(function(n) { return n.isLease; });
+      var minQps = Infinity, target = -1;
+      for (var i = 0; i < nodes.length; i++) {
+        if (i !== currentLease && nodes[i].qps < minQps) {
+          minQps = nodes[i].qps; target = i;
+        }
+      }
+      if (target >= 0) {
+        nodes[currentLease].isLease = false;
+        nodes[target].isLease = true;
+        // Transfer some load
+        var transferred = Math.floor(nodes[currentLease].qps * 0.6);
+        nodes[target].qps += transferred;
+        nodes[currentLease].qps -= transferred;
+        addTimelineEntry(timeline, '📤 Lease transferred from ' + nodes[currentLease].name + ' → ' + nodes[target].name + ' (' + transferred + ' QPS moved)', 'success-step');
+        render();
+      }
+    });
+
+    resetBtn.addEventListener('click', function() {
+      nodes = [
+        { name: 'Node 0', isLease: true, qps: 1200 },
+        { name: 'Node 1', isLease: false, qps: 150 },
+        { name: 'Node 2', isLease: false, qps: 80 },
+      ];
+      timeline.innerHTML = ''; render();
+    });
+
+    render();
+  })();
+</script>

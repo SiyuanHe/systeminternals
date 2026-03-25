@@ -1,0 +1,874 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Distributed Tables: Sharding & Cross-Shard Queries"
+  description="Interactive visualization of ClickHouse Distributed tables, sharding keys, two-level aggregation, and cross-shard query execution"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "ClickHouse", href: "/clickhouse/" },
+    { label: "Distributed Tables", href: "/clickhouse/distributed-tables/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🌐 Distributed Tables</h1>
+    <p class="subtitle">Sharding, Cross-Shard Queries & Two-Level Aggregation</p>
+  </header>
+
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        A ClickHouse <strong>Distributed table</strong> is a virtual layer that fans queries out to
+        <em>local MergeTree tables</em> across multiple shards. Each shard holds a subset of data determined
+        by a <strong>sharding key</strong> (e.g., <code>sipHash64(user_id) % 3</code>). INSERTs can be routed
+        directly to the correct shard (<em>internal routing</em>) or written to any node and forwarded
+        asynchronously. Queries execute in <strong>two stages</strong>: partial aggregation on each shard,
+        then a <em>final merge</em> on the initiator node. This dramatically reduces network traffic
+        compared to pulling all raw data to one node.
+      </p>
+    </div>
+  </section>
+
+  <!-- 1. Cluster Architecture -->
+  <section class="flow-section">
+    <h2>🏗️ Cluster Architecture</h2>
+    <p class="section-desc">A Distributed table sits on top of local tables across shards. Each shard can have replicas managed by ZooKeeper.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Shards: <strong id="archShardLabel">3</strong></label>
+        <input type="range" id="archShardSlider" min="1" max="6" value="3" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Replicas/shard: <strong id="archReplicaLabel">2</strong></label>
+        <input type="range" id="archReplicaSlider" min="1" max="3" value="2" class="slot-slider">
+      </div>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="archCanvas" width="860" height="380"></canvas>
+    </div>
+  </section>
+
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📊 Distributed Engine</h3>
+        <p>
+          The <code>Distributed</code> engine doesn't store data itself. It's defined with:
+          <code>ENGINE = Distributed(cluster, db, local_table, sharding_key)</code>. Queries to
+          this table are automatically <strong>parallelized</strong> across all shards.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔑 Sharding Key</h3>
+        <p>
+          The sharding expression determines which shard receives each row. Common choices:
+          <code>rand()</code> (even distribution), <code>sipHash64(user_id)</code> (co-locate by user),
+          or <code>intHash32(date)</code>. Must return an integer — ClickHouse mods by shard weight.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🐘 ZooKeeper</h3>
+        <p>
+          <strong>ReplicatedMergeTree</strong> uses ZooKeeper to coordinate replicas within a shard.
+          It handles insert deduplication, replica sync, and leader election. The Distributed engine
+          itself doesn't need ZK — it's purely a routing layer.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Insert Routing -->
+  <section class="flow-section">
+    <h2>✏️ Insert Distribution</h2>
+    <p class="section-desc">Watch how rows are routed to shards based on the sharding key. Try different keys to see the distribution.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <select id="insertKeySelect" class="key-input" style="flex:0.4;">
+          <option value="userId">sipHash64(user_id)</option>
+          <option value="random">rand()</option>
+          <option value="date">intHash32(date)</option>
+        </select>
+        <button id="insertOneBtn" class="action-btn primary-btn">✏️ INSERT 1 Row</button>
+        <button id="insertBatchBtn" class="action-btn step-btn">⚡ INSERT 100 Rows</button>
+        <button id="insertResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="insert-stats" id="insertStats"></div>
+      <div class="shard-bars" id="shardBars"></div>
+
+      <div class="insert-log" id="insertLog"></div>
+    </div>
+  </section>
+
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📤 Internal Routing</h3>
+        <p>
+          With <code>internal_replication = true</code>, the Distributed table sends each row to
+          <strong>one replica</strong> per shard. The <em>ReplicatedMergeTree</em> engine then handles
+          syncing to other replicas via ZooKeeper. This is the recommended approach.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📦 Async Send</h3>
+        <p>
+          Inserts to a Distributed table are <strong>buffered locally</strong> in
+          <code>/var/lib/clickhouse/data/.../</code> and sent asynchronously to remote shards.
+          If a shard is temporarily down, data queues up and is retried. Check
+          <code>system.distribution_queue</code> to monitor pending sends.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Distributed Query Execution -->
+  <section class="flow-section">
+    <h2>🔍 Distributed Query Execution</h2>
+    <p class="section-desc">Watch a query execute across shards with partial aggregation and final merge.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Shards: <strong id="qShardLabel">3</strong></label>
+        <input type="range" id="qShardSlider" min="2" max="6" value="3" class="slot-slider">
+      </div>
+      <button id="qRunBtn" class="action-btn primary-btn">▶ Run Query</button>
+      <button id="qResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="qStatus">
+      <span class="status-badge idle" id="qBadge">IDLE</span>
+      <span class="status-text" id="qStatusText">SELECT country, count() FROM dist_table GROUP BY country</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="queryCanvas" width="860" height="450"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="qTimeline"></div>
+  </section>
+
+  <!-- 4. Two-Level Aggregation -->
+  <section class="flow-section">
+    <h2>📊 Two-Level Aggregation</h2>
+    <p class="section-desc">See how partial GROUP BY on each shard reduces data before the final merge. Compare data volumes.</p>
+
+    <div class="calculator-container">
+      <div class="flow-controls" style="margin-bottom:16px;">
+        <div class="slider-group">
+          <label>Shards: <strong id="aggShardLabel">3</strong></label>
+          <input type="range" id="aggShardSlider" min="2" max="5" value="3" class="slot-slider">
+        </div>
+        <div class="slider-group">
+          <label>Rows/shard: <strong id="aggRowLabel">1M</strong></label>
+          <input type="range" id="aggRowSlider" min="1" max="10" value="5" class="slot-slider">
+        </div>
+        <div class="slider-group">
+          <label>Unique keys: <strong id="aggKeyLabel">100</strong></label>
+          <input type="range" id="aggKeySlider" min="10" max="1000" value="100" class="slot-slider">
+        </div>
+        <button id="aggRunBtn" class="action-btn primary-btn">▶ Aggregate</button>
+      </div>
+
+      <div class="agg-viz" id="aggViz"></div>
+      <div class="agg-savings" id="aggSavings"></div>
+    </div>
+  </section>
+
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>🔢 Partial Aggregation</h3>
+        <p>
+          Each shard runs <code>GROUP BY</code> locally, producing at most <strong>unique_keys</strong>
+          rows per shard instead of millions. The initiator node only merges <code>shards × keys</code>
+          rows — orders of magnitude less than raw data. This is why ClickHouse scales so well for analytics.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔀 -State/-Merge Combinators</h3>
+        <p>
+          For complex aggregates (quantiles, uniqExact), ClickHouse uses <code>-State</code> to produce
+          serializable partial states and <code>-Merge</code> to combine them. This enables distributed
+          aggregation for <em>any</em> aggregate function, not just SUM and COUNT.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Shard Failover -->
+  <section class="flow-section">
+    <h2>🛡️ Replica Failover</h2>
+    <p class="section-desc">When a replica goes down, ClickHouse automatically routes to another replica in the same shard.</p>
+
+    <div class="flow-controls">
+      <button id="failRunBtn" class="action-btn primary-btn">▶ Normal Query</button>
+      <button id="failKillBtn" class="action-btn danger-btn">💀 Kill Replica</button>
+      <button id="failResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="failStatus">
+      <span class="status-badge healthy" id="failBadge">HEALTHY</span>
+      <span class="status-text" id="failStatusText">All replicas available</span>
+    </div>
+
+    <div class="cluster-nodes" id="failCluster"></div>
+    <div class="failover-timeline" id="failTimeline"></div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://clickhouse.com/docs/en/engines/table-engines/special/distributed" target="_blank">ClickHouse Distributed Engine Docs</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20ClickHouse%20Distributed%20Tables%20Visualizer&url=https://systeminternals.dev/clickhouse/distributed-tables/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/clickhouse/distributed-tables/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/clickhouse/distributed-tables/&t=Interactive%20ClickHouse%20Distributed%20Tables%20Visualization" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 {
+    font-size: 2.5rem; margin-bottom: 10px;
+    background: linear-gradient(90deg, #facc15, #f97316, #ef4444);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 1rem; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: linear-gradient(135deg, rgba(250,204,21,0.1), rgba(249,115,22,0.05));
+    border: 1px solid rgba(250,204,21,0.3); border-radius: 16px;
+    padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #facc15; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: #f0f0f0; }
+
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #facc15, #f97316); color: #1a1a2e; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(250,204,21,0.4); }
+  .step-btn { background: linear-gradient(135deg, #a855f7, #7c3aed); color: white; }
+  .step-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(168,85,247,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .flow-section { margin-bottom: 50px; }
+  .flow-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+  .flow-status {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+    padding: 12px 16px; background: rgba(255,255,255,0.03);
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .status-badge {
+    padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+  }
+  .status-badge.idle { background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .status-badge.scatter { background: rgba(250,204,21,0.2); color: #facc15; }
+  .status-badge.partial { background: rgba(168,85,247,0.2); color: #a855f7; }
+  .status-badge.merge { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .status-badge.done { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .status-badge.healthy { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .status-badge.degraded { background: rgba(234,179,8,0.2); color: #eab308; }
+  .status-text { color: #aaa; font-size: 0.95rem; font-family: 'Monaco','Menlo',monospace; }
+
+  .slider-group { display: flex; align-items: center; gap: 8px; }
+  .slider-group label { font-size: 0.9rem; color: #aaa; white-space: nowrap; }
+  .slot-slider { width: 100px; accent-color: #facc15; }
+
+  .calculator-container {
+    background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;
+  }
+  .calc-input-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .key-input {
+    flex: 1; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 10px; background: rgba(255,255,255,0.05); color: #fff;
+    font-size: 1rem; font-family: 'Monaco','Menlo',monospace; outline: none;
+  }
+  .key-input:focus { border-color: #facc15; }
+  .key-input option { background: #1a1a2e; color: #fff; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .explain-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px; padding: 20px;
+  }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { font-size: 0.92rem; color: #999; line-height: 1.7; }
+  .explain-card strong { color: #ddd; }
+  .explain-card em { color: #facc15; font-style: normal; }
+  .explain-card code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+
+  .topology-container {
+    background: rgba(0,0,0,0.3); border-radius: 16px; padding: 16px;
+    border: 1px solid rgba(255,255,255,0.08); margin-bottom: 16px;
+    display: flex; justify-content: center;
+  }
+  .topology-container canvas { max-width: 100%; }
+
+  .failover-timeline {
+    max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+  }
+  :global(.timeline-entry) {
+    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    color: #aaa; animation: fadeIn 0.3s ease-out;
+  }
+  :global(.timeline-entry.info-step) { border-left: 3px solid #facc15; }
+  :global(.timeline-entry.success-step) { border-left: 3px solid #22c55e; }
+  :global(.timeline-entry.warn-step) { border-left: 3px solid #eab308; }
+  :global(.timeline-entry.danger-step) { border-left: 3px solid #ef4444; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* Insert viz */
+  .insert-stats {
+    display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap;
+  }
+  :global(.insert-stat) {
+    font-size: 0.85rem; color: #888;
+  }
+  :global(.insert-stat strong) { color: #fff; margin-right: 4px; }
+
+  .shard-bars {
+    display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-end; min-height: 120px;
+  }
+  :global(.shard-bar-col) {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  :global(.shard-bar) {
+    width: 100%; border-radius: 6px 6px 0 0; transition: height 0.3s; min-height: 2px;
+  }
+  :global(.shard-bar-label) { font-size: 0.8rem; color: #888; font-weight: 600; }
+  :global(.shard-bar-count) { font-size: 0.75rem; color: #aaa; }
+
+  .insert-log {
+    max-height: 120px; overflow-y: auto; font-size: 0.8rem; color: #666;
+    font-family: 'Monaco','Menlo',monospace;
+  }
+  :global(.insert-log-entry) { padding: 2px 0; }
+
+  /* Agg viz */
+  .agg-viz {
+    display: flex; gap: 16px; align-items: center; justify-content: center;
+    flex-wrap: wrap; margin-bottom: 16px;
+  }
+  :global(.agg-stage) {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px; padding: 16px; text-align: center; min-width: 140px;
+  }
+  :global(.agg-stage h4) { font-size: 0.85rem; color: #888; margin-bottom: 8px; }
+  :global(.agg-stage .agg-rows) { font-size: 1.8rem; font-weight: 700; color: #fff; }
+  :global(.agg-stage .agg-label) { font-size: 0.75rem; color: #666; margin-top: 4px; }
+  :global(.agg-arrow) { font-size: 1.5rem; color: #555; }
+
+  .agg-savings {
+    text-align: center; padding: 12px; border-radius: 10px;
+    background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3);
+    font-size: 0.95rem; color: #22c55e; font-weight: 600;
+  }
+
+  /* Fail cluster */
+  .cluster-nodes {
+    display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px;
+  }
+  :global(.fail-node) {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 14px; min-width: 140px; transition: all 0.4s;
+  }
+  :global(.fail-node.dead) { border-color: rgba(239,68,68,0.5); opacity: 0.4; }
+  :global(.fail-node .fn-header) {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+    font-size: 0.85rem; font-weight: 600; color: #fff;
+  }
+  :global(.fn-dot) { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  :global(.fail-node.dead .fn-dot) { background: #ef4444; }
+  :global(.fn-shard) {
+    display: inline-block; padding: 3px 8px; border-radius: 5px; margin: 2px;
+    font-size: 0.7rem; font-weight: 600;
+  }
+  :global(.fn-shard.primary) { background: rgba(250,204,21,0.15); color: #facc15; border: 1px solid rgba(250,204,21,0.3); }
+  :global(.fn-shard.replica) { background: rgba(168,85,247,0.1); color: #a855f7; border: 1px solid rgba(168,85,247,0.25); }
+
+  .viz-footer {
+    text-align: center; padding: 30px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 40px;
+  }
+  .viz-footer a { color: #facc15; }
+  .share-buttons {
+    display: flex; gap: 12px; align-items: center; justify-content: center;
+    padding: 20px 0; flex-wrap: wrap; font-size: 0.9rem; color: #666;
+  }
+  .share-btn {
+    padding: 6px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 500;
+    background: rgba(255,255,255,0.06); color: #aaa; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;
+  }
+  .share-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+</style>
+
+<script>
+  function addTimelineEntry(container, text, cls) {
+    var el = document.createElement('div');
+    el.className = 'timeline-entry ' + (cls || 'info-step');
+    el.textContent = text;
+    container.prepend(el);
+    if (container.children.length > 20) container.removeChild(container.lastChild);
+  }
+
+  var SHARD_COLORS = ['#facc15', '#a855f7', '#22c55e', '#00d4ff', '#ef4444', '#f97316'];
+
+  // ===== 1. Cluster Architecture Canvas =====
+  (function() {
+    var canvas = document.getElementById('archCanvas');
+    var ctx = canvas.getContext('2d');
+    var shardSlider = document.getElementById('archShardSlider');
+    var replicaSlider = document.getElementById('archReplicaSlider');
+    var shardLabel = document.getElementById('archShardLabel');
+    var replicaLabel = document.getElementById('archReplicaLabel');
+
+    function draw() {
+      var ns = parseInt(shardSlider.value);
+      var nr = parseInt(replicaSlider.value);
+      var w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Distributed table at top
+      ctx.fillStyle = '#1a1a2e';
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      var dtW = 240, dtH = 44;
+      ctx.beginPath();
+      ctx.roundRect(w/2 - dtW/2, 20, dtW, dtH, 10);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#facc15';
+      ctx.font = 'bold 13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Distributed Table (virtual)', w/2, 47);
+
+      // Shards
+      var shardW = Math.min(140, (w - 40) / ns - 10);
+      var totalShardW = ns * shardW + (ns - 1) * 12;
+      var startX = (w - totalShardW) / 2;
+      var shardY = 120;
+
+      for (var s = 0; s < ns; s++) {
+        var sx = startX + s * (shardW + 12);
+        var color = SHARD_COLORS[s % SHARD_COLORS.length];
+
+        // Connection line from distributed table
+        ctx.strokeStyle = color + '60';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(w/2, 64);
+        ctx.lineTo(sx + shardW/2, shardY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Shard box
+        ctx.fillStyle = '#1a1a2e';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        var totalH = 36 + nr * 40;
+        ctx.beginPath();
+        ctx.roundRect(sx, shardY, shardW, totalH, 10);
+        ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Shard ' + s, sx + shardW/2, shardY + 20);
+
+        // Replicas
+        for (var r = 0; r < nr; r++) {
+          var ry = shardY + 30 + r * 40;
+          ctx.fillStyle = color + '15';
+          ctx.strokeStyle = color + '60';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(sx + 8, ry, shardW - 16, 32, 6);
+          ctx.fill(); ctx.stroke();
+
+          ctx.fillStyle = '#ccc';
+          ctx.font = '10px Inter, sans-serif';
+          ctx.fillText((r === 0 ? '★ ' : '') + 'Replica ' + (r + 1), sx + shardW/2, ry + 20);
+        }
+      }
+
+      // ZooKeeper
+      if (nr > 1) {
+        var zkY = shardY + 36 + ns * 2;
+        ctx.fillStyle = 'rgba(168,85,247,0.08)';
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.roundRect(w/2 - 80, h - 50, 160, 34, 8);
+        ctx.fill(); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.fillText('🐘 ZooKeeper (replica sync)', w/2, h - 28);
+      }
+    }
+
+    shardSlider.addEventListener('input', function() { shardLabel.textContent = shardSlider.value; draw(); });
+    replicaSlider.addEventListener('input', function() { replicaLabel.textContent = replicaSlider.value; draw(); });
+    draw();
+  })();
+
+  // ===== 2. Insert Distribution =====
+  (function() {
+    var keySelect = document.getElementById('insertKeySelect');
+    var oneBtn = document.getElementById('insertOneBtn');
+    var batchBtn = document.getElementById('insertBatchBtn');
+    var resetBtn = document.getElementById('insertResetBtn');
+    var statsEl = document.getElementById('insertStats');
+    var barsEl = document.getElementById('shardBars');
+    var logEl = document.getElementById('insertLog');
+    var numShards = 3;
+    var counts = [0, 0, 0];
+    var totalInserted = 0;
+
+    function sipHash(s) {
+      var h = 0;
+      for (var i = 0; i < s.length; i++) {
+        h = Math.imul(h, 31) + s.charCodeAt(i);
+        h = h | 0;
+      }
+      return Math.abs(h);
+    }
+
+    function insertRow() {
+      var key = keySelect.value;
+      var userId = 'user_' + Math.floor(Math.random() * 10000);
+      var shard;
+      if (key === 'random') {
+        shard = Math.floor(Math.random() * numShards);
+      } else if (key === 'date') {
+        var day = Math.floor(Math.random() * 365);
+        shard = day % numShards;
+      } else {
+        shard = sipHash(userId) % numShards;
+      }
+      counts[shard]++;
+      totalInserted++;
+      return { userId: userId, shard: shard };
+    }
+
+    function render() {
+      var max = Math.max.apply(null, counts) || 1;
+      barsEl.innerHTML = '';
+      for (var i = 0; i < numShards; i++) {
+        var col = document.createElement('div');
+        col.className = 'shard-bar-col';
+        var bar = document.createElement('div');
+        bar.className = 'shard-bar';
+        bar.style.height = Math.max(2, (counts[i] / max) * 100) + 'px';
+        bar.style.background = SHARD_COLORS[i % SHARD_COLORS.length];
+        var label = document.createElement('div');
+        label.className = 'shard-bar-label';
+        label.textContent = 'Shard ' + i;
+        var cnt = document.createElement('div');
+        cnt.className = 'shard-bar-count';
+        cnt.textContent = counts[i] + ' rows';
+        col.appendChild(bar);
+        col.appendChild(label);
+        col.appendChild(cnt);
+        barsEl.appendChild(col);
+      }
+      statsEl.innerHTML = '<span class="insert-stat"><strong>' + totalInserted + '</strong> total rows</span>' +
+        '<span class="insert-stat">Key: <strong>' + keySelect.options[keySelect.selectedIndex].text + '</strong></span>';
+    }
+
+    oneBtn.addEventListener('click', function() {
+      var r = insertRow();
+      var entry = document.createElement('div');
+      entry.className = 'insert-log-entry';
+      entry.textContent = '→ ' + r.userId + ' → Shard ' + r.shard;
+      logEl.prepend(entry);
+      if (logEl.children.length > 30) logEl.removeChild(logEl.lastChild);
+      render();
+    });
+
+    batchBtn.addEventListener('click', function() {
+      for (var i = 0; i < 100; i++) insertRow();
+      var entry = document.createElement('div');
+      entry.className = 'insert-log-entry';
+      entry.textContent = '⚡ Inserted 100 rows';
+      logEl.prepend(entry);
+      render();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      counts = [0, 0, 0];
+      totalInserted = 0;
+      logEl.innerHTML = '';
+      render();
+    });
+
+    render();
+  })();
+
+  // ===== 3. Distributed Query Execution =====
+  (function() {
+    var canvas = document.getElementById('queryCanvas');
+    var ctx = canvas.getContext('2d');
+    var shardSlider = document.getElementById('qShardSlider');
+    var shardLabel = document.getElementById('qShardLabel');
+    var runBtn = document.getElementById('qRunBtn');
+    var resetBtn = document.getElementById('qResetBtn');
+    var badge = document.getElementById('qBadge');
+    var statusText = document.getElementById('qStatusText');
+    var timeline = document.getElementById('qTimeline');
+    var animating = false;
+
+    shardSlider.addEventListener('input', function() { shardLabel.textContent = shardSlider.value; drawIdle(); });
+
+    function drawIdle() {
+      if (animating) return;
+      var ns = parseInt(shardSlider.value);
+      var w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Initiator
+      ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(w/2 - 70, 20, 140, 44, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#facc15'; ctx.font = 'bold 12px Inter, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Initiator Node', w/2, 47);
+
+      // Shards
+      var shW = 120, totalW = ns * shW + (ns-1) * 16;
+      var startX = (w - totalW) / 2;
+      for (var s = 0; s < ns; s++) {
+        var sx = startX + s * (shW + 16);
+        ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = SHARD_COLORS[s % SHARD_COLORS.length]; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.roundRect(sx, h - 130, shW, 90, 10); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = SHARD_COLORS[s % SHARD_COLORS.length]; ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText('Shard ' + s, sx + shW/2, h - 108);
+        ctx.fillStyle = '#888'; ctx.font = '10px Inter, sans-serif';
+        var rows = Math.floor(Math.random() * 900000) + 100000;
+        ctx.fillText(rows.toLocaleString() + ' rows', sx + shW/2, h - 88);
+        ctx.fillText('MergeTree', sx + shW/2, h - 60);
+      }
+    }
+
+    drawIdle();
+
+    runBtn.addEventListener('click', async function() {
+      if (animating) return;
+      animating = true; runBtn.disabled = true;
+      var ns = parseInt(shardSlider.value);
+      var w = canvas.width, h = canvas.height;
+      timeline.innerHTML = '';
+
+      function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+      // Step 1: Send to shards
+      badge.className = 'status-badge scatter'; badge.textContent = 'SCATTER';
+      statusText.textContent = 'Sending query to ' + ns + ' shards...';
+      addTimelineEntry(timeline, '📨 Initiator sends query to all ' + ns + ' shards', 'info-step');
+      await sleep(800);
+
+      // Step 2: Partial agg
+      badge.className = 'status-badge partial'; badge.textContent = 'PARTIAL AGG';
+      statusText.textContent = 'Each shard running GROUP BY locally...';
+      for (var s = 0; s < ns; s++) {
+        var partialRows = Math.floor(Math.random() * 80) + 20;
+        addTimelineEntry(timeline, '⚡ Shard ' + s + ': scanned 500K rows → ' + partialRows + ' groups', 'info-step');
+        await sleep(400);
+      }
+
+      // Step 3: Merge
+      badge.className = 'status-badge merge'; badge.textContent = 'FINAL MERGE';
+      statusText.textContent = 'Initiator merging partial results...';
+      addTimelineEntry(timeline, '🔀 Initiator merging partial aggregates from all shards', 'success-step');
+      await sleep(600);
+
+      badge.className = 'status-badge done'; badge.textContent = 'COMPLETE';
+      statusText.textContent = 'Query complete — 95 result rows returned';
+      addTimelineEntry(timeline, '✅ Final result: 95 rows after merge (saved 99.98% network transfer)', 'success-step');
+
+      animating = false; runBtn.disabled = false;
+    });
+
+    resetBtn.addEventListener('click', function() {
+      animating = false; runBtn.disabled = false;
+      badge.className = 'status-badge idle'; badge.textContent = 'IDLE';
+      statusText.textContent = 'SELECT country, count() FROM dist_table GROUP BY country';
+      timeline.innerHTML = ''; drawIdle();
+    });
+  })();
+
+  // ===== 4. Two-Level Aggregation =====
+  (function() {
+    var shardSlider = document.getElementById('aggShardSlider');
+    var rowSlider = document.getElementById('aggRowSlider');
+    var keySlider = document.getElementById('aggKeySlider');
+    var shardLabel = document.getElementById('aggShardLabel');
+    var rowLabel = document.getElementById('aggRowLabel');
+    var keyLabel = document.getElementById('aggKeyLabel');
+    var runBtn = document.getElementById('aggRunBtn');
+    var vizEl = document.getElementById('aggViz');
+    var savingsEl = document.getElementById('aggSavings');
+
+    function fmt(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+      return n.toString();
+    }
+
+    function render() {
+      var ns = parseInt(shardSlider.value);
+      var rowsPerShard = parseInt(rowSlider.value) * 200000;
+      var keys = parseInt(keySlider.value);
+
+      var totalRaw = ns * rowsPerShard;
+      var partialPerShard = Math.min(keys, rowsPerShard);
+      var totalPartial = ns * partialPerShard;
+      var finalRows = Math.min(keys, totalPartial);
+      var savings = ((1 - totalPartial / totalRaw) * 100).toFixed(1);
+
+      vizEl.innerHTML = '';
+
+      // Raw data
+      var rawStage = document.createElement('div');
+      rawStage.className = 'agg-stage';
+      rawStage.innerHTML = '<h4>Raw Data (total)</h4><div class="agg-rows">' + fmt(totalRaw) + '</div><div class="agg-label">rows across ' + ns + ' shards</div>';
+      vizEl.appendChild(rawStage);
+
+      var a1 = document.createElement('div'); a1.className = 'agg-arrow'; a1.textContent = '→'; vizEl.appendChild(a1);
+
+      // Partial
+      var partStage = document.createElement('div');
+      partStage.className = 'agg-stage';
+      partStage.innerHTML = '<h4>Partial GROUP BY</h4><div class="agg-rows">' + fmt(totalPartial) + '</div><div class="agg-label">' + partialPerShard + ' groups × ' + ns + ' shards</div>';
+      vizEl.appendChild(partStage);
+
+      var a2 = document.createElement('div'); a2.className = 'agg-arrow'; a2.textContent = '→'; vizEl.appendChild(a2);
+
+      // Final
+      var finalStage = document.createElement('div');
+      finalStage.className = 'agg-stage';
+      finalStage.innerHTML = '<h4>Final Merge</h4><div class="agg-rows" style="color:#22c55e">' + fmt(finalRows) + '</div><div class="agg-label">merged result rows</div>';
+      vizEl.appendChild(finalStage);
+
+      savingsEl.textContent = '📉 Network transfer reduced by ' + savings + '% — only ' + fmt(totalPartial) + ' rows sent instead of ' + fmt(totalRaw);
+    }
+
+    shardSlider.addEventListener('input', function() { shardLabel.textContent = shardSlider.value; });
+    rowSlider.addEventListener('input', function() { rowLabel.textContent = (parseInt(rowSlider.value) * 200) + 'K'; });
+    keySlider.addEventListener('input', function() { keyLabel.textContent = keySlider.value; });
+    runBtn.addEventListener('click', render);
+    [shardSlider, rowSlider, keySlider].forEach(function(s) { s.addEventListener('input', render); });
+    render();
+  })();
+
+  // ===== 5. Replica Failover =====
+  (function() {
+    var clusterEl = document.getElementById('failCluster');
+    var runBtn = document.getElementById('failRunBtn');
+    var killBtn = document.getElementById('failKillBtn');
+    var resetBtn = document.getElementById('failResetBtn');
+    var badge = document.getElementById('failBadge');
+    var statusText = document.getElementById('failStatusText');
+    var timeline = document.getElementById('failTimeline');
+
+    // 3 shards, 2 replicas each = 6 nodes
+    var nodes = [];
+    var deadSet = new Set();
+
+    function init() {
+      deadSet.clear();
+      nodes = [
+        { name: 'node-0', shards: [{ id: 0, type: 'primary' }, { id: 1, type: 'replica' }] },
+        { name: 'node-1', shards: [{ id: 1, type: 'primary' }, { id: 2, type: 'replica' }] },
+        { name: 'node-2', shards: [{ id: 2, type: 'primary' }, { id: 0, type: 'replica' }] },
+      ];
+      render();
+      badge.className = 'status-badge healthy'; badge.textContent = 'HEALTHY';
+      statusText.textContent = 'All replicas available';
+    }
+
+    function render() {
+      clusterEl.innerHTML = '';
+      for (var n = 0; n < nodes.length; n++) {
+        var node = nodes[n];
+        var el = document.createElement('div');
+        el.className = 'fail-node' + (deadSet.has(n) ? ' dead' : '');
+        var hdr = document.createElement('div');
+        hdr.className = 'fn-header';
+        hdr.innerHTML = '<span class="fn-dot"></span>' + node.name + (deadSet.has(n) ? ' ☠️' : '');
+        el.appendChild(hdr);
+
+        var shardsDiv = document.createElement('div');
+        for (var si = 0; si < node.shards.length; si++) {
+          var s = node.shards[si];
+          var chip = document.createElement('span');
+          chip.className = 'fn-shard ' + s.type;
+          chip.textContent = (s.type === 'primary' ? 'P' : 'R') + s.id;
+          shardsDiv.appendChild(chip);
+        }
+        el.appendChild(shardsDiv);
+        clusterEl.appendChild(el);
+      }
+    }
+
+    killBtn.addEventListener('click', function() {
+      var alive = [];
+      for (var n = 0; n < nodes.length; n++) { if (!deadSet.has(n)) alive.push(n); }
+      if (alive.length <= 1) return;
+      var victim = alive[Math.floor(Math.random() * alive.length)];
+      deadSet.add(victim);
+      addTimelineEntry(timeline, '💀 ' + nodes[victim].name + ' went down!', 'danger-step');
+
+      // Promote replicas
+      var lostPrimaries = nodes[victim].shards.filter(function(s) { return s.type === 'primary'; });
+      for (var li = 0; li < lostPrimaries.length; li++) {
+        var sid = lostPrimaries[li].id;
+        for (var n = 0; n < nodes.length; n++) {
+          if (deadSet.has(n)) continue;
+          for (var si = 0; si < nodes[n].shards.length; si++) {
+            if (nodes[n].shards[si].id === sid && nodes[n].shards[si].type === 'replica') {
+              nodes[n].shards[si].type = 'primary';
+              addTimelineEntry(timeline, '🔄 Replica of shard ' + sid + ' on ' + nodes[n].name + ' promoted to primary', 'warn-step');
+              break;
+            }
+          }
+        }
+      }
+
+      badge.className = 'status-badge degraded'; badge.textContent = 'DEGRADED';
+      statusText.textContent = 'Node down — queries rerouted to surviving replicas';
+      render();
+    });
+
+    runBtn.addEventListener('click', function() {
+      addTimelineEntry(timeline, '✅ Query executed across all available replicas', 'success-step');
+    });
+
+    resetBtn.addEventListener('click', function() {
+      timeline.innerHTML = '';
+      init();
+    });
+
+    init();
+  })();
+</script>

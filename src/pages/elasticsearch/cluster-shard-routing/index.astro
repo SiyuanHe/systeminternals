@@ -1,0 +1,1019 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Cluster & Shard Routing"
+  description="Interactive visualization of Elasticsearch shard routing, document hashing, scatter-gather search, replica placement, and node failover"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Elasticsearch", href: "/elasticsearch/" },
+    { label: "Cluster & Shard Routing", href: "/elasticsearch/cluster-shard-routing/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🌐 Cluster & Shard Routing</h1>
+    <p class="subtitle">How Documents Find Their Shard and Queries Fan Out Across the Cluster</p>
+  </header>
+
+  <!-- Overview -->
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        Every document in Elasticsearch lives on exactly one <strong>primary shard</strong>, determined by a
+        <em>routing formula</em>: <code>shard = hash(_routing) % number_of_primary_shards</code>.
+        By default, <code>_routing</code> is the document's <code>_id</code>. This is why
+        <strong>you cannot change the number of primary shards</strong> after index creation — it would
+        change the hash mapping. Search queries use a <em>scatter-gather</em> pattern: the coordinating
+        node fans the query out to one copy of each shard (primary or replica), collects partial results,
+        and merges them into a global result set. <strong>Replicas</strong> are placed on different nodes
+        than their primaries for fault tolerance — if a node dies, the cluster promotes replicas automatically.
+      </p>
+    </div>
+  </section>
+
+  <!-- 1. Document Routing Formula -->
+  <section class="flow-section">
+    <h2>🎯 Document Routing</h2>
+    <p class="section-desc">Type a document ID to see which shard it lands on. The hash is deterministic — same ID always maps to the same shard.</p>
+
+    <div class="calculator-container">
+      <div class="calc-input-row">
+        <input type="text" id="routingInput" placeholder="Enter document _id (e.g. 'user-42' or 'order-1337')" class="key-input" autocomplete="off" value="user-42">
+        <button id="routeBtn" class="action-btn primary-btn">Route Document</button>
+      </div>
+      <div class="slider-group" style="margin-top: 12px;">
+        <label>Primary Shards: <strong id="routeShardLabel">5</strong></label>
+        <input type="range" id="routeShardSlider" min="1" max="12" value="5" class="slot-slider">
+      </div>
+
+      <div class="routing-viz" id="routingViz">
+        <div class="routing-formula" id="routingFormula"></div>
+        <div class="shard-buckets" id="shardBuckets"></div>
+      </div>
+
+      <div class="routing-history" id="routingHistory">
+        <h4>📜 Routing History</h4>
+        <div id="historyList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Routing Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>🔢 MurmurHash3</h3>
+        <p>
+          Elasticsearch uses <strong>MurmurHash3</strong> (32-bit) to hash the routing value.
+          It produces a uniform distribution — documents spread evenly across shards with no hot spots.
+          The hash is computed client-side too, so SDKs can predict which shard a document lands on.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🛤️ Custom Routing</h3>
+        <p>
+          You can override <code>_routing</code> with a custom value (e.g., <code>user_id</code>)
+          to co-locate related documents on the same shard. This enables <strong>shard-level joins</strong>
+          and avoids scatter-gather for user-scoped queries — but risks <em>hot shards</em> if distribution is uneven.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>⚠️ Shard Count is Permanent</h3>
+        <p>
+          Changing <code>number_of_primary_shards</code> would change the modulo result, making existing
+          documents unfindable. To "reshard", you must <strong>reindex</strong> into a new index with
+          the desired shard count, or use the <code>_split</code> / <code>_shrink</code> APIs.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Scatter-Gather Search -->
+  <section class="flow-section">
+    <h2>🔍 Scatter-Gather Query Execution</h2>
+    <p class="section-desc">Watch a search query fan out to all shards, execute in parallel, and merge results. Click "Run Query" to animate.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Shards: <strong id="sgShardLabel">4</strong></label>
+        <input type="range" id="sgShardSlider" min="2" max="8" value="4" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Nodes: <strong id="sgNodeLabel">3</strong></label>
+        <input type="range" id="sgNodeSlider" min="2" max="6" value="3" class="slot-slider">
+      </div>
+      <button id="sgRunBtn" class="action-btn primary-btn">🔍 Run Query</button>
+      <button id="sgResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="sgStatus">
+      <span class="status-badge idle" id="sgBadge">IDLE</span>
+      <span class="status-text" id="sgStatusText">Configure cluster and run a search query</span>
+    </div>
+
+    <div class="topology-container">
+      <canvas id="sgCanvas" width="860" height="420"></canvas>
+    </div>
+
+    <div class="failover-timeline" id="sgTimeline"></div>
+  </section>
+
+  <!-- Scatter-Gather Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>📨 Query Phase</h3>
+        <p>
+          The coordinating node picks <strong>one copy</strong> of each shard (primary or replica, using
+          <em>adaptive replica selection</em> based on response time). Each shard runs the query locally
+          against its Lucene index and returns a sorted list of <code>(doc_id, score)</code> — <strong>no
+          document bodies</strong> yet. This keeps network payloads small.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>📋 Fetch Phase</h3>
+        <p>
+          The coordinator merges all shard results using a <strong>priority queue</strong>, selects the global
+          top-N, then issues <code>multi-get</code> requests to fetch full documents <em>only from the
+          shards that hold winners</em>. With <code>size=10</code> and 5 shards, query phase returns 50
+          candidates but fetch phase retrieves only 10 documents.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Replica Placement & Failover -->
+  <section class="flow-section">
+    <h2>🛡️ Replica Placement & Failover</h2>
+    <p class="section-desc">See how replicas are distributed across nodes. Kill a node to watch the cluster recover.</p>
+
+    <div class="flow-controls">
+      <div class="slider-group">
+        <label>Primaries: <strong id="fpShardLabel">3</strong></label>
+        <input type="range" id="fpShardSlider" min="2" max="6" value="3" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Replicas: <strong id="fpReplicaLabel">1</strong></label>
+        <input type="range" id="fpReplicaSlider" min="0" max="2" value="1" class="slot-slider">
+      </div>
+      <div class="slider-group">
+        <label>Nodes: <strong id="fpNodeLabel">3</strong></label>
+        <input type="range" id="fpNodeSlider" min="2" max="6" value="3" class="slot-slider">
+      </div>
+      <button id="fpKillBtn" class="action-btn danger-btn">💀 Kill Random Node</button>
+      <button id="fpResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="flow-status" id="fpStatus">
+      <span class="status-badge healthy" id="fpBadge">GREEN</span>
+      <span class="status-text" id="fpStatusText">All primary and replica shards assigned</span>
+    </div>
+
+    <div class="cluster-viz" id="clusterViz"></div>
+
+    <div class="failover-timeline" id="fpTimeline"></div>
+  </section>
+
+  <!-- Failover Explainer -->
+  <section class="explain-section">
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>🟢 Cluster Health</h3>
+        <p>
+          <strong>Green</strong>: all shards assigned. <strong>Yellow</strong>: all primaries assigned but
+          some replicas aren't (data is safe but not fully redundant). <strong>Red</strong>: some primary
+          shards are unassigned — data loss risk. The master node continuously monitors and rebalances.
+        </p>
+      </div>
+      <div class="explain-card">
+        <h3>🔄 Shard Allocation</h3>
+        <p>
+          Elasticsearch's allocator ensures: (1) no primary and its replica on the same node,
+          (2) shards spread evenly across nodes (by count), (3) awareness of rack/zone attributes.
+          When a node dies, the master promotes replicas to primaries and creates new replicas elsewhere.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Routing Table -->
+  <section class="flow-section">
+    <h2>📋 Live Routing Table</h2>
+    <p class="section-desc">The cluster state contains a routing table mapping every shard to its node. Watch it update as nodes join and leave.</p>
+
+    <div class="flow-controls">
+      <button id="rtAddNodeBtn" class="action-btn primary-btn">+ Add Node</button>
+      <button id="rtRemoveNodeBtn" class="action-btn danger-btn">− Remove Node</button>
+      <button id="rtResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+    </div>
+
+    <div class="routing-table-container" id="routingTableContainer">
+      <table class="routing-table" id="routingTable">
+        <thead>
+          <tr>
+            <th>Shard</th>
+            <th>Type</th>
+            <th>State</th>
+            <th>Node</th>
+            <th>Docs</th>
+          </tr>
+        </thead>
+        <tbody id="routingTableBody"></tbody>
+      </table>
+    </div>
+
+    <div class="rt-stats" id="rtStats"></div>
+  </section>
+
+  <footer class="viz-footer">
+    <p>Based on <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-allocation.html" target="_blank">Elasticsearch Shard Allocation</a> and <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/search-your-data.html" target="_blank">Search Internals</a></p>
+  </footer>
+
+  <div class="share-buttons">
+    <span>Share this visualization:</span>
+    <a href="https://twitter.com/intent/tweet?text=Interactive%20visualization%20of%20Elasticsearch%20shard%20routing%20and%20cluster%20failover&url=https://systeminternals.dev/elasticsearch/cluster-shard-routing/" target="_blank" class="share-btn">𝕏 Twitter</a>
+    <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/elasticsearch/cluster-shard-routing/" target="_blank" class="share-btn">in LinkedIn</a>
+    <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/elasticsearch/cluster-shard-routing/&t=Interactive%20Elasticsearch%20Shard%20Routing%20%26%20Cluster%20Failover" target="_blank" class="share-btn">🟧 Hacker News</a>
+  </div>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #00d4ff, #60a5fa, #a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 1rem; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(96, 165, 250, 0.05));
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #00d4ff; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: #f0f0f0; }
+
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #00d4ff, #0099cc); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4); }
+  .danger-btn { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4); }
+  .reset-btn { background: rgba(255, 255, 255, 0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  .flow-section { margin-bottom: 50px; }
+  .flow-controls {
+    display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center;
+  }
+  .flow-status {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+    padding: 12px 16px; background: rgba(255,255,255,0.03);
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .status-badge {
+    padding: 4px 12px; border-radius: 20px; font-size: 0.8rem;
+    font-weight: 600; text-transform: uppercase;
+  }
+  .status-badge.idle { background: rgba(107,114,128,0.3); color: #9ca3af; }
+  .status-badge.searching { background: rgba(0,212,255,0.2); color: #00d4ff; }
+  .status-badge.scatter { background: rgba(0,212,255,0.2); color: #00d4ff; }
+  .status-badge.gather { background: rgba(168,85,247,0.2); color: #a855f7; }
+  .status-badge.done { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .status-badge.healthy { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .status-badge.yellow { background: rgba(234,179,8,0.2); color: #eab308; }
+  .status-badge.red { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .status-text { color: #aaa; font-size: 0.95rem; }
+
+  .slider-group { display: flex; align-items: center; gap: 8px; }
+  .slider-group label { font-size: 0.9rem; color: #aaa; white-space: nowrap; }
+  .slot-slider { width: 100px; accent-color: #00d4ff; }
+
+  .calculator-container {
+    background: rgba(0,0,0,0.2); border-radius: 16px; padding: 24px;
+    border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;
+  }
+  .calc-input-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .key-input {
+    flex: 1; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 10px; background: rgba(255,255,255,0.05); color: #fff;
+    font-size: 1rem; font-family: 'Monaco','Menlo',monospace; outline: none;
+  }
+  .key-input:focus { border-color: #00d4ff; }
+  .key-input::placeholder { color: #555; }
+
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .explain-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px; padding: 20px;
+  }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { font-size: 0.92rem; color: #999; line-height: 1.7; }
+  .explain-card strong { color: #ddd; }
+  .explain-card em { color: #00d4ff; font-style: normal; }
+  .explain-card code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+
+  .topology-container {
+    background: rgba(0,0,0,0.3); border-radius: 16px; padding: 16px;
+    border: 1px solid rgba(255,255,255,0.08); margin-bottom: 16px;
+    display: flex; justify-content: center;
+  }
+  .topology-container canvas { max-width: 100%; }
+
+  .failover-timeline {
+    max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+  }
+  :global(.timeline-entry) {
+    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    color: #aaa; animation: fadeIn 0.3s ease-out;
+  }
+  :global(.timeline-entry.info-step) { border-left: 3px solid #00d4ff; }
+  :global(.timeline-entry.success-step) { border-left: 3px solid #22c55e; }
+  :global(.timeline-entry.warn-step) { border-left: 3px solid #eab308; }
+  :global(.timeline-entry.danger-step) { border-left: 3px solid #ef4444; }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* Routing Viz */
+  .routing-formula {
+    padding: 16px; margin-bottom: 16px; border-radius: 10px;
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+    font-family: 'Monaco','Menlo',monospace; font-size: 0.95rem; color: #ccc;
+    text-align: center; min-height: 50px; display: flex; align-items: center;
+    justify-content: center; gap: 8px; flex-wrap: wrap;
+  }
+  :global(.formula-part) { transition: all 0.3s; }
+  :global(.formula-highlight) { color: #00d4ff; font-weight: 700; }
+  :global(.formula-result) { color: #22c55e; font-weight: 700; font-size: 1.1em; }
+
+  .shard-buckets {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px;
+  }
+  :global(.shard-bucket) {
+    width: 70px; height: 70px; border-radius: 12px;
+    background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.15);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 0.8rem; color: #888; transition: all 0.3s; position: relative;
+  }
+  :global(.shard-bucket.active) {
+    border-color: #22c55e; background: rgba(34,197,94,0.15);
+    color: #22c55e; transform: scale(1.1); box-shadow: 0 0 20px rgba(34,197,94,0.3);
+  }
+  :global(.shard-bucket .shard-label) { font-weight: 700; font-size: 0.9rem; }
+  :global(.shard-bucket .doc-count) { font-size: 0.7rem; margin-top: 2px; }
+
+  .routing-history { margin-top: 16px; }
+  .routing-history h4 { font-size: 0.9rem; color: #888; margin-bottom: 8px; }
+  :global(.history-item) {
+    display: flex; gap: 12px; align-items: center; padding: 6px 10px;
+    border-radius: 6px; background: rgba(255,255,255,0.02); margin-bottom: 4px;
+    font-size: 0.82rem; color: #888; font-family: 'Monaco','Menlo',monospace;
+  }
+  :global(.history-item .h-id) { color: #00d4ff; min-width: 120px; }
+  :global(.history-item .h-hash) { color: #a855f7; min-width: 100px; }
+  :global(.history-item .h-shard) { color: #22c55e; font-weight: 600; }
+
+  /* Cluster Viz */
+  .cluster-viz {
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px;
+  }
+  :global(.node-card) {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 14px; padding: 16px; min-width: 160px; transition: all 0.4s;
+  }
+  :global(.node-card.dead) {
+    border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.05); opacity: 0.5;
+  }
+  :global(.node-card .node-header) {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+    font-weight: 600; font-size: 0.9rem; color: #fff;
+  }
+  :global(.node-dot) {
+    width: 10px; height: 10px; border-radius: 50%; background: #22c55e;
+  }
+  :global(.node-card.dead .node-dot) { background: #ef4444; }
+  :global(.shard-chip) {
+    display: inline-block; padding: 4px 10px; border-radius: 6px; margin: 3px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  :global(.shard-chip.primary) {
+    background: rgba(0,212,255,0.15); color: #00d4ff; border: 1px solid rgba(0,212,255,0.3);
+  }
+  :global(.shard-chip.replica) {
+    background: rgba(168,85,247,0.1); color: #a855f7; border: 1px solid rgba(168,85,247,0.25);
+  }
+  :global(.shard-chip.promoted) {
+    background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3);
+    animation: pulse 1s ease-in-out 3;
+  }
+  :global(.shard-chip.unassigned) {
+    background: rgba(239,68,68,0.1); color: #ef4444; border: 1px dashed rgba(239,68,68,0.3);
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* Routing Table */
+  .routing-table-container {
+    background: rgba(0,0,0,0.2); border-radius: 16px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1); margin-bottom: 16px; overflow-x: auto;
+  }
+  .routing-table {
+    width: 100%; border-collapse: collapse; font-size: 0.88rem;
+  }
+  .routing-table th {
+    text-align: left; padding: 10px 14px; color: #888; font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .routing-table td {
+    padding: 8px 14px; color: #ccc; border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  :global(.routing-table tr.relocating td) { color: #eab308; }
+  :global(.routing-table tr.unassigned td) { color: #ef4444; }
+  :global(.rt-type-primary) { color: #00d4ff !important; font-weight: 600; }
+  :global(.rt-type-replica) { color: #a855f7 !important; }
+  :global(.rt-state-started) { color: #22c55e !important; }
+  :global(.rt-state-relocating) { color: #eab308 !important; }
+  :global(.rt-state-unassigned) { color: #ef4444 !important; }
+
+  .rt-stats {
+    display: flex; gap: 24px; flex-wrap: wrap; padding: 12px 16px;
+    background: rgba(255,255,255,0.03); border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  :global(.rt-stat) { font-size: 0.85rem; color: #888; }
+  :global(.rt-stat strong) { color: #fff; margin-right: 4px; }
+
+  .viz-footer {
+    text-align: center; padding: 30px 0; border-top: 1px solid rgba(255,255,255,0.1);
+    margin-top: 40px;
+  }
+  .viz-footer a { color: #00d4ff; }
+
+  .share-buttons {
+    display: flex; gap: 12px; align-items: center; justify-content: center;
+    padding: 20px 0; flex-wrap: wrap; font-size: 0.9rem; color: #666;
+  }
+  .share-btn {
+    padding: 6px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 500;
+    background: rgba(255,255,255,0.06); color: #aaa; border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.2s;
+  }
+  .share-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+</style>
+
+<script>
+  // ===== Utilities =====
+  function murmur3_32(str) {
+    var h = 0;
+    for (var i = 0; i < str.length; i++) {
+      var k = str.charCodeAt(i);
+      k = Math.imul(k, 0xcc9e2d51);
+      k = (k << 15) | (k >>> 17);
+      k = Math.imul(k, 0x1b873593);
+      h ^= k;
+      h = (h << 13) | (h >>> 19);
+      h = Math.imul(h, 5) + 0xe6546b64;
+    }
+    h ^= str.length;
+    h ^= h >>> 16;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return h >>> 0;
+  }
+
+  function addTimelineEntry(container, text, cls) {
+    var el = document.createElement('div');
+    el.className = 'timeline-entry ' + (cls || 'info-step');
+    el.textContent = text;
+    container.prepend(el);
+    if (container.children.length > 20) container.removeChild(container.lastChild);
+  }
+
+  // ===== 1. Document Routing =====
+  (function() {
+    var input = document.getElementById('routingInput');
+    var btn = document.getElementById('routeBtn');
+    var slider = document.getElementById('routeShardSlider');
+    var shardLabel = document.getElementById('routeShardLabel');
+    var formulaEl = document.getElementById('routingFormula');
+    var bucketsEl = document.getElementById('shardBuckets');
+    var historyList = document.getElementById('historyList');
+    var shardCounts = {};
+
+    function renderBuckets(numShards, activeShard) {
+      bucketsEl.innerHTML = '';
+      for (var i = 0; i < numShards; i++) {
+        var b = document.createElement('div');
+        b.className = 'shard-bucket' + (i === activeShard ? ' active' : '');
+        b.innerHTML = '<span class="shard-label">S' + i + '</span><span class="doc-count">' + (shardCounts[i] || 0) + ' docs</span>';
+        bucketsEl.appendChild(b);
+      }
+    }
+
+    function route() {
+      var id = input.value.trim();
+      if (!id) return;
+      var numShards = parseInt(slider.value);
+      var hash = murmur3_32(id);
+      var shard = hash % numShards;
+
+      formulaEl.innerHTML = '<span class="formula-part">shard = hash(</span>' +
+        '<span class="formula-highlight">"' + id + '"</span>' +
+        '<span class="formula-part">) % ' + numShards + ' = </span>' +
+        '<span class="formula-part" style="color:#a855f7">' + hash + '</span>' +
+        '<span class="formula-part"> % ' + numShards + ' = </span>' +
+        '<span class="formula-result">S' + shard + '</span>';
+
+      shardCounts[shard] = (shardCounts[shard] || 0) + 1;
+      renderBuckets(numShards, shard);
+
+      var item = document.createElement('div');
+      item.className = 'history-item';
+      item.innerHTML = '<span class="h-id">' + id + '</span>' +
+        '<span class="h-hash">hash=' + hash + '</span>' +
+        '<span class="h-shard">→ S' + shard + '</span>';
+      historyList.prepend(item);
+      if (historyList.children.length > 15) historyList.removeChild(historyList.lastChild);
+    }
+
+    btn.addEventListener('click', route);
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') route(); });
+    slider.addEventListener('input', function() {
+      shardLabel.textContent = slider.value;
+      shardCounts = {};
+      renderBuckets(parseInt(slider.value), -1);
+      formulaEl.innerHTML = '<span style="color:#555">Enter a document ID and click Route</span>';
+      historyList.innerHTML = '';
+    });
+
+    renderBuckets(5, -1);
+    formulaEl.innerHTML = '<span style="color:#555">Enter a document ID and click Route</span>';
+  })();
+
+  // ===== 2. Scatter-Gather =====
+  (function() {
+    var canvas = document.getElementById('sgCanvas');
+    var ctx = canvas.getContext('2d');
+    var shardSlider = document.getElementById('sgShardSlider');
+    var nodeSlider = document.getElementById('sgNodeSlider');
+    var shardLabel = document.getElementById('sgShardLabel');
+    var nodeLabel = document.getElementById('sgNodeLabel');
+    var runBtn = document.getElementById('sgRunBtn');
+    var resetBtn = document.getElementById('sgResetBtn');
+    var badge = document.getElementById('sgBadge');
+    var statusText = document.getElementById('sgStatusText');
+    var timeline = document.getElementById('sgTimeline');
+    var animating = false;
+
+    var COLORS = ['#00d4ff', '#a855f7', '#22c55e', '#eab308', '#ef4444', '#f97316', '#ec4899', '#06b6d4'];
+
+    shardSlider.addEventListener('input', function() { shardLabel.textContent = shardSlider.value; drawIdle(); });
+    nodeSlider.addEventListener('input', function() { nodeLabel.textContent = nodeSlider.value; drawIdle(); });
+
+    function drawIdle() {
+      if (animating) return;
+      var ns = parseInt(shardSlider.value);
+      var nn = parseInt(nodeSlider.value);
+      var w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Coordinator
+      ctx.fillStyle = '#1a1a2e';
+      ctx.strokeStyle = '#00d4ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(w/2 - 60, 20, 120, 40, 8);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#00d4ff';
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Coordinator', w/2, 45);
+
+      // Nodes with shards
+      var nodeW = 120, nodeH = 60;
+      var totalW = nn * nodeW + (nn-1) * 20;
+      var startX = (w - totalW) / 2;
+      var nodeY = h - 100;
+
+      for (var n = 0; n < nn; n++) {
+        var nx = startX + n * (nodeW + 20);
+        ctx.fillStyle = '#1a1a2e';
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(nx, nodeY, nodeW, nodeH, 8);
+        ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = '#888';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Node ' + n, nx + nodeW/2, nodeY + 16);
+
+        // Shards on this node
+        var shardsOnNode = [];
+        for (var s = 0; s < ns; s++) {
+          if (s % nn === n) shardsOnNode.push(s);
+        }
+        for (var si = 0; si < shardsOnNode.length; si++) {
+          var sx = nx + 10 + si * 30;
+          ctx.fillStyle = COLORS[shardsOnNode[si] % COLORS.length] + '30';
+          ctx.strokeStyle = COLORS[shardsOnNode[si] % COLORS.length];
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(sx, nodeY + 28, 26, 22, 4);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = COLORS[shardsOnNode[si] % COLORS.length];
+          ctx.font = 'bold 9px Inter, sans-serif';
+          ctx.fillText('P' + shardsOnNode[si], sx + 13, nodeY + 43);
+        }
+      }
+    }
+
+    drawIdle();
+
+    runBtn.addEventListener('click', async function() {
+      if (animating) return;
+      animating = true;
+      runBtn.disabled = true;
+      var ns = parseInt(shardSlider.value);
+      var nn = parseInt(nodeSlider.value);
+      var w = canvas.width, h = canvas.height;
+      timeline.innerHTML = '';
+
+      // Assign shards to nodes
+      var nodeShards = [];
+      for (var n = 0; n < nn; n++) nodeShards.push([]);
+      for (var s = 0; s < ns; s++) nodeShards[s % nn].push(s);
+
+      var nodeW = 120, nodeH = 60;
+      var totalW = nn * nodeW + (nn-1) * 20;
+      var startX = (w - totalW) / 2;
+      var nodeY = h - 100;
+      var coordX = w/2, coordY = 40;
+
+      function drawBase() {
+        ctx.clearRect(0, 0, w, h);
+        // Coordinator
+        ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(coordX - 60, 20, 120, 40, 8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#00d4ff'; ctx.font = 'bold 12px Inter, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Coordinator', coordX, 45);
+
+        for (var n = 0; n < nn; n++) {
+          var nx = startX + n * (nodeW + 20);
+          ctx.fillStyle = '#1a1a2e'; ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.roundRect(nx, nodeY, nodeW, nodeH, 8); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#888'; ctx.font = '11px Inter, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText('Node ' + n, nx + nodeW/2, nodeY + 16);
+          for (var si = 0; si < nodeShards[n].length; si++) {
+            var sx = nx + 10 + si * 30;
+            var sIdx = nodeShards[n][si];
+            ctx.fillStyle = COLORS[sIdx % COLORS.length] + '30';
+            ctx.strokeStyle = COLORS[sIdx % COLORS.length]; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(sx, nodeY + 28, 26, 22, 4); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = COLORS[sIdx % COLORS.length]; ctx.font = 'bold 9px Inter, sans-serif';
+            ctx.fillText('P' + sIdx, sx + 13, nodeY + 43);
+          }
+        }
+      }
+
+      function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+      // Phase 1: Query scatter
+      badge.className = 'status-badge scatter'; badge.textContent = 'SCATTER';
+      statusText.textContent = 'Sending query to all ' + ns + ' shards...';
+      addTimelineEntry(timeline, '📨 Client sends search query to coordinating node', 'info-step');
+      await sleep(600);
+
+      for (var n = 0; n < nn; n++) {
+        drawBase();
+        // Draw arrows to nodes already sent
+        for (var pn = 0; pn <= n; pn++) {
+          var nx = startX + pn * (nodeW + 20) + nodeW/2;
+          ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+          ctx.beginPath(); ctx.moveTo(coordX, 60); ctx.lineTo(nx, nodeY); ctx.stroke();
+          ctx.setLineDash([]);
+          // Arrow head
+          ctx.fillStyle = '#00d4ff'; ctx.beginPath();
+          ctx.moveTo(nx, nodeY); ctx.lineTo(nx - 5, nodeY - 10); ctx.lineTo(nx + 5, nodeY - 10); ctx.fill();
+        }
+        addTimelineEntry(timeline, '→ Query sent to Node ' + n + ' (shards: ' + nodeShards[n].map(function(s){ return 'P'+s; }).join(', ') + ')', 'info-step');
+        await sleep(400);
+      }
+
+      // Phase 2: Shard execution
+      badge.className = 'status-badge searching'; badge.textContent = 'EXECUTING';
+      statusText.textContent = 'Each shard executing query locally...';
+      addTimelineEntry(timeline, '⚡ All shards executing query in parallel', 'info-step');
+      await sleep(1000);
+
+      // Phase 3: Gather
+      badge.className = 'status-badge gather'; badge.textContent = 'GATHER';
+      statusText.textContent = 'Collecting results from all shards...';
+
+      for (var n = nn - 1; n >= 0; n--) {
+        drawBase();
+        for (var pn = n; pn < nn; pn++) {
+          var nx = startX + pn * (nodeW + 20) + nodeW/2;
+          ctx.strokeStyle = '#a855f7'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+          ctx.beginPath(); ctx.moveTo(nx, nodeY); ctx.lineTo(coordX, 60); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#a855f7'; ctx.beginPath();
+          ctx.moveTo(coordX, 60); ctx.lineTo(coordX - 5, 70); ctx.lineTo(coordX + 5, 70); ctx.fill();
+        }
+        var hits = Math.floor(Math.random() * 20) + 5;
+        addTimelineEntry(timeline, '← Node ' + n + ' returned ' + hits + ' candidate hits', 'success-step');
+        await sleep(350);
+      }
+
+      // Phase 4: Merge
+      badge.className = 'status-badge done'; badge.textContent = 'COMPLETE';
+      statusText.textContent = 'Results merged — top 10 documents returned to client';
+      addTimelineEntry(timeline, '✅ Coordinator merged results, returning top-10 documents', 'success-step');
+
+      drawBase();
+      ctx.fillStyle = 'rgba(34,197,94,0.15)';
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(coordX - 80, 70, 160, 30, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#22c55e'; ctx.font = 'bold 11px Inter, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('✓ Top-10 Results Merged', coordX, 90);
+
+      animating = false;
+      runBtn.disabled = false;
+    });
+
+    resetBtn.addEventListener('click', function() {
+      animating = false; runBtn.disabled = false;
+      badge.className = 'status-badge idle'; badge.textContent = 'IDLE';
+      statusText.textContent = 'Configure cluster and run a search query';
+      timeline.innerHTML = '';
+      drawIdle();
+    });
+  })();
+
+  // ===== 3. Replica Placement & Failover =====
+  (function() {
+    var shardSlider = document.getElementById('fpShardSlider');
+    var replicaSlider = document.getElementById('fpReplicaSlider');
+    var nodeSlider = document.getElementById('fpNodeSlider');
+    var shardLabel = document.getElementById('fpShardLabel');
+    var replicaLabel = document.getElementById('fpReplicaLabel');
+    var nodeLabel = document.getElementById('fpNodeLabel');
+    var killBtn = document.getElementById('fpKillBtn');
+    var resetBtn = document.getElementById('fpResetBtn');
+    var badge = document.getElementById('fpBadge');
+    var statusText = document.getElementById('fpStatusText');
+    var clusterViz = document.getElementById('clusterViz');
+    var timeline = document.getElementById('fpTimeline');
+
+    var nodes = [];
+    var deadNodes = new Set();
+
+    function buildCluster() {
+      var numShards = parseInt(shardSlider.value);
+      var numReplicas = parseInt(replicaSlider.value);
+      var numNodes = parseInt(nodeSlider.value);
+      deadNodes.clear();
+
+      nodes = [];
+      for (var n = 0; n < numNodes; n++) {
+        nodes.push({ id: n, shards: [] });
+      }
+
+      // Assign primaries round-robin
+      for (var s = 0; s < numShards; s++) {
+        nodes[s % numNodes].shards.push({ id: s, type: 'primary' });
+      }
+
+      // Assign replicas — different node than primary
+      for (var s = 0; s < numShards; s++) {
+        var primaryNode = s % numNodes;
+        for (var r = 0; r < numReplicas; r++) {
+          var replicaNode = (primaryNode + 1 + r) % numNodes;
+          if (replicaNode === primaryNode && numNodes > 1) replicaNode = (replicaNode + 1) % numNodes;
+          nodes[replicaNode].shards.push({ id: s, type: 'replica' });
+        }
+      }
+
+      render();
+      updateHealth();
+    }
+
+    function render() {
+      clusterViz.innerHTML = '';
+      for (var n = 0; n < nodes.length; n++) {
+        var node = nodes[n];
+        var card = document.createElement('div');
+        card.className = 'node-card' + (deadNodes.has(n) ? ' dead' : '');
+
+        var header = document.createElement('div');
+        header.className = 'node-header';
+        header.innerHTML = '<span class="node-dot"></span>Node ' + n + (deadNodes.has(n) ? ' ☠️' : '');
+        card.appendChild(header);
+
+        var shardsDiv = document.createElement('div');
+        for (var si = 0; si < node.shards.length; si++) {
+          var s = node.shards[si];
+          var chip = document.createElement('span');
+          chip.className = 'shard-chip ' + s.type;
+          chip.textContent = (s.type === 'primary' ? 'P' : 'R') + s.id;
+          shardsDiv.appendChild(chip);
+        }
+        card.appendChild(shardsDiv);
+        clusterViz.appendChild(card);
+      }
+    }
+
+    function updateHealth() {
+      var numShards = parseInt(shardSlider.value);
+      var numReplicas = parseInt(replicaSlider.value);
+
+      // Check if all primaries are covered
+      var coveredPrimaries = new Set();
+      var coveredReplicas = {};
+      for (var n = 0; n < nodes.length; n++) {
+        if (deadNodes.has(n)) continue;
+        for (var si = 0; si < nodes[n].shards.length; si++) {
+          var s = nodes[n].shards[si];
+          if (s.type === 'primary') coveredPrimaries.add(s.id);
+          else {
+            if (!coveredReplicas[s.id]) coveredReplicas[s.id] = 0;
+            coveredReplicas[s.id]++;
+          }
+        }
+      }
+
+      var allPrimaries = coveredPrimaries.size === numShards;
+      var allReplicas = true;
+      for (var s = 0; s < numShards; s++) {
+        if ((coveredReplicas[s] || 0) < numReplicas) { allReplicas = false; break; }
+      }
+
+      if (!allPrimaries) {
+        badge.className = 'status-badge red'; badge.textContent = 'RED';
+        statusText.textContent = 'Some primary shards are unassigned — data loss risk!';
+      } else if (!allReplicas) {
+        badge.className = 'status-badge yellow'; badge.textContent = 'YELLOW';
+        statusText.textContent = 'All primaries assigned but some replicas missing';
+      } else {
+        badge.className = 'status-badge healthy'; badge.textContent = 'GREEN';
+        statusText.textContent = 'All primary and replica shards assigned';
+      }
+    }
+
+    killBtn.addEventListener('click', function() {
+      var aliveNodes = [];
+      for (var n = 0; n < nodes.length; n++) {
+        if (!deadNodes.has(n)) aliveNodes.push(n);
+      }
+      if (aliveNodes.length <= 1) return;
+
+      var victim = aliveNodes[Math.floor(Math.random() * aliveNodes.length)];
+      deadNodes.add(victim);
+
+      addTimelineEntry(timeline, '💀 Node ' + victim + ' went down!', 'danger-step');
+
+      // Promote replicas where needed
+      var lostPrimaries = [];
+      for (var si = 0; si < nodes[victim].shards.length; si++) {
+        if (nodes[victim].shards[si].type === 'primary') {
+          lostPrimaries.push(nodes[victim].shards[si].id);
+        }
+      }
+
+      for (var li = 0; li < lostPrimaries.length; li++) {
+        var shardId = lostPrimaries[li];
+        var promoted = false;
+        for (var n = 0; n < nodes.length; n++) {
+          if (deadNodes.has(n)) continue;
+          for (var si = 0; si < nodes[n].shards.length; si++) {
+            if (nodes[n].shards[si].id === shardId && nodes[n].shards[si].type === 'replica') {
+              nodes[n].shards[si].type = 'primary';
+              addTimelineEntry(timeline, '🔄 Replica P' + shardId + ' on Node ' + n + ' promoted to primary', 'warn-step');
+              promoted = true;
+              break;
+            }
+          }
+          if (promoted) break;
+        }
+        if (!promoted) {
+          addTimelineEntry(timeline, '❌ Shard P' + shardId + ' has no replica — UNASSIGNED!', 'danger-step');
+        }
+      }
+
+      render();
+      updateHealth();
+    });
+
+    [shardSlider, replicaSlider, nodeSlider].forEach(function(s) {
+      s.addEventListener('input', function() {
+        shardLabel.textContent = shardSlider.value;
+        replicaLabel.textContent = replicaSlider.value;
+        nodeLabel.textContent = nodeSlider.value;
+        timeline.innerHTML = '';
+        buildCluster();
+      });
+    });
+
+    resetBtn.addEventListener('click', function() {
+      timeline.innerHTML = '';
+      buildCluster();
+    });
+
+    buildCluster();
+  })();
+
+  // ===== 4. Routing Table =====
+  (function() {
+    var tbody = document.getElementById('routingTableBody');
+    var addBtn = document.getElementById('rtAddNodeBtn');
+    var removeBtn = document.getElementById('rtRemoveNodeBtn');
+    var resetBtn = document.getElementById('rtResetBtn');
+    var statsEl = document.getElementById('rtStats');
+
+    var numNodes = 3;
+    var numShards = 5;
+    var numReplicas = 1;
+
+    function buildTable() {
+      tbody.innerHTML = '';
+      var rows = [];
+
+      for (var s = 0; s < numShards; s++) {
+        var primaryNode = s % numNodes;
+        var docs = Math.floor(Math.random() * 50000) + 10000;
+        rows.push({ shard: s, type: 'PRIMARY', state: 'STARTED', node: 'node-' + primaryNode, docs: docs.toLocaleString() });
+
+        for (var r = 0; r < numReplicas; r++) {
+          var replicaNode = (primaryNode + 1 + r) % numNodes;
+          rows.push({ shard: s, type: 'REPLICA', state: 'STARTED', node: 'node-' + replicaNode, docs: docs.toLocaleString() });
+        }
+      }
+
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var tr = document.createElement('tr');
+        var typeClass = r.type === 'PRIMARY' ? 'rt-type-primary' : 'rt-type-replica';
+        var stateClass = r.state === 'STARTED' ? 'rt-state-started' : r.state === 'RELOCATING' ? 'rt-state-relocating' : 'rt-state-unassigned';
+        tr.innerHTML = '<td>S' + r.shard + '</td><td class="' + typeClass + '">' + r.type + '</td><td class="' + stateClass + '">' + r.state + '</td><td>' + r.node + '</td><td>' + r.docs + '</td>';
+        tbody.appendChild(tr);
+      }
+
+      statsEl.innerHTML = '<span class="rt-stat"><strong>' + numNodes + '</strong> nodes</span>' +
+        '<span class="rt-stat"><strong>' + numShards + '</strong> primaries</span>' +
+        '<span class="rt-stat"><strong>' + (numShards * numReplicas) + '</strong> replicas</span>' +
+        '<span class="rt-stat"><strong>' + (numShards * (1 + numReplicas)) + '</strong> total shards</span>';
+    }
+
+    addBtn.addEventListener('click', function() {
+      if (numNodes >= 8) return;
+      numNodes++;
+      buildTable();
+    });
+
+    removeBtn.addEventListener('click', function() {
+      if (numNodes <= 1) return;
+      numNodes--;
+      buildTable();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      numNodes = 3;
+      buildTable();
+    });
+
+    buildTable();
+  })();
+</script>

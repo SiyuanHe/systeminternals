@@ -1,0 +1,466 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="DynamoDB Streams" 
+  description="Interactive visualization of DynamoDB Streams: change data capture, stream records, shard iteration, and event-driven architectures with Lambda"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "DynamoDB", href: "/dynamodb/" },
+    { label: "Streams", href: "/dynamodb/streams/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📡 DynamoDB Streams</h1>
+      <p class="subtitle">Change Data Capture — React to Every Write in Real Time</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          <strong>DynamoDB Streams</strong> captures an ordered sequence of item-level changes (insert, modify, delete)
+          in a table. Each change produces a <em>stream record</em> with the item's key, old/new values, and a
+          sequence number. Streams are organized into <strong>shards</strong> (like Kinesis). Common patterns:
+          trigger <em>Lambda functions</em> for event-driven architectures, replicate data to other stores,
+          maintain materialized views, or build audit logs. Records are retained for <strong>24 hours</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Stream Record Viewer -->
+    <section class="records-section">
+      <h2>📝 Stream Records</h2>
+      <p class="section-desc">Perform operations on a table and watch stream records appear in real time.</p>
+
+      <div class="records-viz">
+        <div class="table-col">
+          <div class="tbl-label">Table: Users</div>
+          <div class="table-rows" id="tableRows">
+            <div class="tbl-header">
+              <span>ID</span><span>Name</span><span>Email</span>
+            </div>
+          </div>
+          <div class="table-actions">
+            <button id="insertBtn" class="action-btn primary-btn">📥 INSERT</button>
+            <button id="updateBtn" class="action-btn secondary-btn" disabled>✏️ UPDATE</button>
+            <button id="deleteBtn" class="action-btn danger-btn" disabled>🗑️ DELETE</button>
+          </div>
+        </div>
+
+        <div class="stream-arrow">→</div>
+
+        <div class="stream-col">
+          <div class="tbl-label">Stream Records</div>
+          <div class="stream-records" id="streamRecords">
+            <div class="sr-empty">No changes yet — perform a table operation</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- View Types -->
+    <section class="views-section">
+      <h2>👁️ Stream View Types</h2>
+      <p class="section-desc">Choose what data is included in each stream record.</p>
+
+      <div class="view-cards">
+        <div class="view-card active" data-view="NEW_AND_OLD_IMAGES">
+          <div class="vc-name">NEW_AND_OLD_IMAGES</div>
+          <div class="vc-desc">Full item before & after change</div>
+          <div class="vc-size">Largest records</div>
+        </div>
+        <div class="view-card" data-view="NEW_IMAGE">
+          <div class="vc-name">NEW_IMAGE</div>
+          <div class="vc-desc">Full item after change</div>
+          <div class="vc-size">Medium records</div>
+        </div>
+        <div class="view-card" data-view="OLD_IMAGE">
+          <div class="vc-name">OLD_IMAGE</div>
+          <div class="vc-desc">Full item before change</div>
+          <div class="vc-size">Medium records</div>
+        </div>
+        <div class="view-card" data-view="KEYS_ONLY">
+          <div class="vc-name">KEYS_ONLY</div>
+          <div class="vc-desc">Only partition/sort key</div>
+          <div class="vc-size">Smallest records</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Event-Driven Architecture -->
+    <section class="arch-section">
+      <h2>⚡ Event-Driven Patterns</h2>
+      <p class="section-desc">Click a pattern to see the data flow.</p>
+
+      <div class="arch-patterns">
+        <div class="arch-card active" data-pattern="lambda">
+          <div class="ap-icon">λ</div>
+          <div class="ap-name">Lambda Trigger</div>
+        </div>
+        <div class="arch-card" data-pattern="replicate">
+          <div class="ap-icon">🔄</div>
+          <div class="ap-name">Cross-Region Replica</div>
+        </div>
+        <div class="arch-card" data-pattern="search">
+          <div class="ap-icon">🔍</div>
+          <div class="ap-name">Search Index</div>
+        </div>
+        <div class="arch-card" data-pattern="audit">
+          <div class="ap-icon">📋</div>
+          <div class="ap-name">Audit Log</div>
+        </div>
+      </div>
+
+      <div class="arch-flow" id="archFlow">
+        <div class="af-step">DynamoDB Table</div>
+        <div class="af-arrow">→</div>
+        <div class="af-step highlight">DynamoDB Stream</div>
+        <div class="af-arrow">→</div>
+        <div class="af-step">Lambda Function</div>
+        <div class="af-arrow">→</div>
+        <div class="af-step" id="afTarget">Process & respond</div>
+      </div>
+
+      <div class="arch-desc" id="archDesc">
+        <strong>Lambda Trigger:</strong> Most common pattern. Lambda polls the stream, receives batches of records, and processes them. Automatic retry on failure. Configure batch size (1-10,000), batch window (0-300s), and parallelization factor (1-10 per shard).
+      </div>
+    </section>
+
+    <!-- Shard Visualization -->
+    <section class="shard-section">
+      <h2>🔀 Stream Shards</h2>
+      <p class="section-desc">Streams are split into shards. Each shard has an iterator for sequential reading.</p>
+
+      <div class="shard-viz">
+        <div class="shard" id="shard0">
+          <div class="sh-label">Shard-0 (hash: 0000-7FFF)</div>
+          <div class="sh-records" id="shRecs0"></div>
+          <div class="sh-iterator">Iterator: <span id="shIter0">TRIM_HORIZON</span></div>
+        </div>
+        <div class="shard" id="shard1">
+          <div class="sh-label">Shard-1 (hash: 8000-FFFF)</div>
+          <div class="sh-records" id="shRecs1"></div>
+          <div class="sh-iterator">Iterator: <span id="shIter1">TRIM_HORIZON</span></div>
+        </div>
+      </div>
+
+      <div class="shard-controls">
+        <button id="shardWriteBtn" class="action-btn primary-btn">✍️ Write Records</button>
+        <button id="shardReadBtn" class="action-btn secondary-btn">📖 GetRecords (poll)</button>
+        <button id="shardResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="shard-log" id="shardLog"></div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Exactly-Once Processing?</h3>
+          <p>
+            DynamoDB Streams guarantees <strong>exactly-once delivery</strong> of each change and
+            <strong>in-order</strong> per item. But Lambda may retry on failures, so your processing
+            must be <em>idempotent</em>. Use the stream record's sequence number as a deduplication key.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⏰ 24-Hour Retention</h3>
+          <p>
+            Stream records are available for <strong>24 hours</strong>, then automatically deleted.
+            If your consumer falls behind by more than 24h, you lose records. For long-term storage,
+            write records to S3 or Kinesis Data Firehose.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Streams vs Kinesis Data Streams</h3>
+          <p>
+            DynamoDB also supports <strong>Kinesis Data Streams</strong> as an alternative. Kinesis offers
+            longer retention (up to 365 days), enhanced fan-out, and no 2-reader limit per shard.
+            Use Kinesis when you need multiple consumers or longer retention.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚠️ Shard Limits</h3>
+          <p>
+            Each shard supports up to <strong>2 GetRecords calls per second</strong> and up to
+            <strong>2 simultaneous readers</strong>. More readers? Use Kinesis adapter or fan out
+            through SNS/SQS. Shard splits happen automatically as table throughput scales.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html" target="_blank">DynamoDB Streams Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20DynamoDB%20Streams%20Visualizer&url=https://systeminternals.dev/dynamodb/streams/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/dynamodb/streams/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/dynamodb/streams/&t=Interactive%20DynamoDB%20Streams%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #f97316, #fbbf24, #f59e0b); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(249,115,22,0.1), rgba(251,191,36,0.05)); border: 1px solid rgba(249,115,22,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f97316; font-style: normal; font-weight: 500; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249,115,22,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Records */
+  .records-section { margin-bottom: 50px; }
+  .records-viz { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .table-col { flex: 1; }
+  .stream-col { flex: 1.2; }
+  .stream-arrow { font-size: 1.5rem; color: #555; padding-top: 40px; }
+  .tbl-label { font-size: 0.85rem; font-weight: 700; color: #f97316; margin-bottom: 10px; text-transform: uppercase; }
+  .table-rows { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; min-height: 120px; margin-bottom: 10px; }
+  .tbl-header { display: flex; gap: 10px; font-size: 0.75rem; font-weight: 700; color: #888; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 6px; }
+  .tbl-header span { flex: 1; }
+  :global(.tbl-row) { display: flex; gap: 10px; padding: 4px 0; font-size: 0.8rem; color: #ccc; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  :global(.tbl-row span) { flex: 1; font-family: 'Monaco','Menlo',monospace; font-size: 0.75rem; }
+  :global(.tbl-row.deleted) { opacity: 0.3; text-decoration: line-through; }
+  .table-actions { display: flex; gap: 8px; }
+
+  .stream-records { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; max-height: 250px; overflow-y: auto; }
+  .sr-empty { color: #555; font-size: 0.85rem; text-align: center; padding: 40px 0; }
+  :global(.sr-record) { padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; margin-bottom: 6px; animation: fadeIn 0.3s; }
+  :global(.sr-record.INSERT) { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.2); color: #6ee7b7; }
+  :global(.sr-record.MODIFY) { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.2); color: #93c5fd; }
+  :global(.sr-record.REMOVE) { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; }
+  :global(.sr-type) { font-weight: 700; }
+
+  /* View Types */
+  .views-section { margin-bottom: 50px; }
+  .view-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .view-card { padding: 16px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .view-card:hover { transform: translateY(-2px); }
+  .view-card.active { border-color: rgba(249,115,22,0.5); background: rgba(249,115,22,0.08); }
+  .vc-name { font-size: 0.8rem; font-weight: 700; color: #fff; font-family: 'Monaco','Menlo',monospace; margin-bottom: 4px; }
+  .vc-desc { font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+  .vc-size { font-size: 0.7rem; color: #f97316; }
+
+  /* Architecture */
+  .arch-section { margin-bottom: 50px; }
+  .arch-patterns { display: flex; gap: 12px; margin-bottom: 16px; }
+  .arch-card { flex: 1; padding: 14px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .arch-card:hover { transform: translateY(-2px); }
+  .arch-card.active { border-color: rgba(249,115,22,0.5); background: rgba(249,115,22,0.08); }
+  .ap-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .ap-name { font-size: 0.8rem; font-weight: 700; color: #fff; }
+
+  .arch-flow { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; justify-content: center; flex-wrap: wrap; }
+  .af-step { padding: 10px 16px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; font-size: 0.85rem; color: #ccc; }
+  .af-step.highlight { border-color: rgba(249,115,22,0.4); background: rgba(249,115,22,0.08); color: #f97316; font-weight: 600; }
+  .af-arrow { color: #555; }
+  .arch-desc { padding: 14px 18px; background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .arch-desc strong { color: #f97316; }
+
+  /* Shards */
+  .shard-section { margin-bottom: 50px; }
+  .shard-viz { display: flex; gap: 16px; margin-bottom: 16px; }
+  .shard { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; }
+  .sh-label { font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; }
+  .sh-records { display: flex; gap: 3px; flex-wrap: wrap; min-height: 30px; margin-bottom: 8px; }
+  :global(.sh-rec) { width: 24px; height: 24px; border-radius: 4px; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; }
+  :global(.sh-rec.unread) { background: rgba(249,115,22,0.2); border: 1px solid rgba(249,115,22,0.3); color: #fdba74; }
+  :global(.sh-rec.read) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.25); color: #6ee7b7; }
+  .sh-iterator { font-size: 0.7rem; color: #888; }
+  .sh-iterator span { color: #f97316; font-family: 'Monaco','Menlo',monospace; }
+  .shard-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .shard-log { font-size: 0.8rem; color: #888; max-height: 60px; overflow-y: auto; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #f97316; }
+  .explain-card em { color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(249,115,22,0.08), rgba(251,191,36,0.08)); border-color: rgba(249,115,22,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #f97316; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .records-viz { flex-direction: column; }
+    .stream-arrow { transform: rotate(90deg); text-align: center; }
+    .view-cards { grid-template-columns: repeat(2, 1fr); }
+    .arch-patterns { flex-wrap: wrap; }
+    .shard-viz { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== TABLE + STREAM RECORDS ==========
+  const NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'];
+  const DOMAINS = ['gmail.com', 'example.com', 'company.io'];
+  let tableData: { id: number; name: string; email: string; deleted?: boolean }[] = [];
+  let nextId = 1;
+  let seqNum = 1000;
+
+  function renderTable() {
+    const rows = document.getElementById('tableRows')!;
+    const header = '<div class="tbl-header"><span>ID</span><span>Name</span><span>Email</span></div>';
+    rows.innerHTML = header + tableData.map(r =>
+      `<div class="tbl-row ${r.deleted ? 'deleted' : ''}"><span>${r.id}</span><span>${r.name}</span><span>${r.email}</span></div>`
+    ).join('');
+    const hasRows = tableData.some(r => !r.deleted);
+    (document.getElementById('updateBtn') as HTMLButtonElement).disabled = !hasRows;
+    (document.getElementById('deleteBtn') as HTMLButtonElement).disabled = !hasRows;
+  }
+
+  function addStreamRecord(type: string, item: any, oldItem?: any) {
+    const el = document.getElementById('streamRecords')!;
+    if (el.querySelector('.sr-empty')) el.innerHTML = '';
+    seqNum++;
+    let detail = '';
+    if (type === 'INSERT') detail = `NewImage: {id:${item.id}, name:"${item.name}", email:"${item.email}"}`;
+    else if (type === 'MODIFY') detail = `Old: {name:"${oldItem.name}"} → New: {name:"${item.name}"}`;
+    else detail = `Keys: {id:${item.id}} OldImage: {name:"${item.name}"}`;
+
+    el.innerHTML = `<div class="sr-record ${type}"><span class="sr-type">${type}</span> seq:${seqNum}<br>${detail}</div>` + el.innerHTML;
+  }
+
+  document.getElementById('insertBtn')?.addEventListener('click', () => {
+    const name = NAMES[Math.floor(Math.random() * NAMES.length)];
+    const email = `${name.toLowerCase()}${nextId}@${DOMAINS[Math.floor(Math.random() * DOMAINS.length)]}`;
+    const item = { id: nextId++, name, email };
+    tableData.push(item);
+    renderTable();
+    addStreamRecord('INSERT', item);
+  });
+
+  document.getElementById('updateBtn')?.addEventListener('click', () => {
+    const active = tableData.filter(r => !r.deleted);
+    if (!active.length) return;
+    const item = active[Math.floor(Math.random() * active.length)];
+    const oldName = item.name;
+    item.name = item.name + ' (updated)';
+    renderTable();
+    addStreamRecord('MODIFY', item, { name: oldName });
+  });
+
+  document.getElementById('deleteBtn')?.addEventListener('click', () => {
+    const active = tableData.filter(r => !r.deleted);
+    if (!active.length) return;
+    const item = active[active.length - 1];
+    item.deleted = true;
+    renderTable();
+    addStreamRecord('REMOVE', item);
+  });
+
+  // ========== VIEW TYPES ==========
+  document.querySelectorAll('.view-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.view-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+    });
+  });
+
+  // ========== ARCHITECTURE PATTERNS ==========
+  const ARCH_DESCS: Record<string, { flow: string[]; desc: string }> = {
+    lambda: { flow: ['DynamoDB Table', 'DynamoDB Stream', 'Lambda Function', 'Process & respond'], desc: '<strong>Lambda Trigger:</strong> Most common pattern. Lambda polls the stream, receives batches of records, and processes them. Automatic retry on failure. Configure batch size (1-10,000), batch window (0-300s), and parallelization factor (1-10 per shard).' },
+    replicate: { flow: ['DynamoDB Table', 'DynamoDB Stream', 'Lambda / Global Tables', 'Remote Region Table'], desc: '<strong>Cross-Region Replication:</strong> DynamoDB Global Tables uses streams internally to replicate items across regions in ~1 second. For custom replication, use Lambda to write changes to another table or service.' },
+    search: { flow: ['DynamoDB Table', 'DynamoDB Stream', 'Lambda', 'OpenSearch / Elasticsearch'], desc: '<strong>Search Index Sync:</strong> DynamoDB has limited query patterns. Stream changes to OpenSearch for full-text search, aggregations, and complex queries. Lambda transforms DynamoDB records into search documents.' },
+    audit: { flow: ['DynamoDB Table', 'DynamoDB Stream', 'Kinesis Firehose', 'S3 (audit archive)'], desc: '<strong>Audit Log:</strong> Capture every change for compliance. Stream → Kinesis Firehose → S3 (Parquet). Query with Athena. Firehose handles batching and delivery automatically.' },
+  };
+
+  document.querySelectorAll('.arch-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.arch-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      const pattern = (card as HTMLElement).dataset.pattern!;
+      const cfg = ARCH_DESCS[pattern];
+      document.getElementById('archFlow')!.innerHTML = cfg.flow.map((s, i) =>
+        `<div class="af-step ${i === 1 ? 'highlight' : ''}">${s}</div>${i < cfg.flow.length - 1 ? '<div class="af-arrow">→</div>' : ''}`
+      ).join('');
+      document.getElementById('archDesc')!.innerHTML = cfg.desc;
+    });
+  });
+
+  // ========== SHARD VISUALIZATION ==========
+  let shardRecs: [number[], number[]] = [[], []];
+  let shardRead: [number, number] = [0, 0];
+  let shRecId = 0;
+
+  function renderShards() {
+    [0, 1].forEach(s => {
+      const el = document.getElementById(`shRecs${s}`)!;
+      el.innerHTML = shardRecs[s].map((id, i) =>
+        `<div class="sh-rec ${i < shardRead[s] ? 'read' : 'unread'}">${id}</div>`
+      ).join('');
+      document.getElementById(`shIter${s}`)!.textContent = shardRead[s] > 0 ? `AFTER_SEQ_${shardRecs[s][shardRead[s] - 1]}` : 'TRIM_HORIZON';
+    });
+  }
+
+  document.getElementById('shardWriteBtn')?.addEventListener('click', () => {
+    const count = 3 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < count; i++) {
+      shRecId++;
+      const shard = Math.random() < 0.5 ? 0 : 1;
+      shardRecs[shard].push(shRecId);
+    }
+    renderShards();
+    const logEl = document.getElementById('shardLog')!;
+    logEl.innerHTML += `<div style="padding:2px 0">✍️ ${count} records written across shards</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('shardReadBtn')?.addEventListener('click', () => {
+    let totalRead = 0;
+    [0, 1].forEach(s => {
+      const unread = shardRecs[s].length - shardRead[s];
+      const toRead = Math.min(unread, 5);
+      shardRead[s] += toRead;
+      totalRead += toRead;
+    });
+    renderShards();
+    const logEl = document.getElementById('shardLog')!;
+    logEl.innerHTML += `<div style="padding:2px 0">📖 GetRecords: read ${totalRead} records (limit 5 per shard)</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('shardResetBtn')?.addEventListener('click', () => {
+    shardRecs = [[], []];
+    shardRead = [0, 0];
+    shRecId = 0;
+    renderShards();
+    document.getElementById('shardLog')!.innerHTML = '';
+  });
+
+  // Init
+  renderTable();
+  renderShards();
+</script>
+</BaseLayout>
