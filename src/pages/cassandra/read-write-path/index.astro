@@ -1,0 +1,585 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Cassandra Read/Write Path" 
+  description="Interactive visualization of Cassandra's write path (commit log, memtable, SSTable), read path (merge, bloom filters), consistency levels, and read repair"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Cassandra", href: "/cassandra/" },
+    { label: "Read/Write Path", href: "/cassandra/read-write-path/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📖 Read/Write Path</h1>
+      <p class="subtitle">How Cassandra Writes, Reads, and Repairs — From Client to Disk</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Cassandra writes are <strong>blazingly fast</strong> — append to a commit log, write to an in-memory
+          <em>memtable</em>, done. No read-before-write. Reads are more complex: merge data from memtables and
+          SSTables, using <em>bloom filters</em> to skip irrelevant files. The <strong>coordinator</strong> node
+          routes requests to replicas based on the <em>consistency level</em>. When replicas disagree,
+          <strong>read repair</strong> fixes the stale ones using "last write wins" (timestamps).
+        </p>
+      </div>
+    </section>
+
+    <!-- Write Path -->
+    <section class="write-section">
+      <h2>✍️ Write Path</h2>
+      <p class="section-desc">Follow a write from client to disk. Click "Write" to step through each stage.</p>
+
+      <div class="write-viz">
+        <div class="write-stage" id="wsClient">
+          <div class="ws-icon">👤</div>
+          <div class="ws-name">Client</div>
+          <div class="ws-desc">INSERT INTO users...</div>
+        </div>
+        <div class="write-arrow" id="wa1">→</div>
+        <div class="write-stage" id="wsCoord">
+          <div class="ws-icon">🎯</div>
+          <div class="ws-name">Coordinator</div>
+          <div class="ws-desc">Routes to replicas</div>
+        </div>
+        <div class="write-arrow" id="wa2">→</div>
+        <div class="write-replicas">
+          <div class="write-replica" id="wsRep1">
+            <div class="wr-name">Replica 1</div>
+            <div class="wr-stages">
+              <div class="wr-stage" id="wr1cl">📝 Commit Log</div>
+              <div class="wr-stage" id="wr1mt">💾 Memtable</div>
+              <div class="wr-stage" id="wr1ss">📦 SSTable</div>
+            </div>
+          </div>
+          <div class="write-replica" id="wsRep2">
+            <div class="wr-name">Replica 2</div>
+            <div class="wr-stages">
+              <div class="wr-stage" id="wr2cl">📝 Commit Log</div>
+              <div class="wr-stage" id="wr2mt">💾 Memtable</div>
+              <div class="wr-stage" id="wr2ss">📦 SSTable</div>
+            </div>
+          </div>
+          <div class="write-replica" id="wsRep3">
+            <div class="wr-name">Replica 3</div>
+            <div class="wr-stages">
+              <div class="wr-stage" id="wr3cl">📝 Commit Log</div>
+              <div class="wr-stage" id="wr3mt">💾 Memtable</div>
+              <div class="wr-stage" id="wr3ss">📦 SSTable</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="write-controls">
+        <button id="writeStepBtn" class="action-btn primary-btn">✍️ Write Step</button>
+        <button id="writeFlushBtn" class="action-btn secondary-btn">💧 Flush Memtable → SSTable</button>
+        <button id="writeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="write-log" id="writeLog"></div>
+    </section>
+
+    <!-- Consistency Levels -->
+    <section class="cl-section">
+      <h2>🎚️ Consistency Levels</h2>
+      <p class="section-desc">How many replicas must respond? Drag the slider to feel the tradeoff.</p>
+
+      <div class="cl-viz">
+        <div class="cl-slider-row">
+          <label>Write Consistency:</label>
+          <input type="range" id="clWriteSlider" min="0" max="2" value="1" step="1">
+          <strong id="clWriteLabel">QUORUM (2/3)</strong>
+        </div>
+        <div class="cl-slider-row">
+          <label>Read Consistency:</label>
+          <input type="range" id="clReadSlider" min="0" max="2" value="1" step="1">
+          <strong id="clReadLabel">QUORUM (2/3)</strong>
+        </div>
+
+        <div class="cl-replicas" id="clReplicas">
+          <div class="cl-rep" id="clRep0">
+            <div class="clr-name">Replica 1</div>
+            <div class="clr-write" id="clrw0">—</div>
+            <div class="clr-read" id="clrr0">—</div>
+          </div>
+          <div class="cl-rep" id="clRep1">
+            <div class="clr-name">Replica 2</div>
+            <div class="clr-write" id="clrw1">—</div>
+            <div class="clr-read" id="clrr1">—</div>
+          </div>
+          <div class="cl-rep" id="clRep2">
+            <div class="clr-name">Replica 3</div>
+            <div class="clr-write" id="clrw2">—</div>
+            <div class="clr-read" id="clrr2">—</div>
+          </div>
+        </div>
+
+        <div class="cl-analysis" id="clAnalysis">
+          <div class="cla-item">
+            <span class="cla-label">Strong Consistency?</span>
+            <span class="cla-value" id="claStrong">✅ Yes (R + W > N)</span>
+          </div>
+          <div class="cla-item">
+            <span class="cla-label">Write Availability</span>
+            <span class="cla-value" id="claWriteAvail">Tolerates 1 node down</span>
+          </div>
+          <div class="cla-item">
+            <span class="cla-label">Read Availability</span>
+            <span class="cla-value" id="claReadAvail">Tolerates 1 node down</span>
+          </div>
+          <div class="cla-item">
+            <span class="cla-label">Latency</span>
+            <span class="cla-value" id="claLatency">Moderate — waits for 2 replicas</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Read Path -->
+    <section class="read-section">
+      <h2>📖 Read Path</h2>
+      <p class="section-desc">Follow a read through bloom filters, SSTables, memtable merge, and read repair.</p>
+
+      <div class="read-viz">
+        <div class="read-flow" id="readFlow">
+          <div class="rf-step" id="rfReq">
+            <div class="rf-icon">📨</div>
+            <div class="rf-label">Coordinator receives read</div>
+          </div>
+          <div class="rf-step" id="rfBloom">
+            <div class="rf-icon">🌸</div>
+            <div class="rf-label">Bloom filter check</div>
+            <div class="rf-detail" id="rfBloomDetail"></div>
+          </div>
+          <div class="rf-step" id="rfPartIdx">
+            <div class="rf-icon">📑</div>
+            <div class="rf-label">Partition index lookup</div>
+          </div>
+          <div class="rf-step" id="rfSSTable">
+            <div class="rf-icon">📦</div>
+            <div class="rf-label">Read from SSTables + Memtable</div>
+            <div class="rf-detail" id="rfSSDetail"></div>
+          </div>
+          <div class="rf-step" id="rfMerge">
+            <div class="rf-icon">🔀</div>
+            <div class="rf-label">Merge (latest timestamp wins)</div>
+          </div>
+          <div class="rf-step" id="rfRepair">
+            <div class="rf-icon">🔧</div>
+            <div class="rf-label">Read repair (if replicas disagree)</div>
+            <div class="rf-detail" id="rfRepairDetail"></div>
+          </div>
+          <div class="rf-step" id="rfResponse">
+            <div class="rf-icon">✅</div>
+            <div class="rf-label">Return result to client</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="read-controls">
+        <button id="readStepBtn" class="action-btn primary-btn">📖 Read Step</button>
+        <button id="readRepairBtn" class="action-btn danger-btn">🔧 Trigger Read Repair</button>
+        <button id="readResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="read-log" id="readLog"></div>
+    </section>
+
+    <!-- Hinted Handoff -->
+    <section class="hh-section">
+      <h2>💌 Hinted Handoff</h2>
+      <p class="section-desc">When a replica is down, the coordinator stores a "hint" and replays it when the node recovers.</p>
+
+      <div class="hh-viz">
+        <div class="hh-nodes">
+          <div class="hh-node" id="hhNode1">
+            <div class="hh-status online">● Online</div>
+            <div class="hh-name">Node 1</div>
+          </div>
+          <div class="hh-node down" id="hhNode2">
+            <div class="hh-status offline">● Down</div>
+            <div class="hh-name">Node 2</div>
+          </div>
+          <div class="hh-node" id="hhNode3">
+            <div class="hh-status online">● Online</div>
+            <div class="hh-name">Node 3 (Coordinator)</div>
+            <div class="hh-hints" id="hhHints"></div>
+          </div>
+        </div>
+
+        <div class="hh-controls">
+          <button id="hhWriteBtn" class="action-btn primary-btn">✍️ Write (Node 2 down)</button>
+          <button id="hhRecoverBtn" class="action-btn secondary-btn">🔄 Node 2 Recovers</button>
+          <button id="hhResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+
+        <div class="hh-log" id="hhLog"></div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Writes Are Fast</h3>
+          <p>
+            Cassandra writes are <strong>sequential appends</strong> — commit log is append-only, memtable is in-memory.
+            No read-before-write, no locking, no seeking. Write latency is typically <em>&lt;1ms</em>.
+            The tradeoff: reads are more expensive because data may be spread across multiple SSTables
+            that must be merged at read time.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🌸 Bloom Filters</h3>
+          <p>
+            Each SSTable has a bloom filter — a probabilistic data structure that answers "is this key
+            maybe in this file?" False positives are possible (check the file anyway), but false negatives
+            are not (skip the file for sure). Saves enormous I/O by avoiding unnecessary SSTable reads.
+            Default false positive rate: 1%.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⏰ Timestamps & Last-Write-Wins</h3>
+          <p>
+            Every cell in Cassandra has a <strong>microsecond timestamp</strong>. During reads, if replicas
+            return different versions, the one with the highest timestamp wins. This is why clock sync
+            (NTP) is critical — clock skew can cause "older" writes to overwrite "newer" ones.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔧 Anti-Entropy Repair</h3>
+          <p>
+            Read repair only fixes data that's actually read. For full consistency, run <code>nodetool repair</code>
+            periodically. It compares Merkle trees between replicas and syncs differences. Required within
+            <code>gc_grace_seconds</code> (default 10 days) to prevent zombie data resurrection.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://cassandra.apache.org/doc/latest/cassandra/architecture/" target="_blank">Apache Cassandra Architecture Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Cassandra%20Read%2FWrite%20Path%20Visualizer&url=https://systeminternals.dev/cassandra/read-write-path/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/cassandra/read-write-path/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/cassandra/read-write-path/&t=Interactive%20Cassandra%20Read%2FWrite%20Path%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #a78bfa, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(167,139,250,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #a78bfa; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 200px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+
+  /* Write Path */
+  .write-section { margin-bottom: 50px; }
+  .write-viz { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; overflow-x: auto; padding: 10px 0; }
+  .write-stage { text-align: center; min-width: 100px; padding: 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; transition: all 0.4s; }
+  .write-stage.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.08); }
+  .write-stage.done { border-color: rgba(52,211,153,0.4); }
+  .ws-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .ws-name { font-size: 0.85rem; font-weight: 700; color: #fff; }
+  .ws-desc { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .write-arrow { font-size: 1.3rem; color: #555; padding-top: 20px; }
+  .write-replicas { display: flex; gap: 8px; }
+  .write-replica { padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; min-width: 120px; transition: all 0.4s; }
+  .write-replica.active { border-color: rgba(96,165,250,0.4); }
+  .wr-name { font-size: 0.8rem; font-weight: 700; color: #ccc; margin-bottom: 8px; text-align: center; }
+  .wr-stages { display: flex; flex-direction: column; gap: 4px; }
+  .wr-stage { padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); color: #888; transition: all 0.3s; text-align: center; }
+  .wr-stage.active { background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.3); color: #60a5fa; }
+  .wr-stage.done { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.25); color: #34d399; }
+
+  .write-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .write-log { font-size: 0.8rem; max-height: 80px; overflow-y: auto; color: #888; }
+  :global(.wlog) { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Consistency Levels */
+  .cl-section { margin-bottom: 50px; }
+  .cl-viz { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .cl-slider-row { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .cl-slider-row label { color: #ccc; font-size: 0.9rem; min-width: 140px; }
+  .cl-slider-row strong { color: #60a5fa; min-width: 130px; }
+
+  .cl-replicas { display: flex; gap: 12px; margin: 20px 0; }
+  .cl-rep { flex: 1; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; text-align: center; }
+  .clr-name { font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .clr-write, .clr-read { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; margin-bottom: 4px; }
+  :global(.clr-ack) { background: rgba(52,211,153,0.15); color: #34d399; }
+  :global(.clr-skip) { background: rgba(107,114,128,0.15); color: #9ca3af; }
+  :global(.clr-required) { background: rgba(96,165,250,0.15); color: #60a5fa; }
+
+  .cl-analysis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cla-item { display: flex; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.02); border-radius: 6px; }
+  .cla-label { font-size: 0.85rem; color: #888; }
+  .cla-value { font-size: 0.85rem; font-weight: 600; color: #ccc; }
+
+  /* Read Path */
+  .read-section { margin-bottom: 50px; }
+  .read-flow { display: flex; flex-direction: column; gap: 6px; }
+  .rf-step { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; transition: all 0.4s; }
+  .rf-step.active { border-color: rgba(96,165,250,0.4); background: rgba(96,165,250,0.05); }
+  .rf-step.done { border-color: rgba(52,211,153,0.3); }
+  .rf-icon { font-size: 1.2rem; }
+  .rf-label { font-size: 0.85rem; color: #ccc; }
+  .rf-detail { font-size: 0.75rem; color: #888; margin-left: auto; }
+
+  .read-controls { display: flex; gap: 12px; margin-top: 16px; margin-bottom: 12px; }
+  .read-log { font-size: 0.8rem; max-height: 80px; overflow-y: auto; color: #888; }
+
+  /* Hinted Handoff */
+  .hh-section { margin-bottom: 50px; }
+  .hh-viz { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .hh-nodes { display: flex; gap: 16px; margin-bottom: 16px; }
+  .hh-node { flex: 1; padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(52,211,153,0.2); border-radius: 12px; text-align: center; transition: all 0.4s; }
+  .hh-node.down { border-color: rgba(239,68,68,0.3); opacity: 0.5; }
+  .hh-status { font-size: 0.75rem; margin-bottom: 4px; }
+  .hh-status.online { color: #34d399; }
+  .hh-status.offline { color: #ef4444; }
+  .hh-name { font-size: 0.9rem; font-weight: 700; color: #fff; }
+  .hh-hints { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+  :global(.hh-hint) { padding: 3px 8px; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25); border-radius: 4px; font-size: 0.7rem; color: #fde68a; animation: fadeIn 0.3s; }
+  :global(.hh-hint.replayed) { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.25); color: #6ee7b7; }
+
+  .hh-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .hh-log { font-size: 0.8rem; max-height: 60px; overflow-y: auto; color: #888; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card em { color: #a78bfa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #a78bfa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(167,139,250,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .write-viz { flex-direction: column; align-items: stretch; }
+    .write-replicas { flex-direction: column; }
+    .write-arrow { transform: rotate(90deg); text-align: center; }
+    .cl-replicas { flex-direction: column; }
+    .cl-analysis { grid-template-columns: 1fr; }
+    .hh-nodes { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== WRITE PATH ==========
+  let writeStep = 0;
+
+  const WRITE_STEPS = [
+    { log: '👤 Client sends INSERT INTO users (id, name) VALUES (1, "Alice")' },
+    { log: '🎯 Coordinator determines replicas via consistent hashing', activate: ['wsCoord'] },
+    { log: '📝 Replica 1: Append to commit log (sequential write)', activate: ['wr1cl'] },
+    { log: '💾 Replica 1: Write to memtable (in-memory, sorted)', activate: ['wr1mt'] },
+    { log: '📝 Replica 2: Append to commit log', activate: ['wr2cl'] },
+    { log: '💾 Replica 2: Write to memtable', activate: ['wr2mt'] },
+    { log: '📝 Replica 3: Append to commit log', activate: ['wr3cl'] },
+    { log: '💾 Replica 3: Write to memtable', activate: ['wr3mt'] },
+    { log: '✅ QUORUM achieved (2/3 acks) — client gets success response' },
+  ];
+
+  document.getElementById('writeStepBtn')?.addEventListener('click', () => {
+    if (writeStep >= WRITE_STEPS.length) return;
+    const step = WRITE_STEPS[writeStep];
+    const logEl = document.getElementById('writeLog')!;
+    logEl.innerHTML += `<div class="wlog">${step.log}</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+
+    if (step.activate) {
+      step.activate.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.classList.add('active');
+          setTimeout(() => { el.classList.remove('active'); el.classList.add('done'); }, 500);
+        }
+      });
+    }
+    writeStep++;
+  });
+
+  document.getElementById('writeFlushBtn')?.addEventListener('click', () => {
+    ['wr1ss', 'wr2ss', 'wr3ss'].forEach(id => {
+      const el = document.getElementById(id)!;
+      el.classList.add('active');
+      setTimeout(() => { el.classList.remove('active'); el.classList.add('done'); }, 500);
+    });
+    const logEl = document.getElementById('writeLog')!;
+    logEl.innerHTML += `<div class="wlog">💧 Memtables flushed to SSTables on all replicas (background)</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('writeResetBtn')?.addEventListener('click', () => {
+    writeStep = 0;
+    document.getElementById('writeLog')!.innerHTML = '';
+    document.querySelectorAll('.wr-stage, .write-stage').forEach(el => el.classList.remove('active', 'done'));
+  });
+
+  // ========== CONSISTENCY LEVELS ==========
+  const CL_NAMES = ['ONE (1/3)', 'QUORUM (2/3)', 'ALL (3/3)'];
+  const CL_COUNTS = [1, 2, 3];
+
+  function updateCL() {
+    const w = parseInt((document.getElementById('clWriteSlider') as HTMLInputElement).value);
+    const r = parseInt((document.getElementById('clReadSlider') as HTMLInputElement).value);
+    document.getElementById('clWriteLabel')!.textContent = CL_NAMES[w];
+    document.getElementById('clReadLabel')!.textContent = CL_NAMES[r];
+
+    const wc = CL_COUNTS[w];
+    const rc = CL_COUNTS[r];
+
+    for (let i = 0; i < 3; i++) {
+      const wEl = document.getElementById(`clrw${i}`)!;
+      const rEl = document.getElementById(`clrr${i}`)!;
+      wEl.textContent = i < wc ? '✍️ Write ACK required' : '— async';
+      wEl.className = 'clr-write ' + (i < wc ? 'clr-required' : 'clr-skip');
+      rEl.textContent = i < rc ? '📖 Read required' : '— skip';
+      rEl.className = 'clr-read ' + (i < rc ? 'clr-required' : 'clr-skip');
+    }
+
+    const strong = (wc + rc) > 3;
+    document.getElementById('claStrong')!.textContent = strong ? '✅ Yes (R + W > N)' : '❌ No (R + W ≤ N) — stale reads possible';
+    document.getElementById('claStrong')!.style.color = strong ? '#34d399' : '#ef4444';
+    document.getElementById('claWriteAvail')!.textContent = `Tolerates ${3 - wc} node(s) down`;
+    document.getElementById('claReadAvail')!.textContent = `Tolerates ${3 - rc} node(s) down`;
+
+    const latency = wc === 1 || rc === 1 ? 'Low — fastest replica wins' : wc === 3 || rc === 3 ? 'High — waits for slowest replica' : 'Moderate — waits for 2 replicas';
+    document.getElementById('claLatency')!.textContent = latency;
+  }
+
+  document.getElementById('clWriteSlider')?.addEventListener('input', updateCL);
+  document.getElementById('clReadSlider')?.addEventListener('input', updateCL);
+
+  // ========== READ PATH ==========
+  let readStep = 0;
+  const READ_STEPS = [
+    { id: 'rfReq', log: '📨 Coordinator receives SELECT * FROM users WHERE id = 1' },
+    { id: 'rfBloom', log: '🌸 Bloom filter: SSTable-1 ✓ maybe, SSTable-2 ✗ skip, SSTable-3 ✓ maybe', detail: 'rfBloomDetail', detailText: 'Checked 3 SSTables, 1 skipped' },
+    { id: 'rfPartIdx', log: '📑 Partition index: found key in SSTable-1 at offset 0x4A20' },
+    { id: 'rfSSTable', log: '📦 Read SSTable-1 (ts=1000) + Memtable (ts=1050)', detail: 'rfSSDetail', detailText: 'Memtable: name="Alice V2" | SSTable: name="Alice"' },
+    { id: 'rfMerge', log: '🔀 Merge: Memtable wins (ts 1050 > 1000) → name="Alice V2"' },
+    { id: 'rfResponse', log: '✅ Return {id: 1, name: "Alice V2"} to client' },
+  ];
+
+  document.getElementById('readStepBtn')?.addEventListener('click', () => {
+    if (readStep >= READ_STEPS.length) return;
+    const step = READ_STEPS[readStep];
+    const el = document.getElementById(step.id)!;
+    el.classList.add('active');
+    if (readStep > 0) {
+      document.getElementById(READ_STEPS[readStep - 1].id)!.classList.remove('active');
+      document.getElementById(READ_STEPS[readStep - 1].id)!.classList.add('done');
+    }
+    if (step.detail) {
+      document.getElementById(step.detail)!.textContent = step.detailText!;
+    }
+    const logEl = document.getElementById('readLog')!;
+    logEl.innerHTML += `<div class="wlog">${step.log}</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    readStep++;
+  });
+
+  document.getElementById('readRepairBtn')?.addEventListener('click', () => {
+    const el = document.getElementById('rfRepair')!;
+    el.classList.add('active');
+    document.getElementById('rfRepairDetail')!.textContent = 'Replica 3 has stale data → sending correction';
+    const logEl = document.getElementById('readLog')!;
+    logEl.innerHTML += `<div class="wlog">🔧 Read repair: Replica 3 returned ts=900, sending latest (ts=1050)</div>`;
+    logEl.innerHTML += `<div class="wlog">✅ Replica 3 updated — all replicas now consistent</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    setTimeout(() => { el.classList.remove('active'); el.classList.add('done'); }, 800);
+  });
+
+  document.getElementById('readResetBtn')?.addEventListener('click', () => {
+    readStep = 0;
+    document.getElementById('readLog')!.innerHTML = '';
+    document.querySelectorAll('.rf-step').forEach(el => {
+      el.classList.remove('active', 'done');
+    });
+    ['rfBloomDetail', 'rfSSDetail', 'rfRepairDetail'].forEach(id => {
+      document.getElementById(id)!.textContent = '';
+    });
+  });
+
+  // ========== HINTED HANDOFF ==========
+  let hhHintCount = 0;
+
+  document.getElementById('hhWriteBtn')?.addEventListener('click', () => {
+    hhHintCount++;
+    const hints = document.getElementById('hhHints')!;
+    hints.innerHTML += `<div class="hh-hint">💌 Hint #${hhHintCount} for Node 2</div>`;
+    const logEl = document.getElementById('hhLog')!;
+    logEl.innerHTML += `<div class="wlog">✍️ Write #${hhHintCount}: Node 2 down → Coordinator stores hint locally</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('hhRecoverBtn')?.addEventListener('click', () => {
+    const node2 = document.getElementById('hhNode2')!;
+    node2.classList.remove('down');
+    node2.querySelector('.hh-status')!.textContent = '● Online';
+    node2.querySelector('.hh-status')!.className = 'hh-status online';
+
+    // Replay hints
+    document.querySelectorAll('.hh-hint').forEach(hint => hint.classList.add('replayed'));
+    const logEl = document.getElementById('hhLog')!;
+    logEl.innerHTML += `<div class="wlog">🔄 Node 2 recovered! Replaying ${hhHintCount} hint(s)...</div>`;
+    logEl.innerHTML += `<div class="wlog">✅ All hints replayed — Node 2 caught up</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('hhResetBtn')?.addEventListener('click', () => {
+    hhHintCount = 0;
+    const node2 = document.getElementById('hhNode2')!;
+    node2.classList.add('down');
+    node2.querySelector('.hh-status')!.textContent = '● Down';
+    node2.querySelector('.hh-status')!.className = 'hh-status offline';
+    document.getElementById('hhHints')!.innerHTML = '';
+    document.getElementById('hhLog')!.innerHTML = '';
+  });
+
+  // Init
+  updateCL();
+</script>
+</BaseLayout>

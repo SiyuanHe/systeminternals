@@ -1,0 +1,643 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Memory Management" 
+  description="Interactive visualization of Linux virtual memory, page tables, TLB, page faults, and memory allocation"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Linux", href: "/linux/" },
+    { label: "Memory Management", href: "/linux/memory-management/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🧠 Memory Management</h1>
+      <p class="subtitle">Virtual Addresses, Page Tables, TLB — How Every Memory Access Really Works</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Every process sees its own <strong>virtual address space</strong> — a continuous range of addresses
+          that the kernel maps to physical RAM (or swap) via <em>page tables</em>. The CPU's <strong>MMU</strong>
+          translates virtual→physical on every memory access. The <em>TLB</em> (Translation Lookaside Buffer)
+          caches recent translations for speed. When a page isn't in RAM, a <strong>page fault</strong> triggers
+          the kernel to load it from disk. This abstraction enables process isolation, shared memory, memory-mapped
+          files, and overcommit.
+        </p>
+      </div>
+    </section>
+
+    <!-- Address Translation -->
+    <section class="translation-section">
+      <h2>🔀 Virtual → Physical Translation</h2>
+      <p class="section-desc">Enter a virtual address and watch the 4-level page table walk. x86-64 uses 48-bit virtual addresses.</p>
+
+      <div class="translation-viz">
+        <div class="addr-input-row">
+          <label>Virtual Address (hex):</label>
+          <input type="text" id="virtAddr" value="0x7FFE42A01234" maxlength="18" class="addr-input">
+          <button id="translateBtn" class="action-btn primary-btn">🔍 Translate</button>
+        </div>
+
+        <div class="addr-breakdown" id="addrBreakdown">
+          <div class="addr-field" data-field="pml4">
+            <div class="af-label">PML4</div>
+            <div class="af-bits" id="pml4Bits">—</div>
+            <div class="af-desc">bits 47-39</div>
+          </div>
+          <div class="addr-field" data-field="pdpt">
+            <div class="af-label">PDPT</div>
+            <div class="af-bits" id="pdptBits">—</div>
+            <div class="af-desc">bits 38-30</div>
+          </div>
+          <div class="addr-field" data-field="pd">
+            <div class="af-label">PD</div>
+            <div class="af-bits" id="pdBits">—</div>
+            <div class="af-desc">bits 29-21</div>
+          </div>
+          <div class="addr-field" data-field="pt">
+            <div class="af-label">PT</div>
+            <div class="af-bits" id="ptBits">—</div>
+            <div class="af-desc">bits 20-12</div>
+          </div>
+          <div class="addr-field" data-field="offset">
+            <div class="af-label">Offset</div>
+            <div class="af-bits" id="offsetBits">—</div>
+            <div class="af-desc">bits 11-0</div>
+          </div>
+        </div>
+
+        <div class="walk-viz" id="walkViz">
+          <div class="walk-step" id="walkCR3">
+            <div class="ws-label">CR3</div>
+            <div class="ws-box">Page Table Root</div>
+          </div>
+          <div class="walk-arrow">→</div>
+          <div class="walk-step" id="walkPML4">
+            <div class="ws-label">PML4 Table</div>
+            <div class="ws-box" id="wsPML4">index [—]</div>
+          </div>
+          <div class="walk-arrow">→</div>
+          <div class="walk-step" id="walkPDPT">
+            <div class="ws-label">PDPT</div>
+            <div class="ws-box" id="wsPDPT">index [—]</div>
+          </div>
+          <div class="walk-arrow">→</div>
+          <div class="walk-step" id="walkPD">
+            <div class="ws-label">Page Dir</div>
+            <div class="ws-box" id="wsPD">index [—]</div>
+          </div>
+          <div class="walk-arrow">→</div>
+          <div class="walk-step" id="walkPT">
+            <div class="ws-label">Page Table</div>
+            <div class="ws-box" id="wsPT">index [—]</div>
+          </div>
+          <div class="walk-arrow">→</div>
+          <div class="walk-step result" id="walkPhys">
+            <div class="ws-label">Physical Page</div>
+            <div class="ws-box" id="wsPhys">—</div>
+          </div>
+        </div>
+
+        <div class="walk-result" id="walkResult"></div>
+      </div>
+    </section>
+
+    <!-- TLB Simulator -->
+    <section class="tlb-section">
+      <h2>⚡ TLB Cache Simulator</h2>
+      <p class="section-desc">The TLB caches recent translations. See how access patterns affect hit rates.</p>
+
+      <div class="tlb-viz">
+        <div class="tlb-cache-col">
+          <div class="tlb-label">TLB (64 entries)</div>
+          <div class="tlb-grid" id="tlbGrid"></div>
+          <div class="tlb-stats">
+            <span>Hits: <strong id="tlbHits" class="hit-color">0</strong></span>
+            <span>Misses: <strong id="tlbMisses" class="miss-color">0</strong></span>
+            <span>Hit Rate: <strong id="tlbHitRate">—</strong></span>
+          </div>
+        </div>
+
+        <div class="tlb-access-col">
+          <div class="tlb-label">Access Log</div>
+          <div class="tlb-log" id="tlbLog"></div>
+        </div>
+      </div>
+
+      <div class="tlb-controls">
+        <button id="tlbSeqBtn" class="action-btn primary-btn">📊 Sequential Access</button>
+        <button id="tlbRandBtn" class="action-btn secondary-btn">🎲 Random Access</button>
+        <button id="tlbLoopBtn" class="action-btn commit-btn">🔁 Loop (hot set)</button>
+        <button id="tlbFlushBtn" class="action-btn danger-btn">💥 Flush TLB</button>
+        <button id="tlbResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Page Fault Handling -->
+    <section class="fault-section">
+      <h2>💥 Page Fault Handling</h2>
+      <p class="section-desc">What happens when you access memory that isn't in RAM yet.</p>
+
+      <div class="fault-types">
+        <div class="fault-card" id="faultMinor">
+          <div class="fault-icon">📄</div>
+          <div class="fault-name">Minor Fault</div>
+          <div class="fault-desc">Page exists but not mapped. Kernel allocates a frame and updates the page table. No disk I/O needed.</div>
+          <div class="fault-cost">~1 µs</div>
+          <button class="fault-trigger action-btn primary-btn" data-type="minor">Simulate</button>
+          <div class="fault-timeline" id="faultMinorTimeline"></div>
+        </div>
+        <div class="fault-card" id="faultMajor">
+          <div class="fault-icon">💿</div>
+          <div class="fault-name">Major Fault</div>
+          <div class="fault-desc">Page is on disk (swapped out or file-backed). Kernel must read from disk — expensive!</div>
+          <div class="fault-cost">~1-10 ms (1000x slower)</div>
+          <button class="fault-trigger action-btn danger-btn" data-type="major">Simulate</button>
+          <div class="fault-timeline" id="faultMajorTimeline"></div>
+        </div>
+        <div class="fault-card" id="faultInvalid">
+          <div class="fault-icon">🚫</div>
+          <div class="fault-name">Invalid Fault</div>
+          <div class="fault-desc">Address not in any VMA (virtual memory area). Kernel sends SIGSEGV — segmentation fault!</div>
+          <div class="fault-cost">Process killed</div>
+          <button class="fault-trigger action-btn" style="background:rgba(239,68,68,0.3);color:#ef4444;" data-type="invalid">Simulate</button>
+          <div class="fault-timeline" id="faultInvalidTimeline"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Page Sizes -->
+    <section class="pages-section">
+      <h2>📐 Page Size Comparison</h2>
+      <p class="section-desc">Drag the slider to see how page size affects translation and TLB coverage.</p>
+
+      <div class="page-compare">
+        <div class="page-slider-row">
+          <label>Page Size:</label>
+          <input type="range" id="pageSizeSlider" min="0" max="2" value="0" step="1">
+          <strong id="pageSizeLabel">4 KB (default)</strong>
+        </div>
+
+        <div class="page-stats-grid">
+          <div class="page-stat">
+            <div class="ps-label">Page Size</div>
+            <div class="ps-value" id="psSize">4 KB</div>
+          </div>
+          <div class="page-stat">
+            <div class="ps-label">PT Levels</div>
+            <div class="ps-value" id="psLevels">4</div>
+          </div>
+          <div class="page-stat">
+            <div class="ps-label">TLB Coverage (64 entries)</div>
+            <div class="ps-value" id="psTlbCoverage">256 KB</div>
+          </div>
+          <div class="page-stat">
+            <div class="ps-label">Offset Bits</div>
+            <div class="ps-value" id="psOffset">12</div>
+          </div>
+          <div class="page-stat">
+            <div class="ps-label">Pages for 1GB</div>
+            <div class="ps-value" id="psCount">262,144</div>
+          </div>
+          <div class="page-stat">
+            <div class="ps-label">Internal Fragmentation</div>
+            <div class="ps-value" id="psFragmentation">Low</div>
+          </div>
+        </div>
+
+        <div class="page-visual" id="pageVisual">
+          <div class="pv-bar" id="pvBar">
+            <div class="pv-fill" id="pvFill" style="width: 0.025%"></div>
+          </div>
+          <div class="pv-label">TLB coverage of 1 GB address space</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Virtual Memory?</h3>
+          <p>
+            Without it, every process would share one flat address space — a bug in one program could corrupt
+            another. Virtual memory gives each process an <strong>isolated 48-bit address space</strong> (256 TB),
+            lets the kernel place pages anywhere in physical RAM, enables <em>copy-on-write</em> for fork(),
+            and supports <em>demand paging</em> — only allocating physical memory when actually accessed.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Copy-on-Write (COW)</h3>
+          <p>
+            When fork() creates a child, both processes share the same physical pages (marked read-only).
+            Only when one writes does the kernel copy that page — hence "copy on write." This makes
+            fork() nearly instant regardless of process memory size. Used heavily by Redis for background saves.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 OOM Killer</h3>
+          <p>
+            Linux <strong>overcommits</strong> by default — it promises more memory than exists, betting
+            that not all processes will use their full allocation. When it runs out for real, the
+            <em>OOM Killer</em> picks a process to sacrifice (usually the biggest memory consumer).
+            Tune via <code>/proc/sys/vm/overcommit_memory</code>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ NUMA Awareness</h3>
+          <p>
+            On multi-socket systems, each CPU socket has its own local memory. Accessing remote memory
+            (another socket) costs ~100ns extra. The kernel's NUMA policy tries to allocate pages on the
+            same node as the CPU running the process. Use <code>numactl</code> to control this.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.kernel.org/doc/html/latest/admin-guide/mm/index.html" target="_blank">Linux Memory Management Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Linux%20Memory%20Management%20Visualizer&url=https://systeminternals.dev/linux/memory-management/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/linux/memory-management/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/linux/memory-management/&t=Interactive%20Linux%20Memory%20Management%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .commit-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .commit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  input[type="range"] { -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer; width: 100%; max-width: 300px; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #34d399; cursor: pointer; }
+
+  /* Translation */
+  .translation-section { margin-bottom: 50px; }
+  .addr-input-row { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .addr-input-row label { color: #ccc; font-size: 0.9rem; }
+  .addr-input { padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(52,211,153,0.3); background: rgba(0,0,0,0.3); color: #34d399; font-size: 1rem; font-family: 'Monaco','Menlo',monospace; width: 200px; }
+
+  .addr-breakdown { display: flex; gap: 4px; margin-bottom: 20px; }
+  .addr-field { flex: 1; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; text-align: center; transition: all 0.3s; }
+  .addr-field.active { border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.08); }
+  .af-label { font-size: 0.8rem; font-weight: 700; color: #34d399; }
+  .af-bits { font-size: 1.1rem; font-weight: 700; color: #fff; font-family: 'Monaco','Menlo',monospace; margin: 4px 0; }
+  .af-desc { font-size: 0.65rem; color: #666; }
+
+  .walk-viz { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; overflow-x: auto; padding: 10px 0; }
+  .walk-step { text-align: center; min-width: 90px; }
+  .ws-label { font-size: 0.7rem; color: #888; margin-bottom: 4px; }
+  .ws-box { padding: 10px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; color: #ccc; transition: all 0.4s; }
+  .walk-step.active .ws-box { border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.08); color: #34d399; }
+  .walk-step.result .ws-box { border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.08); color: #fbbf24; }
+  .walk-arrow { color: #555; font-size: 1.2rem; }
+  .walk-result { font-size: 0.9rem; color: #aaa; padding: 8px; text-align: center; min-height: 24px; }
+
+  /* TLB */
+  .tlb-section { margin-bottom: 50px; }
+  .tlb-viz { display: flex; gap: 16px; margin-bottom: 16px; }
+  .tlb-cache-col { flex: 1.5; }
+  .tlb-access-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); max-height: 280px; overflow-y: auto; }
+  .tlb-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .tlb-grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-bottom: 10px; }
+  :global(.tlb-entry) { width: 100%; aspect-ratio: 1; border-radius: 3px; transition: all 0.2s; }
+  :global(.tlb-entry.empty) { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); }
+  :global(.tlb-entry.filled) { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); }
+  :global(.tlb-entry.hit) { background: rgba(52,211,153,0.4); border-color: #34d399; box-shadow: 0 0 8px rgba(52,211,153,0.4); }
+  :global(.tlb-entry.miss) { background: rgba(239,68,68,0.3); border-color: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.3); }
+
+  .tlb-stats { display: flex; gap: 20px; font-size: 0.85rem; color: #888; }
+  .hit-color { color: #34d399; }
+  .miss-color { color: #ef4444; }
+
+  :global(.tlb-log-entry) { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; margin-bottom: 3px; animation: msgAppear 0.2s ease-out; }
+  @keyframes msgAppear { from { opacity: 0; } to { opacity: 1; } }
+  :global(.tlb-log-entry.hit) { background: rgba(52,211,153,0.08); color: #6ee7b7; }
+  :global(.tlb-log-entry.miss) { background: rgba(239,68,68,0.08); color: #fca5a5; }
+
+  .tlb-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  /* Page Faults */
+  .fault-section { margin-bottom: 50px; }
+  .fault-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .fault-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; text-align: center; }
+  .fault-icon { font-size: 2rem; margin-bottom: 8px; }
+  .fault-name { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .fault-desc { font-size: 0.8rem; color: #aaa; line-height: 1.5; margin-bottom: 8px; }
+  .fault-cost { font-size: 0.85rem; font-weight: 600; color: #34d399; margin-bottom: 12px; }
+  .fault-trigger { font-size: 0.8rem; padding: 6px 14px; margin-bottom: 10px; }
+  .fault-timeline { min-height: 40px; font-size: 0.7rem; text-align: left; }
+  :global(.ft-step) { padding: 3px 8px; border-radius: 4px; margin-bottom: 2px; animation: msgAppear 0.3s ease-out; }
+  :global(.ft-step.kernel) { background: rgba(60,165,250,0.08); color: #93c5fd; }
+  :global(.ft-step.disk) { background: rgba(251,191,36,0.08); color: #fde68a; }
+  :global(.ft-step.done) { background: rgba(52,211,153,0.08); color: #6ee7b7; }
+  :global(.ft-step.error) { background: rgba(239,68,68,0.08); color: #fca5a5; }
+
+  /* Page Sizes */
+  .pages-section { margin-bottom: 50px; }
+  .page-compare { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .page-slider-row { display: flex; gap: 16px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .page-slider-row label { color: #ccc; }
+  .page-slider-row strong { color: #34d399; font-size: 1.1rem; }
+  .page-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .page-stat { padding: 12px; background: rgba(255,255,255,0.03); border-radius: 10px; text-align: center; }
+  .ps-label { font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+  .ps-value { font-size: 1.1rem; font-weight: 700; color: #fff; }
+  .page-visual { margin-top: 12px; }
+  .pv-bar { height: 24px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; }
+  .pv-fill { height: 100%; background: linear-gradient(90deg, #34d399, #60a5fa); border-radius: 6px; transition: width 0.5s; min-width: 2px; }
+  .pv-label { font-size: 0.8rem; color: #888; margin-top: 6px; text-align: center; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card em { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .addr-breakdown { flex-direction: column; }
+    .walk-viz { flex-direction: column; align-items: stretch; }
+    .walk-arrow { transform: rotate(90deg); text-align: center; }
+    .tlb-viz { flex-direction: column; }
+    .fault-types { grid-template-columns: 1fr; }
+    .page-stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== ADDRESS TRANSLATION ==========
+  document.getElementById('translateBtn')?.addEventListener('click', () => {
+    const input = (document.getElementById('virtAddr') as HTMLInputElement).value.replace(/^0x/i, '');
+    const addr = BigInt('0x' + (input || '0'));
+
+    const pml4 = Number((addr >> 39n) & 0x1FFn);
+    const pdpt = Number((addr >> 30n) & 0x1FFn);
+    const pd = Number((addr >> 21n) & 0x1FFn);
+    const pt = Number((addr >> 12n) & 0x1FFn);
+    const offset = Number(addr & 0xFFFn);
+
+    document.getElementById('pml4Bits')!.textContent = pml4.toString();
+    document.getElementById('pdptBits')!.textContent = pdpt.toString();
+    document.getElementById('pdBits')!.textContent = pd.toString();
+    document.getElementById('ptBits')!.textContent = pt.toString();
+    document.getElementById('offsetBits')!.textContent = '0x' + offset.toString(16);
+
+    // Animate walk
+    const steps = ['walkCR3', 'walkPML4', 'walkPDPT', 'walkPD', 'walkPT', 'walkPhys'];
+    const indices = [null, pml4, pdpt, pd, pt, null];
+    const boxIds = [null, 'wsPML4', 'wsPDPT', 'wsPD', 'wsPT', 'wsPhys'];
+
+    steps.forEach(s => document.getElementById(s)!.classList.remove('active'));
+    document.querySelectorAll('.addr-field').forEach(f => f.classList.remove('active'));
+
+    let i = 0;
+    const fieldNames = [null, 'pml4', 'pdpt', 'pd', 'pt', 'offset'];
+
+    function animateStep() {
+      if (i >= steps.length) {
+        // Generate fake physical address
+        const physPage = ((pml4 * 73 + pdpt * 37 + pd * 19 + pt * 7) % 0xFFFFF);
+        const physAddr = (physPage << 12) | offset;
+        document.getElementById('wsPhys')!.textContent = '0x' + physAddr.toString(16).padStart(8, '0');
+        document.getElementById('walkResult')!.textContent =
+          `✅ Virtual 0x${input} → Physical 0x${physAddr.toString(16).padStart(8, '0')} (4 table lookups + offset)`;
+        return;
+      }
+
+      document.getElementById(steps[i])!.classList.add('active');
+      if (fieldNames[i]) {
+        document.querySelector(`.addr-field[data-field="${fieldNames[i]}"]`)?.classList.add('active');
+      }
+      if (boxIds[i] && indices[i] !== null) {
+        document.getElementById(boxIds[i]!)!.textContent = `index [${indices[i]}]`;
+      }
+      i++;
+      setTimeout(animateStep, 350);
+    }
+    animateStep();
+  });
+
+  // ========== TLB SIMULATOR ==========
+  const TLB_SIZE = 64;
+  let tlbEntries: (number | null)[] = new Array(TLB_SIZE).fill(null);
+  let tlbHits = 0;
+  let tlbMisses = 0;
+  let tlbLRU: number[] = [];
+
+  function initTlbGrid() {
+    const grid = document.getElementById('tlbGrid')!;
+    grid.innerHTML = '';
+    for (let i = 0; i < TLB_SIZE; i++) {
+      grid.innerHTML += `<div class="tlb-entry empty" id="tlbe${i}"></div>`;
+    }
+  }
+
+  function tlbAccess(page: number) {
+    const idx = tlbEntries.indexOf(page);
+    const logEl = document.getElementById('tlbLog')!;
+
+    if (idx >= 0) {
+      // HIT
+      tlbHits++;
+      const entry = document.getElementById(`tlbe${idx}`)!;
+      entry.classList.remove('filled', 'miss');
+      entry.classList.add('hit');
+      setTimeout(() => { entry.classList.remove('hit'); entry.classList.add('filled'); }, 300);
+      logEl.innerHTML += `<div class="tlb-log-entry hit">✓ HIT page 0x${page.toString(16)} → slot ${idx}</div>`;
+      // Update LRU
+      tlbLRU = tlbLRU.filter(i => i !== idx);
+      tlbLRU.push(idx);
+    } else {
+      // MISS
+      tlbMisses++;
+      let slot: number;
+      const emptySlot = tlbEntries.indexOf(null);
+      if (emptySlot >= 0) {
+        slot = emptySlot;
+      } else {
+        slot = tlbLRU.shift()!;
+      }
+      tlbEntries[slot] = page;
+      tlbLRU = tlbLRU.filter(i => i !== slot);
+      tlbLRU.push(slot);
+
+      const entry = document.getElementById(`tlbe${slot}`)!;
+      entry.classList.remove('empty', 'hit');
+      entry.classList.add('miss');
+      setTimeout(() => { entry.classList.remove('miss'); entry.classList.add('filled'); }, 300);
+      logEl.innerHTML += `<div class="tlb-log-entry miss">✗ MISS page 0x${page.toString(16)} → evict slot ${slot}</div>`;
+    }
+
+    logEl.scrollTop = logEl.scrollHeight;
+    document.getElementById('tlbHits')!.textContent = String(tlbHits);
+    document.getElementById('tlbMisses')!.textContent = String(tlbMisses);
+    const total = tlbHits + tlbMisses;
+    document.getElementById('tlbHitRate')!.textContent = total > 0 ? (tlbHits / total * 100).toFixed(1) + '%' : '—';
+  }
+
+  async function runPattern(pages: number[], delay: number = 80) {
+    for (const page of pages) {
+      tlbAccess(page);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  document.getElementById('tlbSeqBtn')?.addEventListener('click', () => {
+    const pages = Array.from({ length: 80 }, (_, i) => i);
+    runPattern(pages);
+  });
+
+  document.getElementById('tlbRandBtn')?.addEventListener('click', () => {
+    const pages = Array.from({ length: 80 }, () => Math.floor(Math.random() * 256));
+    runPattern(pages);
+  });
+
+  document.getElementById('tlbLoopBtn')?.addEventListener('click', () => {
+    // Access 8 pages in a tight loop — should get high hit rate after warmup
+    const hotSet = [10, 20, 30, 40, 50, 60, 70, 80];
+    const pages: number[] = [];
+    for (let i = 0; i < 10; i++) pages.push(...hotSet);
+    runPattern(pages, 50);
+  });
+
+  document.getElementById('tlbFlushBtn')?.addEventListener('click', () => {
+    tlbEntries = new Array(TLB_SIZE).fill(null);
+    tlbLRU = [];
+    for (let i = 0; i < TLB_SIZE; i++) {
+      const el = document.getElementById(`tlbe${i}`)!;
+      el.className = 'tlb-entry empty';
+    }
+    document.getElementById('tlbLog')!.innerHTML += `<div class="tlb-log-entry miss">💥 TLB FLUSHED — all entries invalidated</div>`;
+  });
+
+  document.getElementById('tlbResetBtn')?.addEventListener('click', () => {
+    tlbEntries = new Array(TLB_SIZE).fill(null);
+    tlbLRU = [];
+    tlbHits = 0;
+    tlbMisses = 0;
+    initTlbGrid();
+    document.getElementById('tlbLog')!.innerHTML = '';
+    document.getElementById('tlbHits')!.textContent = '0';
+    document.getElementById('tlbMisses')!.textContent = '0';
+    document.getElementById('tlbHitRate')!.textContent = '—';
+  });
+
+  // ========== PAGE FAULT SIMULATION ==========
+  document.querySelectorAll('.fault-trigger').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const type = (btn as HTMLElement).dataset.type!;
+      const timeline = document.getElementById(`fault${type.charAt(0).toUpperCase() + type.slice(1)}Timeline`)!;
+      timeline.innerHTML = '';
+
+      if (type === 'minor') {
+        const steps = [
+          { text: '1. CPU raises #PF exception', cls: 'kernel', delay: 200 },
+          { text: '2. Kernel checks VMA — address is valid', cls: 'kernel', delay: 300 },
+          { text: '3. Allocate physical frame from free list', cls: 'kernel', delay: 200 },
+          { text: '4. Zero the page (security)', cls: 'kernel', delay: 150 },
+          { text: '5. Update page table entry + TLB', cls: 'kernel', delay: 150 },
+          { text: '✅ Done (~1 µs) — retry instruction', cls: 'done', delay: 0 },
+        ];
+        for (const step of steps) {
+          timeline.innerHTML += `<div class="ft-step ${step.cls}">${step.text}</div>`;
+          await new Promise(r => setTimeout(r, step.delay));
+        }
+      } else if (type === 'major') {
+        const steps = [
+          { text: '1. CPU raises #PF exception', cls: 'kernel', delay: 200 },
+          { text: '2. Kernel checks VMA — page swapped out', cls: 'kernel', delay: 200 },
+          { text: '3. Find free frame (may need to evict)', cls: 'kernel', delay: 200 },
+          { text: '4. Issue disk I/O read...', cls: 'disk', delay: 800 },
+          { text: '5. ⏳ Waiting for disk (1-10 ms)...', cls: 'disk', delay: 1000 },
+          { text: '6. Copy page from disk to RAM', cls: 'disk', delay: 300 },
+          { text: '7. Update page table + TLB', cls: 'kernel', delay: 150 },
+          { text: '✅ Done (~5 ms) — retry instruction', cls: 'done', delay: 0 },
+        ];
+        for (const step of steps) {
+          timeline.innerHTML += `<div class="ft-step ${step.cls}">${step.text}</div>`;
+          await new Promise(r => setTimeout(r, step.delay));
+        }
+      } else {
+        const steps = [
+          { text: '1. CPU raises #PF exception', cls: 'kernel', delay: 200 },
+          { text: '2. Kernel checks VMA — NO mapping found!', cls: 'error', delay: 300 },
+          { text: '3. Send SIGSEGV to process', cls: 'error', delay: 200 },
+          { text: '💀 Segmentation fault (core dumped)', cls: 'error', delay: 0 },
+        ];
+        for (const step of steps) {
+          timeline.innerHTML += `<div class="ft-step ${step.cls}">${step.text}</div>`;
+          await new Promise(r => setTimeout(r, step.delay));
+        }
+      }
+    });
+  });
+
+  // ========== PAGE SIZE SLIDER ==========
+  const PAGE_CONFIGS = [
+    { size: '4 KB', levels: 4, tlbCov: '256 KB', offset: 12, count: '262,144', frag: 'Low', pct: 0.025 },
+    { size: '2 MB', levels: 3, tlbCov: '128 MB', offset: 21, count: '512', frag: 'Medium', pct: 12.5 },
+    { size: '1 GB', levels: 2, tlbCov: '64 GB', offset: 30, count: '1', frag: 'High', pct: 100 },
+  ];
+  const PAGE_LABELS = ['4 KB (default)', '2 MB (huge page)', '1 GB (gigantic page)'];
+
+  document.getElementById('pageSizeSlider')?.addEventListener('input', (e) => {
+    const idx = parseInt((e.target as HTMLInputElement).value);
+    const cfg = PAGE_CONFIGS[idx];
+    document.getElementById('pageSizeLabel')!.textContent = PAGE_LABELS[idx];
+    document.getElementById('psSize')!.textContent = cfg.size;
+    document.getElementById('psLevels')!.textContent = String(cfg.levels);
+    document.getElementById('psTlbCoverage')!.textContent = cfg.tlbCov;
+    document.getElementById('psOffset')!.textContent = String(cfg.offset);
+    document.getElementById('psCount')!.textContent = cfg.count;
+    document.getElementById('psFragmentation')!.textContent = cfg.frag;
+    document.getElementById('pvFill')!.style.width = cfg.pct + '%';
+  });
+
+  // Init
+  initTlbGrid();
+</script>
+</BaseLayout>

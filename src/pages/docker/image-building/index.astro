@@ -1,0 +1,527 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Docker Image Building" 
+  description="Interactive visualization of Docker image layers, build caching, cache invalidation, multi-stage builds, and BuildKit parallelism"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Docker", href: "/docker/" },
+    { label: "Image Building", href: "/docker/image-building/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🏗️ Docker Image Building</h1>
+      <p class="subtitle">Layers, Caching, Multi-Stage — Why Your Builds Are Slow (and How to Fix Them)</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A Docker image is a stack of <strong>read-only layers</strong>. Each Dockerfile instruction creates a layer.
+          Docker caches layers — if an instruction hasn't changed, its cached layer is reused. But cache invalidation
+          is <em>cascading</em>: change one line and everything below it rebuilds. <strong>Multi-stage builds</strong>
+          let you use multiple FROM stages, copying only the final artifacts into a slim runtime image.
+          <em>BuildKit</em> adds parallelism, better caching, and secret mounts.
+        </p>
+      </div>
+    </section>
+
+    <!-- Layer-by-Layer Build -->
+    <section class="build-section">
+      <h2>📦 Layer-by-Layer Build</h2>
+      <p class="section-desc">Watch a Dockerfile build layer by layer. Each instruction adds a new layer to the image.</p>
+
+      <div class="build-viz">
+        <div class="dockerfile-col">
+          <div class="df-label">Dockerfile</div>
+          <div class="dockerfile" id="dockerfile">
+            <div class="df-line" data-line="0"><span class="df-cmd">FROM</span> node:20-alpine</div>
+            <div class="df-line" data-line="1"><span class="df-cmd">WORKDIR</span> /app</div>
+            <div class="df-line" data-line="2"><span class="df-cmd">COPY</span> package*.json ./</div>
+            <div class="df-line" data-line="3"><span class="df-cmd">RUN</span> npm install</div>
+            <div class="df-line" data-line="4"><span class="df-cmd">COPY</span> . .</div>
+            <div class="df-line" data-line="5"><span class="df-cmd">RUN</span> npm run build</div>
+            <div class="df-line" data-line="6"><span class="df-cmd">EXPOSE</span> 3000</div>
+            <div class="df-line" data-line="7"><span class="df-cmd">CMD</span> ["node", "dist/server.js"]</div>
+          </div>
+        </div>
+
+        <div class="layers-col">
+          <div class="df-label">Image Layers</div>
+          <div class="layers-stack" id="layersStack"></div>
+          <div class="layers-total">
+            Total: <strong id="totalSize">0 MB</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="build-controls">
+        <button id="buildStepBtn" class="action-btn primary-btn">⏭ Build Next Layer</button>
+        <button id="buildAllBtn" class="action-btn secondary-btn">⚡ Build All</button>
+        <button id="buildResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="build-log" id="buildLog"></div>
+    </section>
+
+    <!-- Cache Invalidation -->
+    <section class="cache-section">
+      <h2>💥 Cache Invalidation</h2>
+      <p class="section-desc">Click a Dockerfile line to "change" it. Watch the cascade: every layer below rebuilds.</p>
+
+      <div class="cache-viz">
+        <div class="cache-dockerfile" id="cacheDockerfile">
+          <div class="cache-line" data-line="0">
+            <div class="cl-status cached" id="cs0">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">FROM</span> node:20-alpine</div>
+            <div class="cl-size">45 MB</div>
+          </div>
+          <div class="cache-line" data-line="1">
+            <div class="cl-status cached" id="cs1">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">WORKDIR</span> /app</div>
+            <div class="cl-size">0 B</div>
+          </div>
+          <div class="cache-line" data-line="2">
+            <div class="cl-status cached" id="cs2">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">COPY</span> package*.json ./</div>
+            <div class="cl-size">2 KB</div>
+          </div>
+          <div class="cache-line" data-line="3">
+            <div class="cl-status cached" id="cs3">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">RUN</span> npm install</div>
+            <div class="cl-size">180 MB</div>
+          </div>
+          <div class="cache-line clickable" data-line="4">
+            <div class="cl-status cached" id="cs4">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">COPY</span> . . <span class="cl-hint">← click to change source</span></div>
+            <div class="cl-size">5 MB</div>
+          </div>
+          <div class="cache-line" data-line="5">
+            <div class="cl-status cached" id="cs5">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">RUN</span> npm run build</div>
+            <div class="cl-size">12 MB</div>
+          </div>
+          <div class="cache-line" data-line="6">
+            <div class="cl-status cached" id="cs6">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">EXPOSE</span> 3000</div>
+            <div class="cl-size">0 B</div>
+          </div>
+          <div class="cache-line" data-line="7">
+            <div class="cl-status cached" id="cs7">✓ CACHED</div>
+            <div class="cl-code"><span class="df-cmd">CMD</span> ["node", "dist/server.js"]</div>
+            <div class="cl-size">0 B</div>
+          </div>
+        </div>
+
+        <div class="cache-result" id="cacheResult">
+          All 8 layers cached — instant rebuild ⚡
+        </div>
+
+        <div class="cache-tip">
+          💡 <strong>Pro tip:</strong> Copy <code>package.json</code> before source code. That way, <code>npm install</code>
+          only reruns when dependencies change — not on every code edit. This is the #1 Docker caching optimization.
+        </div>
+      </div>
+
+      <div class="cache-controls">
+        <button id="cacheChangeCodeBtn" class="action-btn primary-btn">📝 Change Source Code (line 5)</button>
+        <button id="cacheChangeDepsBtn" class="action-btn danger-btn">📦 Change package.json (line 3)</button>
+        <button id="cacheResetBtn" class="action-btn reset-btn">🔄 Reset All Cached</button>
+      </div>
+    </section>
+
+    <!-- Multi-Stage Build -->
+    <section class="multistage-section">
+      <h2>🎭 Multi-Stage Build</h2>
+      <p class="section-desc">Compare a naive build vs multi-stage. Only the final stage's layers make it into the image.</p>
+
+      <div class="ms-compare">
+        <div class="ms-col">
+          <div class="ms-label bad">❌ Single-Stage (Naive)</div>
+          <div class="ms-layers">
+            <div class="ms-layer base">Base: node:20 <span class="ms-size">350 MB</span></div>
+            <div class="ms-layer deps">npm install (dev+prod) <span class="ms-size">280 MB</span></div>
+            <div class="ms-layer src">Source code <span class="ms-size">5 MB</span></div>
+            <div class="ms-layer build">Build artifacts <span class="ms-size">12 MB</span></div>
+          </div>
+          <div class="ms-total bad">Total: <strong>647 MB</strong></div>
+          <div class="ms-problem">Includes: TypeScript compiler, dev deps, test files, source maps...</div>
+        </div>
+
+        <div class="ms-arrow">→</div>
+
+        <div class="ms-col">
+          <div class="ms-label good">✅ Multi-Stage</div>
+          <div class="ms-stages">
+            <div class="ms-stage">
+              <div class="ms-stage-label">Stage 1: Build</div>
+              <div class="ms-layer base dimmed">Base: node:20 <span class="ms-size">350 MB</span></div>
+              <div class="ms-layer deps dimmed">npm install (all) <span class="ms-size">280 MB</span></div>
+              <div class="ms-layer build dimmed">npm run build <span class="ms-size">12 MB</span></div>
+              <div class="ms-discard">🗑️ Discarded after build</div>
+            </div>
+            <div class="ms-stage final">
+              <div class="ms-stage-label">Stage 2: Runtime</div>
+              <div class="ms-layer base">Base: node:20-alpine <span class="ms-size">45 MB</span></div>
+              <div class="ms-layer deps-prod">npm install --prod <span class="ms-size">95 MB</span></div>
+              <div class="ms-layer build">COPY --from=build /app/dist <span class="ms-size">12 MB</span></div>
+            </div>
+          </div>
+          <div class="ms-total good">Total: <strong>152 MB</strong> (76% smaller!)</div>
+        </div>
+      </div>
+
+      <div class="ms-savings">
+        <div class="savings-bar">
+          <div class="savings-naive" style="width: 100%">647 MB</div>
+        </div>
+        <div class="savings-bar">
+          <div class="savings-multi" style="width: 23.5%">152 MB</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BuildKit Features -->
+    <section class="buildkit-section">
+      <h2>⚡ BuildKit Advantages</h2>
+      <div class="buildkit-grid">
+        <div class="bk-card">
+          <div class="bk-icon">🔀</div>
+          <h3>Parallel Builds</h3>
+          <p>Independent stages build simultaneously. A 3-stage Dockerfile can run all stages in parallel if they don't depend on each other.</p>
+        </div>
+        <div class="bk-card">
+          <div class="bk-icon">🔒</div>
+          <h3>Secret Mounts</h3>
+          <p><code>RUN --mount=type=secret,id=key</code> — use secrets during build without baking them into layers. Never <code>COPY</code> your SSH keys!</p>
+        </div>
+        <div class="bk-card">
+          <div class="bk-icon">📦</div>
+          <h3>Cache Mounts</h3>
+          <p><code>RUN --mount=type=cache,target=/root/.npm</code> — persist package manager caches across builds. 10x faster npm/pip installs.</p>
+        </div>
+        <div class="bk-card">
+          <div class="bk-icon">🌐</div>
+          <h3>Remote Cache</h3>
+          <p>Push/pull cache to registries: <code>--cache-to type=registry</code>. CI builds can reuse cache from previous runs.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Layer Ordering Matters</h3>
+          <p>
+            Put <strong>rarely-changing layers first</strong> (base image, system deps) and
+            <strong>frequently-changing layers last</strong> (source code). This maximizes cache hits.
+            The golden rule: <code>COPY package.json</code> → <code>RUN npm install</code> →
+            <code>COPY . .</code>. Never copy everything first!
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🗜️ .dockerignore</h3>
+          <p>
+            Without <code>.dockerignore</code>, <code>COPY . .</code> sends <em>everything</em> to the daemon —
+            including <code>node_modules</code>, <code>.git</code>, and build artifacts. A proper
+            <code>.dockerignore</code> can shrink build context from 500MB to 5MB and massively speed up builds.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🏷️ Distroless & Scratch</h3>
+          <p>
+            <strong>Alpine</strong> (~5MB) is small but uses musl libc (compatibility issues).
+            <strong>Distroless</strong> (Google) has no shell — just your app + runtime. Smallest possible:
+            <code>FROM scratch</code> with a static binary. Go apps can be ~5MB total images.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Layer Deduplication</h3>
+          <p>
+            Layers are content-addressed (SHA256). If two images share the same base, the base layers are
+            stored once on disk and in registries. <code>docker pull</code> only downloads layers you
+            don't already have. This is why standardizing on base images saves bandwidth and storage.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.docker.com/build/" target="_blank">Docker Build Documentation</a> and <a href="https://docs.docker.com/build/buildkit/" target="_blank">BuildKit Docs</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Docker%20Image%20Building%20Visualizer&url=https://systeminternals.dev/docker/image-building/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/docker/image-building/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/docker/image-building/&t=Interactive%20Docker%20Image%20Building%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #3b82f6, #2563eb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(59,130,246,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #60a5fa; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Build Section */
+  .build-section { margin-bottom: 50px; }
+  .build-viz { display: flex; gap: 20px; margin-bottom: 16px; }
+  .dockerfile-col { flex: 1.2; }
+  .layers-col { flex: 1; }
+  .df-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .dockerfile { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; }
+  .df-line { padding: 4px 8px; border-radius: 4px; color: #aaa; transition: all 0.3s; }
+  .df-line.building { background: rgba(96,165,250,0.1); color: #60a5fa; }
+  .df-line.built { background: rgba(52,211,153,0.08); color: #6ee7b7; }
+  .df-cmd { color: #60a5fa; font-weight: 700; }
+
+  .layers-stack { display: flex; flex-direction: column-reverse; gap: 3px; min-height: 200px; }
+  :global(.layer-bar) { padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; display: flex; justify-content: space-between; animation: layerSlide 0.4s ease-out; }
+  @keyframes layerSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  :global(.layer-bar.base) { background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; }
+  :global(.layer-bar.small) { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25); color: #6ee7b7; }
+  :global(.layer-bar.large) { background: rgba(249,115,22,0.1); border: 1px solid rgba(249,115,22,0.25); color: #fdba74; }
+  :global(.layer-bar.meta) { background: rgba(107,114,128,0.1); border: 1px solid rgba(107,114,128,0.2); color: #9ca3af; }
+  .layers-total { font-size: 0.9rem; color: #888; margin-top: 10px; }
+  .layers-total strong { color: #60a5fa; }
+
+  .build-controls { display: flex; gap: 12px; margin-bottom: 12px; }
+  .build-log { font-size: 0.8rem; max-height: 100px; overflow-y: auto; }
+  :global(.blog-entry) { padding: 3px 8px; color: #888; border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+  /* Cache Invalidation */
+  .cache-section { margin-bottom: 50px; }
+  .cache-dockerfile { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .cache-line { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; transition: all 0.3s; }
+  .cache-line.clickable { cursor: pointer; }
+  .cache-line.clickable:hover { border-color: rgba(96,165,250,0.3); }
+  .cache-line.invalidated { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.04); }
+  .cl-status { padding: 2px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; min-width: 80px; text-align: center; }
+  .cl-status.cached { background: rgba(52,211,153,0.15); color: #34d399; }
+  .cl-status.rebuild { background: rgba(239,68,68,0.15); color: #ef4444; }
+  .cl-status.changed { background: rgba(251,191,36,0.15); color: #fbbf24; }
+  .cl-code { flex: 1; font-family: 'Monaco','Menlo',monospace; font-size: 0.8rem; color: #ccc; }
+  .cl-hint { color: #555; font-size: 0.7rem; }
+  .cl-size { font-size: 0.75rem; color: #888; min-width: 60px; text-align: right; }
+  .df-cmd { color: #60a5fa; font-weight: 700; }
+
+  .cache-result { padding: 10px 16px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; font-size: 0.9rem; color: #34d399; text-align: center; margin-bottom: 12px; transition: all 0.3s; }
+  .cache-result.warning { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.2); color: #ef4444; }
+
+  .cache-tip { padding: 12px 16px; background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.2); border-radius: 10px; font-size: 0.85rem; color: #fbbf24; }
+  .cache-tip strong { color: #fbbf24; }
+  .cache-tip code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #60a5fa; font-size: 0.8rem; }
+
+  .cache-controls { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+
+  /* Multi-Stage */
+  .multistage-section { margin-bottom: 50px; }
+  .ms-compare { display: flex; gap: 20px; align-items: flex-start; margin-bottom: 20px; }
+  .ms-col { flex: 1; }
+  .ms-label { font-size: 0.9rem; font-weight: 700; margin-bottom: 10px; padding: 6px 12px; border-radius: 8px; text-align: center; }
+  .ms-label.bad { background: rgba(239,68,68,0.1); color: #ef4444; }
+  .ms-label.good { background: rgba(52,211,153,0.1); color: #34d399; }
+  .ms-layers { display: flex; flex-direction: column; gap: 4px; }
+  .ms-layer { padding: 10px 14px; border-radius: 8px; font-size: 0.8rem; display: flex; justify-content: space-between; }
+  .ms-layer.base { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.2); color: #93c5fd; }
+  .ms-layer.deps { background: rgba(249,115,22,0.1); border: 1px solid rgba(249,115,22,0.2); color: #fdba74; }
+  .ms-layer.deps-prod { background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.2); color: #c4b5fd; }
+  .ms-layer.src { background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.2); color: #6ee7b7; }
+  .ms-layer.build { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.2); color: #fde68a; }
+  .ms-layer.dimmed { opacity: 0.4; }
+  .ms-size { font-weight: 600; }
+  .ms-total { font-size: 1rem; margin-top: 10px; text-align: center; }
+  .ms-total.bad strong { color: #ef4444; }
+  .ms-total.good strong { color: #34d399; }
+  .ms-problem { font-size: 0.75rem; color: #888; text-align: center; margin-top: 6px; }
+  .ms-arrow { font-size: 2rem; color: #555; padding-top: 80px; }
+
+  .ms-stages { display: flex; flex-direction: column; gap: 12px; }
+  .ms-stage { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px; }
+  .ms-stage.final { border-color: rgba(52,211,153,0.3); }
+  .ms-stage-label { font-size: 0.75rem; font-weight: 700; color: #888; margin-bottom: 6px; }
+  .ms-discard { font-size: 0.7rem; color: #ef4444; text-align: center; margin-top: 4px; }
+
+  .ms-savings { margin-top: 16px; }
+  .savings-bar { height: 28px; background: rgba(255,255,255,0.03); border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+  .savings-naive { height: 100%; background: linear-gradient(90deg, rgba(239,68,68,0.2), rgba(239,68,68,0.4)); border-radius: 6px; display: flex; align-items: center; padding: 0 12px; font-size: 0.8rem; font-weight: 600; color: #fca5a5; }
+  .savings-multi { height: 100%; background: linear-gradient(90deg, rgba(52,211,153,0.2), rgba(52,211,153,0.4)); border-radius: 6px; display: flex; align-items: center; padding: 0 12px; font-size: 0.8rem; font-weight: 600; color: #6ee7b7; }
+
+  /* BuildKit */
+  .buildkit-section { margin-bottom: 50px; }
+  .buildkit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .bk-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; text-align: center; }
+  .bk-icon { font-size: 2rem; margin-bottom: 8px; }
+  .bk-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .bk-card p { font-size: 0.8rem; color: #aaa; line-height: 1.5; }
+  .bk-card code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 0.75rem; color: #60a5fa; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card em { color: #34d399; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(59,130,246,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .build-viz { flex-direction: column; }
+    .ms-compare { flex-direction: column; }
+    .ms-arrow { transform: rotate(90deg); text-align: center; padding: 0; }
+    .buildkit-grid { grid-template-columns: repeat(2, 1fr); }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // ========== LAYER BUILD ==========
+  interface LayerInfo { name: string; size: number; sizeStr: string; cls: string; }
+  const LAYERS: LayerInfo[] = [
+    { name: 'FROM node:20-alpine', size: 45, sizeStr: '45 MB', cls: 'base' },
+    { name: 'WORKDIR /app', size: 0, sizeStr: '0 B', cls: 'meta' },
+    { name: 'COPY package*.json', size: 0.002, sizeStr: '2 KB', cls: 'small' },
+    { name: 'RUN npm install', size: 180, sizeStr: '180 MB', cls: 'large' },
+    { name: 'COPY . .', size: 5, sizeStr: '5 MB', cls: 'small' },
+    { name: 'RUN npm run build', size: 12, sizeStr: '12 MB', cls: 'large' },
+    { name: 'EXPOSE 3000', size: 0, sizeStr: '0 B', cls: 'meta' },
+    { name: 'CMD ["node", ...]', size: 0, sizeStr: '0 B', cls: 'meta' },
+  ];
+
+  let buildStep = 0;
+
+  function renderBuildLayers() {
+    const stack = document.getElementById('layersStack')!;
+    stack.innerHTML = '';
+    let total = 0;
+    for (let i = 0; i < buildStep; i++) {
+      total += LAYERS[i].size;
+      stack.innerHTML += `<div class="layer-bar ${LAYERS[i].cls}"><span>${LAYERS[i].name}</span><span>${LAYERS[i].sizeStr}</span></div>`;
+    }
+    document.getElementById('totalSize')!.textContent = total < 1 ? '< 1 MB' : total.toFixed(0) + ' MB';
+
+    // Highlight current line
+    document.querySelectorAll('.df-line').forEach((line, idx) => {
+      line.classList.remove('building', 'built');
+      if (idx < buildStep) line.classList.add('built');
+      else if (idx === buildStep) line.classList.add('building');
+    });
+  }
+
+  document.getElementById('buildStepBtn')?.addEventListener('click', () => {
+    if (buildStep >= LAYERS.length) return;
+    const logEl = document.getElementById('buildLog')!;
+    logEl.innerHTML += `<div class="blog-entry">Step ${buildStep + 1}/${LAYERS.length}: ${LAYERS[buildStep].name} (${LAYERS[buildStep].sizeStr})</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    buildStep++;
+    renderBuildLayers();
+  });
+
+  document.getElementById('buildAllBtn')?.addEventListener('click', async () => {
+    const logEl = document.getElementById('buildLog')!;
+    while (buildStep < LAYERS.length) {
+      logEl.innerHTML += `<div class="blog-entry">Step ${buildStep + 1}/${LAYERS.length}: ${LAYERS[buildStep].name} (${LAYERS[buildStep].sizeStr})</div>`;
+      buildStep++;
+      renderBuildLayers();
+      await new Promise(r => setTimeout(r, 200));
+    }
+    logEl.innerHTML += `<div class="blog-entry">✅ Build complete!</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  document.getElementById('buildResetBtn')?.addEventListener('click', () => {
+    buildStep = 0;
+    document.getElementById('buildLog')!.innerHTML = '';
+    renderBuildLayers();
+  });
+
+  // ========== CACHE INVALIDATION ==========
+  function invalidateFrom(startLine: number, changedLine: number) {
+    const resultEl = document.getElementById('cacheResult')!;
+    let rebuilds = 0;
+
+    for (let i = 0; i < 8; i++) {
+      const status = document.getElementById(`cs${i}`)!;
+      const line = status.closest('.cache-line')!;
+      if (i === changedLine) {
+        status.textContent = '⚡ CHANGED';
+        status.className = 'cl-status changed';
+        line.classList.add('invalidated');
+        rebuilds++;
+      } else if (i > changedLine) {
+        status.textContent = '🔄 REBUILD';
+        status.className = 'cl-status rebuild';
+        line.classList.add('invalidated');
+        rebuilds++;
+      } else {
+        status.textContent = '✓ CACHED';
+        status.className = 'cl-status cached';
+        line.classList.remove('invalidated');
+      }
+    }
+
+    resultEl.textContent = `${8 - rebuilds} cached, ${rebuilds} rebuilding — cache busted from line ${changedLine + 1} onwards`;
+    resultEl.className = 'cache-result warning';
+  }
+
+  document.getElementById('cacheChangeCodeBtn')?.addEventListener('click', () => invalidateFrom(4, 4));
+  document.getElementById('cacheChangeDepsBtn')?.addEventListener('click', () => invalidateFrom(2, 2));
+
+  // Click on any clickable line
+  document.querySelectorAll('.cache-line.clickable').forEach(line => {
+    line.addEventListener('click', () => {
+      const lineNum = parseInt((line as HTMLElement).dataset.line!);
+      invalidateFrom(lineNum, lineNum);
+    });
+  });
+
+  document.getElementById('cacheResetBtn')?.addEventListener('click', () => {
+    for (let i = 0; i < 8; i++) {
+      const status = document.getElementById(`cs${i}`)!;
+      status.textContent = '✓ CACHED';
+      status.className = 'cl-status cached';
+      status.closest('.cache-line')!.classList.remove('invalidated');
+    }
+    const resultEl = document.getElementById('cacheResult')!;
+    resultEl.textContent = 'All 8 layers cached — instant rebuild ⚡';
+    resultEl.className = 'cache-result';
+  });
+
+  // Init
+  renderBuildLayers();
+</script>
+</BaseLayout>

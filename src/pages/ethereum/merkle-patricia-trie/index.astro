@@ -1,0 +1,624 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Merkle Patricia Trie" 
+  description="Interactive visualization of Ethereum's Merkle Patricia Trie: insert keys, watch nodes split, verify proofs, and understand world state storage"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Ethereum", href: "/ethereum/" },
+    { label: "Merkle Patricia Trie", href: "/ethereum/merkle-patricia-trie/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌳 Merkle Patricia Trie</h1>
+      <p class="subtitle">How Ethereum Stores the Entire World State in a Single Hash</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Ethereum stores all account balances, contract storage, and code in a <strong>Modified Merkle Patricia Trie</strong> (MPT).
+          Every block header contains a <em>state root</em> — a single 32-byte hash that cryptographically commits to the entire world state.
+          The trie has three node types: <strong>Branch</strong> (16 children + value), <strong>Extension</strong> (shared nibble prefix),
+          and <strong>Leaf</strong> (remaining path + value). Keys are hex-encoded (nibbles), and each node is RLP-encoded and hashed with Keccak-256.
+          This structure enables <em>Merkle proofs</em> — proving any value exists without downloading the full state.
+        </p>
+      </div>
+    </section>
+
+    <!-- Node Types -->
+    <section class="nodes-section">
+      <h2>🧩 Node Types</h2>
+      <p class="section-desc">Click each node type to learn how it works.</p>
+
+      <div class="node-types">
+        <div class="node-type-card active" data-type="branch" id="ntBranch">
+          <div class="nt-icon">🔀</div>
+          <div class="nt-name">Branch Node</div>
+          <div class="nt-brief">16 children + value</div>
+        </div>
+        <div class="node-type-card" data-type="extension" id="ntExtension">
+          <div class="nt-icon">🔗</div>
+          <div class="nt-name">Extension Node</div>
+          <div class="nt-brief">Shared prefix shortcut</div>
+        </div>
+        <div class="node-type-card" data-type="leaf" id="ntLeaf">
+          <div class="nt-icon">🍃</div>
+          <div class="nt-name">Leaf Node</div>
+          <div class="nt-brief">Key remainder + value</div>
+        </div>
+      </div>
+
+      <div class="node-type-desc" id="nodeTypeDesc">
+        <strong>Branch Node:</strong> Has 17 slots — indices 0-F (hex nibbles) for children, plus a value slot.
+        When two keys diverge at a nibble, a branch node routes them to different children.
+        Most of the 16 slots are usually empty (null). The node is RLP-encoded as a 17-element list.
+      </div>
+    </section>
+
+    <!-- Interactive Trie Builder -->
+    <section class="trie-section">
+      <h2>🔨 Trie Builder</h2>
+      <p class="section-desc">Insert key-value pairs and watch the trie structure evolve. Keys are hex-encoded addresses.</p>
+
+      <div class="trie-controls">
+        <div class="trie-input-group">
+          <label>Key (hex nibbles)</label>
+          <select id="trieKeySelect">
+            <option value="a711355">a711355 (Account A)</option>
+            <option value="a77d337">a77d337 (Account B)</option>
+            <option value="a7f9365">a7f9365 (Account C)</option>
+            <option value="a77d397">a77d397 (Account D)</option>
+            <option value="b3f2c8a">b3f2c8a (Account E)</option>
+          </select>
+        </div>
+        <div class="trie-input-group">
+          <label>Value (balance in ETH)</label>
+          <input type="text" id="trieValue" value="1.5 ETH" maxlength="20">
+        </div>
+        <button id="trieInsertBtn" class="action-btn primary-btn">📥 Insert</button>
+        <button id="trieResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="trie-viz" id="trieViz">
+        <div class="trie-empty">Insert a key-value pair to start building the trie</div>
+      </div>
+
+      <div class="trie-state-root">
+        State Root: <code id="stateRoot">0x0000...0000</code>
+        <span class="root-entries" id="rootEntries">0 entries</span>
+      </div>
+
+      <div class="trie-log" id="trieLog"></div>
+    </section>
+
+    <!-- Proof Verification -->
+    <section class="proof-section">
+      <h2>🔍 Merkle Proof Verification</h2>
+      <p class="section-desc">Prove a value exists without downloading the full trie. Select an inserted key to generate and verify its proof.</p>
+
+      <div class="proof-viz">
+        <div class="proof-select-col">
+          <div class="proof-label">Key to Prove</div>
+          <select id="proofKeySelect" class="proof-select">
+            <option value="">— insert keys first —</option>
+          </select>
+          <button id="proofGenBtn" class="action-btn secondary-btn" disabled>🔐 Generate Proof</button>
+        </div>
+
+        <div class="proof-path-col" id="proofPath">
+          <div class="proof-label">Proof Path</div>
+          <div class="proof-empty">Select a key and generate proof</div>
+        </div>
+
+        <div class="proof-result-col" id="proofResult">
+          <div class="proof-label">Verification</div>
+          <div class="proof-empty">—</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hex-Prefix Encoding -->
+    <section class="encoding-section">
+      <h2>🔢 Hex-Prefix Encoding</h2>
+      <p class="section-desc">How nibble paths are compactly encoded with a flag nibble.</p>
+
+      <div class="encoding-table">
+        <div class="enc-row enc-header">
+          <div class="enc-cell">Node Type</div>
+          <div class="enc-cell">Path Length</div>
+          <div class="enc-cell">Prefix Nibble</div>
+          <div class="enc-cell">Example</div>
+        </div>
+        <div class="enc-row">
+          <div class="enc-cell">Extension</div>
+          <div class="enc-cell">Even</div>
+          <div class="enc-cell flag-ext">0x00</div>
+          <div class="enc-cell mono">[0,0,a,7] → 00a7</div>
+        </div>
+        <div class="enc-row">
+          <div class="enc-cell">Extension</div>
+          <div class="enc-cell">Odd</div>
+          <div class="enc-cell flag-ext">0x1_</div>
+          <div class="enc-cell mono">[1,a,7] → 1a7</div>
+        </div>
+        <div class="enc-row">
+          <div class="enc-cell">Leaf</div>
+          <div class="enc-cell">Even</div>
+          <div class="enc-cell flag-leaf">0x20</div>
+          <div class="enc-cell mono">[2,0,3,5,5] → 20355</div>
+        </div>
+        <div class="enc-row">
+          <div class="enc-cell">Leaf</div>
+          <div class="enc-cell">Odd</div>
+          <div class="enc-cell flag-leaf">0x3_</div>
+          <div class="enc-cell mono">[3,5,5] → 355</div>
+        </div>
+      </div>
+
+      <div class="encoding-note">
+        The first nibble encodes: bit 1 = leaf (vs extension), bit 0 = odd length. For odd-length paths, the second nibble is the first path nibble. For even-length paths, a padding nibble (0) is added.
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Why Not a Plain Merkle Tree?</h3>
+          <p>
+            A plain Merkle tree requires all keys to be the same length and doesn't support efficient
+            key-value lookups. The Patricia part adds <strong>path compression</strong> — shared prefixes
+            are collapsed into extension nodes, making lookups O(key length) instead of O(n).
+            The Merkle part provides <strong>cryptographic commitments</strong> — change one value and
+            all hashes up to the root change.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ State Trie vs Storage Trie</h3>
+          <p>
+            Ethereum has multiple tries: the <strong>State Trie</strong> maps addresses to accounts,
+            each account's <strong>Storage Trie</strong> maps storage slots to values, and the
+            <strong>Transaction</strong> and <strong>Receipt Tries</strong> are per-block. Each account
+            in the state trie contains: nonce, balance, storageRoot, codeHash.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Verkle Trees (Coming Soon)</h3>
+          <p>
+            MPTs have a problem: proofs are huge (~1KB per key). <strong>Verkle Trees</strong> use
+            polynomial commitments (IPA or KZG) to shrink proofs to ~150 bytes. This enables
+            <em>stateless clients</em> — nodes that verify blocks without storing the full state.
+            Expected in a future Ethereum hard fork.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Real-World Numbers</h3>
+          <p>
+            Ethereum's state trie has ~<strong>250M+ accounts</strong>. A full state sync is ~80GB.
+            Each block changes thousands of nodes, requiring thousands of disk reads for the trie walk.
+            This is why <strong>snap sync</strong> downloads flat state first, then rebuilds the trie.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on the <a href="https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/" target="_blank">Ethereum Patricia Merkle Trie Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Merkle%20Patricia%20Trie%20Visualizer&url=https://systeminternals.dev/ethereum/merkle-patricia-trie/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/ethereum/merkle-patricia-trie/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/ethereum/merkle-patricia-trie/&t=Interactive%20Merkle%20Patricia%20Trie%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #a78bfa, #818cf8, #60a5fa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(167,139,250,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(167,139,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #a78bfa; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #a78bfa; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(167,139,250,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(96,165,250,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Node Types */
+  .nodes-section { margin-bottom: 50px; }
+  .node-types { display: flex; gap: 16px; margin-bottom: 20px; }
+  .node-type-card { flex: 1; padding: 20px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 14px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .node-type-card:hover { transform: translateY(-3px); }
+  .node-type-card.active { border-color: rgba(167,139,250,0.5); background: rgba(167,139,250,0.08); }
+  .nt-icon { font-size: 2rem; margin-bottom: 8px; }
+  .nt-name { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .nt-brief { font-size: 0.8rem; color: #888; }
+  .node-type-desc { padding: 14px 18px; background: rgba(167,139,250,0.06); border: 1px solid rgba(167,139,250,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .node-type-desc strong { color: #a78bfa; }
+
+  /* Trie Builder */
+  .trie-section { margin-bottom: 50px; }
+  .trie-controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .trie-input-group { display: flex; flex-direction: column; gap: 4px; }
+  .trie-input-group label { font-size: 0.8rem; color: #888; }
+  .trie-input-group select, .trie-input-group input { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  .trie-input-group select option { background: #1a1a2e; }
+
+  .trie-viz { min-height: 200px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; margin-bottom: 12px; overflow-x: auto; }
+  .trie-empty { color: #555; text-align: center; padding: 60px 0; }
+
+  :global(.trie-node) { display: inline-flex; flex-direction: column; align-items: center; margin: 0 4px; }
+  :global(.trie-node-box) { padding: 8px 14px; border-radius: 10px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; text-align: center; min-width: 60px; animation: nodeAppear 0.4s ease-out; }
+  @keyframes nodeAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+  :global(.trie-node-box.branch) { background: rgba(251,191,36,0.12); border: 1px solid rgba(251,191,36,0.35); color: #fde68a; }
+  :global(.trie-node-box.extension) { background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.35); color: #93c5fd; }
+  :global(.trie-node-box.leaf) { background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.35); color: #6ee7b7; }
+  :global(.trie-node-label) { font-size: 0.65rem; color: #666; margin-top: 2px; }
+  :global(.trie-children) { display: flex; gap: 8px; margin-top: 8px; position: relative; }
+  :global(.trie-edge-label) { font-size: 0.65rem; color: #a78bfa; font-weight: 600; margin-bottom: 2px; }
+  :global(.trie-child-group) { display: flex; flex-direction: column; align-items: center; }
+  :global(.trie-connector) { width: 1px; height: 12px; background: rgba(255,255,255,0.15); }
+
+  .trie-state-root { padding: 12px 16px; background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.25); border-radius: 10px; font-size: 0.9rem; color: #ccc; margin-bottom: 12px; }
+  .trie-state-root code { background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px; color: #a78bfa; font-size: 0.85rem; }
+  .root-entries { float: right; color: #888; font-size: 0.85rem; }
+
+  .trie-log { font-size: 0.8rem; color: #888; max-height: 100px; overflow-y: auto; }
+  :global(.trie-log-entry) { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); animation: msgAppear 0.3s ease-out; }
+  @keyframes msgAppear { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* Proof */
+  .proof-section { margin-bottom: 50px; }
+  .proof-viz { display: flex; gap: 16px; }
+  .proof-select-col { min-width: 180px; display: flex; flex-direction: column; gap: 10px; }
+  .proof-label { font-size: 0.85rem; font-weight: 700; color: #60a5fa; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .proof-select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-size: 0.85rem; font-family: 'Monaco','Menlo',monospace; }
+  .proof-select option { background: #1a1a2e; }
+  .proof-path-col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); }
+  .proof-result-col { min-width: 200px; background: rgba(0,0,0,0.2); border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,0.1); }
+  .proof-empty { color: #555; font-size: 0.85rem; }
+  :global(.proof-node) { padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; font-family: 'Monaco','Menlo',monospace; margin-bottom: 6px; animation: nodeAppear 0.4s ease-out; }
+  :global(.proof-node.branch) { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25); color: #fde68a; }
+  :global(.proof-node.extension) { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.25); color: #93c5fd; }
+  :global(.proof-node.leaf) { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25); color: #6ee7b7; }
+  :global(.proof-verified) { padding: 12px; border-radius: 10px; text-align: center; font-weight: 600; font-size: 0.9rem; }
+  :global(.proof-verified.success) { background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.3); color: #34d399; }
+
+  /* Encoding */
+  .encoding-section { margin-bottom: 50px; }
+  .encoding-table { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; overflow: hidden; margin-bottom: 12px; }
+  .enc-row { display: flex; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .enc-row:last-child { border-bottom: none; }
+  .enc-header { background: rgba(255,255,255,0.05); }
+  .enc-header .enc-cell { font-weight: 700; color: #fff; }
+  .enc-cell { flex: 1; padding: 12px 16px; font-size: 0.85rem; color: #aaa; }
+  .enc-cell.mono { font-family: 'Monaco','Menlo',monospace; color: #ccc; }
+  .flag-ext { color: #60a5fa; font-weight: 600; font-family: 'Monaco','Menlo',monospace; }
+  .flag-leaf { color: #34d399; font-weight: 600; font-family: 'Monaco','Menlo',monospace; }
+  .encoding-note { padding: 12px 16px; background: rgba(167,139,250,0.06); border: 1px solid rgba(167,139,250,0.2); border-radius: 10px; font-size: 0.85rem; color: #888; line-height: 1.6; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #a78bfa; }
+  .explain-card em { color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(167,139,250,0.08), rgba(96,165,250,0.08)); border-color: rgba(167,139,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #a78bfa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .node-types { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .proof-viz { flex-direction: column; }
+    .trie-controls { flex-direction: column; }
+    .enc-row { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // ========== NODE TYPE DESCRIPTIONS ==========
+  const NODE_DESCS: Record<string, string> = {
+    branch: '<strong>Branch Node:</strong> Has 17 slots — indices 0-F (hex nibbles) for children, plus a value slot. When two keys diverge at a nibble, a branch node routes them to different children. Most of the 16 slots are usually empty (null). The node is RLP-encoded as a 17-element list.',
+    extension: '<strong>Extension Node:</strong> Compresses a shared nibble prefix into a single node. Instead of a chain of branch nodes with only one child, an extension node stores the common prefix and points to the next node. This is the "Patricia" optimization — path compression.',
+    leaf: '<strong>Leaf Node:</strong> Stores the remaining key path (suffix) and the actual value. When you reach a leaf, you\'ve found your data. The key remainder is hex-prefix encoded with a flag nibble indicating it\'s a leaf and whether the path length is odd or even.',
+  };
+
+  document.querySelectorAll('.node-type-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.node-type-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      document.getElementById('nodeTypeDesc')!.innerHTML = NODE_DESCS[(card as HTMLElement).dataset.type!];
+    });
+  });
+
+  // ========== TRIE DATA STRUCTURE ==========
+  interface TrieNode {
+    type: 'branch' | 'extension' | 'leaf';
+    // branch: children[0..15], value
+    children?: (TrieNode | null)[];
+    value?: string;
+    // extension: prefix, next
+    prefix?: string;
+    next?: TrieNode;
+    // leaf: remainder, value (value reused)
+    remainder?: string;
+  }
+
+  let trieRoot: TrieNode | null = null;
+  let insertedKeys: { key: string; value: string }[] = [];
+  let hashCounter = 0;
+
+  function fakeHash(): string {
+    hashCounter++;
+    const hex = hashCounter.toString(16).padStart(8, '0');
+    return `0x${hex}${'abcdef0123456789'.slice(0, 8)}...${hex.split('').reverse().join('')}`;
+  }
+
+  function commonPrefix(a: string, b: string): string {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return a.slice(0, i);
+  }
+
+  function insertTrie(node: TrieNode | null, key: string, value: string): TrieNode {
+    if (!node) {
+      return { type: 'leaf', remainder: key, value };
+    }
+
+    if (node.type === 'leaf') {
+      if (node.remainder === key) {
+        node.value = value;
+        return node;
+      }
+      const cp = commonPrefix(node.remainder!, key);
+      const branch: TrieNode = { type: 'branch', children: new Array(16).fill(null) };
+
+      if (cp.length > 0) {
+        const ext: TrieNode = { type: 'extension', prefix: cp, next: branch };
+        const oldSuffix = node.remainder!.slice(cp.length);
+        const newSuffix = key.slice(cp.length);
+
+        if (oldSuffix.length === 0) {
+          branch.value = node.value;
+        } else {
+          const idx = parseInt(oldSuffix[0], 16);
+          branch.children![idx] = { type: 'leaf', remainder: oldSuffix.slice(1), value: node.value };
+        }
+        if (newSuffix.length === 0) {
+          branch.value = value;
+        } else {
+          const idx = parseInt(newSuffix[0], 16);
+          branch.children![idx] = { type: 'leaf', remainder: newSuffix.slice(1), value };
+        }
+        return ext;
+      } else {
+        const oldIdx = parseInt(node.remainder![0], 16);
+        const newIdx = parseInt(key[0], 16);
+        branch.children![oldIdx] = { type: 'leaf', remainder: node.remainder!.slice(1), value: node.value };
+        branch.children![newIdx] = { type: 'leaf', remainder: key.slice(1), value };
+        return branch;
+      }
+    }
+
+    if (node.type === 'extension') {
+      const cp = commonPrefix(node.prefix!, key);
+      if (cp === node.prefix) {
+        node.next = insertTrie(node.next!, key.slice(cp.length), value);
+        return node;
+      }
+      const branch: TrieNode = { type: 'branch', children: new Array(16).fill(null) };
+      const remainingPrefix = node.prefix!.slice(cp.length);
+
+      if (remainingPrefix.length === 1) {
+        branch.children![parseInt(remainingPrefix[0], 16)] = node.next!;
+      } else {
+        branch.children![parseInt(remainingPrefix[0], 16)] = { type: 'extension', prefix: remainingPrefix.slice(1), next: node.next! };
+      }
+
+      const newSuffix = key.slice(cp.length);
+      if (newSuffix.length === 0) {
+        branch.value = value;
+      } else {
+        branch.children![parseInt(newSuffix[0], 16)] = { type: 'leaf', remainder: newSuffix.slice(1), value };
+      }
+
+      if (cp.length > 0) {
+        return { type: 'extension', prefix: cp, next: branch };
+      }
+      return branch;
+    }
+
+    if (node.type === 'branch') {
+      if (key.length === 0) {
+        node.value = value;
+        return node;
+      }
+      const idx = parseInt(key[0], 16);
+      node.children![idx] = insertTrie(node.children![idx], key.slice(1), value);
+      return node;
+    }
+
+    return node;
+  }
+
+  function renderTrieNode(node: TrieNode | null, depth: number = 0): string {
+    if (!node) return '';
+    if (depth > 6) return '<div class="trie-node"><div class="trie-node-box leaf">...</div></div>';
+
+    if (node.type === 'leaf') {
+      return `<div class="trie-node">
+        <div class="trie-node-box leaf">🍃 Leaf<br><span style="font-size:0.65rem">path: ${node.remainder || '∅'}</span><br><span style="font-size:0.65rem;color:#6ee7b7">${node.value}</span></div>
+      </div>`;
+    }
+
+    if (node.type === 'extension') {
+      return `<div class="trie-node">
+        <div class="trie-node-box extension">🔗 Extension<br><span style="font-size:0.65rem">prefix: ${node.prefix}</span></div>
+        <div class="trie-connector"></div>
+        <div class="trie-children">${renderTrieNode(node.next!, depth + 1)}</div>
+      </div>`;
+    }
+
+    if (node.type === 'branch') {
+      const activeChildren = node.children!
+        .map((child, i) => child ? { child, nibble: i.toString(16).toUpperCase() } : null)
+        .filter(Boolean) as { child: TrieNode; nibble: string }[];
+
+      const childrenHtml = activeChildren.map(({ child, nibble }) =>
+        `<div class="trie-child-group">
+          <div class="trie-edge-label">${nibble}</div>
+          <div class="trie-connector"></div>
+          ${renderTrieNode(child, depth + 1)}
+        </div>`
+      ).join('');
+
+      const valStr = node.value ? `<br><span style="font-size:0.65rem;color:#fde68a">val: ${node.value}</span>` : '';
+      return `<div class="trie-node">
+        <div class="trie-node-box branch">🔀 Branch<br><span style="font-size:0.65rem">[${activeChildren.map(c => c.nibble).join(',')}]</span>${valStr}</div>
+        <div class="trie-connector"></div>
+        <div class="trie-children">${childrenHtml}</div>
+      </div>`;
+    }
+
+    return '';
+  }
+
+  function renderTrie() {
+    const viz = document.getElementById('trieViz')!;
+    if (!trieRoot) {
+      viz.innerHTML = '<div class="trie-empty">Insert a key-value pair to start building the trie</div>';
+    } else {
+      viz.innerHTML = renderTrieNode(trieRoot);
+    }
+    document.getElementById('stateRoot')!.textContent = trieRoot ? fakeHash() : '0x0000...0000';
+    document.getElementById('rootEntries')!.textContent = `${insertedKeys.length} entries`;
+
+    // Update proof selector
+    const proofSelect = document.getElementById('proofKeySelect') as HTMLSelectElement;
+    proofSelect.innerHTML = insertedKeys.length === 0
+      ? '<option value="">— insert keys first —</option>'
+      : insertedKeys.map(k => `<option value="${k.key}">${k.key} → ${k.value}</option>`).join('');
+    (document.getElementById('proofGenBtn') as HTMLButtonElement).disabled = insertedKeys.length === 0;
+  }
+
+  document.getElementById('trieInsertBtn')?.addEventListener('click', () => {
+    const keySelect = document.getElementById('trieKeySelect') as HTMLSelectElement;
+    const valueInput = document.getElementById('trieValue') as HTMLInputElement;
+    const key = keySelect.value.replace(/\s.*/, '');
+    const value = valueInput.value || '0 ETH';
+
+    trieRoot = insertTrie(trieRoot, key, value);
+    insertedKeys = insertedKeys.filter(k => k.key !== key);
+    insertedKeys.push({ key, value });
+
+    const logEl = document.getElementById('trieLog')!;
+    logEl.innerHTML += `<div class="trie-log-entry">📥 INSERT key=${key} value="${value}" → trie restructured, new state root</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+
+    renderTrie();
+  });
+
+  document.getElementById('trieResetBtn')?.addEventListener('click', () => {
+    trieRoot = null;
+    insertedKeys = [];
+    hashCounter = 0;
+    document.getElementById('trieLog')!.innerHTML = '';
+    document.getElementById('proofPath')!.innerHTML = '<div class="proof-label">Proof Path</div><div class="proof-empty">Select a key and generate proof</div>';
+    document.getElementById('proofResult')!.innerHTML = '<div class="proof-label">Verification</div><div class="proof-empty">—</div>';
+    renderTrie();
+  });
+
+  // ========== PROOF GENERATION ==========
+  document.getElementById('proofGenBtn')?.addEventListener('click', () => {
+    const key = (document.getElementById('proofKeySelect') as HTMLSelectElement).value;
+    if (!key || !trieRoot) return;
+
+    const pathEl = document.getElementById('proofPath')!;
+    const resultEl = document.getElementById('proofResult')!;
+
+    // Walk trie and collect proof nodes
+    let node: TrieNode | null = trieRoot;
+    let remaining = key;
+    let proofNodes: string[] = [];
+    let found = false;
+    let foundValue = '';
+
+    while (node) {
+      if (node.type === 'extension') {
+        proofNodes.push(`<div class="proof-node extension">🔗 Extension [${node.prefix}]<br>hash: ${fakeHash().slice(0, 18)}...</div>`);
+        if (remaining.startsWith(node.prefix!)) {
+          remaining = remaining.slice(node.prefix!.length);
+          node = node.next!;
+        } else {
+          break;
+        }
+      } else if (node.type === 'branch') {
+        const activeSlots = node.children!.map((c, i) => c ? i.toString(16).toUpperCase() : null).filter(Boolean);
+        proofNodes.push(`<div class="proof-node branch">🔀 Branch [${activeSlots.join(',')}]<br>hash: ${fakeHash().slice(0, 18)}...</div>`);
+        if (remaining.length === 0) {
+          if (node.value) { found = true; foundValue = node.value; }
+          break;
+        }
+        const idx = parseInt(remaining[0], 16);
+        remaining = remaining.slice(1);
+        node = node.children![idx];
+      } else if (node.type === 'leaf') {
+        proofNodes.push(`<div class="proof-node leaf">🍃 Leaf [${node.remainder}]<br>value: ${node.value}</div>`);
+        if (remaining === node.remainder) {
+          found = true;
+          foundValue = node.value!;
+        }
+        break;
+      } else {
+        break;
+      }
+    }
+
+    pathEl.innerHTML = `<div class="proof-label">Proof Path (${proofNodes.length} nodes)</div>` + proofNodes.join('');
+
+    if (found) {
+      resultEl.innerHTML = `<div class="proof-label">Verification</div>
+        <div class="proof-verified success">
+          ✅ Proof Valid<br>
+          <span style="font-size:0.8rem;font-weight:400">Key ${key} → ${foundValue}</span><br>
+          <span style="font-size:0.75rem;font-weight:400;opacity:0.7">${proofNodes.length} nodes in proof path</span>
+        </div>`;
+    } else {
+      resultEl.innerHTML = `<div class="proof-label">Verification</div>
+        <div class="proof-verified" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#ef4444;">
+          ❌ Key not found in trie
+        </div>`;
+    }
+  });
+
+  // Init
+  renderTrie();
+</script>
+</BaseLayout>
