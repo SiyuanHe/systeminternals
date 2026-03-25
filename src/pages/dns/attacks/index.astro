@@ -1,0 +1,63 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="DNS Attacks" description="Interactive visualization of DNS attacks: cache poisoning, amplification attacks, DNS rebinding, and DNSSEC protection" breadcrumbs={[{label:"Home",href:"/"},{label:"DNS",href:"/dns/"},{label:"DNS Attacks",href:"/dns/attacks/"}]}>
+<div class="viz-container">
+<header class="viz-header"><h1>🛡️ DNS Attacks</h1><p class="subtitle">Cache Poisoning, Amplification, Rebinding — And How to Defend</p></header>
+
+<section class="overview-section"><div class="overview-card"><p>DNS was designed without security. <strong>Cache poisoning</strong> injects fake records into resolvers. <strong>Amplification</strong> attacks use DNS to multiply DDoS traffic 50x. <strong>DNS rebinding</strong> bypasses same-origin policy. Defenses include <em>DNSSEC</em> (cryptographic signatures), <em>DoH/DoT</em> (encrypted transport), <em>response rate limiting</em>, and source port randomization.</p></div></section>
+
+<section class="attacks-section"><h2>⚔️ Attack Types</h2><p class="section-desc">Click each attack to see how it works.</p>
+<div class="attack-cards">
+<div class="attack-card active" data-attack="poisoning"><div class="ac-icon">💉</div><div class="ac-name">Cache Poisoning</div><div class="ac-impact">Redirect users to fake sites</div></div>
+<div class="attack-card" data-attack="amplification"><div class="ac-icon">📡</div><div class="ac-name">Amplification DDoS</div><div class="ac-impact">50x traffic multiplication</div></div>
+<div class="attack-card" data-attack="rebinding"><div class="ac-icon">🔄</div><div class="ac-name">DNS Rebinding</div><div class="ac-impact">Bypass same-origin policy</div></div>
+<div class="attack-card" data-attack="tunneling"><div class="ac-icon">🕳️</div><div class="ac-name">DNS Tunneling</div><div class="ac-impact">Exfiltrate data via queries</div></div>
+</div>
+<div class="attack-desc" id="attackDesc"><strong>Cache Poisoning:</strong> Attacker sends fake DNS responses to a resolver, racing against the real response. If the fake arrives first with a matching transaction ID, the resolver caches it. All users of that resolver now get sent to the attacker's IP. <em>Kaminsky attack</em> (2008) made this trivially exploitable. Fix: DNSSEC + source port randomization + 0x20 encoding.</div>
+</section>
+
+<section class="defense-section"><h2>🛡️ Defenses</h2>
+<div class="defense-grid">
+<div class="def-card"><h3>DNSSEC</h3><p>Cryptographic signatures on DNS records. Resolvers verify the chain of trust from root → TLD → domain. Prevents cache poisoning. ~30% of domains signed (2024).</p></div>
+<div class="def-card"><h3>DoH / DoT</h3><p>DNS over HTTPS (port 443) or DNS over TLS (port 853). Encrypts queries — ISPs and attackers can't see or modify them. Supported by all major browsers.</p></div>
+<div class="def-card"><h3>Response Rate Limiting</h3><p>Authoritative servers limit responses per source IP. Prevents amplification by refusing to be an amplifier. Most modern DNS servers support RRL.</p></div>
+<div class="def-card"><h3>Source Port Randomization</h3><p>Randomize UDP source port for queries (not just txn ID). Makes cache poisoning exponentially harder — attacker must guess both port AND txn ID.</p></div>
+</div>
+</section>
+
+<section class="explain-section"><div class="explain-grid">
+<div class="explain-card highlight-card"><h3>💡 Amplification Math</h3><p>Attacker sends 60-byte query with spoofed source IP. DNS server responds with ~3000-byte ANY record to the victim. That's <strong>50x amplification</strong>. With thousands of open resolvers, a 1 Gbps attacker becomes 50 Gbps of DDoS. Fix: disable ANY queries, use RRL, close open resolvers.</p></div>
+<div class="explain-card"><h3>🔄 Rebinding Attack</h3><p>Attacker's DNS returns their IP first (passes same-origin), then switches to 192.168.1.1 (your router). Browser thinks it's still talking to attacker's domain but now accesses your internal network. Fix: DNS pinning, private IP blocking in resolvers.</p></div>
+</div></section>
+
+<footer class="viz-footer"><p>Based on DNS security research and <a href="https://datatracker.ietf.org/doc/html/rfc4033" target="_blank">DNSSEC RFCs</a></p></footer>
+<div class="share-buttons"><span>Share:</span><a href="https://twitter.com/intent/tweet?text=Interactive%20DNS%20Attacks%20Visualizer&url=https://systeminternals.dev/dns/attacks/" target="_blank" class="share-btn">𝕏 Twitter</a><a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/dns/attacks/" target="_blank" class="share-btn">in LinkedIn</a></div>
+</div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#ef4444,#f97316,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(239,68,68,0.1),rgba(249,115,22,0.05));border:1px solid rgba(239,68,68,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#ef4444;font-style:normal;font-weight:500}
+.attacks-section{margin-bottom:50px}.attack-cards{display:flex;gap:12px;margin-bottom:16px}.attack-card{flex:1;padding:16px;background:rgba(0,0,0,0.2);border:2px solid rgba(255,255,255,0.1);border-radius:14px;text-align:center;cursor:pointer;transition:all 0.3s}.attack-card:hover{transform:translateY(-3px)}.attack-card.active{border-color:rgba(239,68,68,0.5);background:rgba(239,68,68,0.08)}.ac-icon{font-size:2rem;margin-bottom:6px}.ac-name{font-size:0.9rem;font-weight:700;color:#fff}.ac-impact{font-size:0.75rem;color:#ef4444}
+.attack-desc{padding:14px 18px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:10px;font-size:0.9rem;color:#aaa;line-height:1.6}.attack-desc strong{color:#ef4444}.attack-desc em{color:#f97316}
+.defense-section{margin-bottom:50px}.defense-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.def-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.def-card h3{font-size:0.95rem;color:#fff;margin-bottom:8px}.def-card p{font-size:0.8rem;color:#aaa;line-height:1.5}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#ef4444}.highlight-card{background:linear-gradient(135deg,rgba(239,68,68,0.08),rgba(249,115,22,0.08));border-color:rgba(239,68,68,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#ef4444}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.attack-cards{flex-direction:column}.defense-grid{grid-template-columns:repeat(2,1fr)}.explain-grid{grid-template-columns:1fr}}
+</style>
+
+<script>
+const DESCS: Record<string,string> = {
+  poisoning: '<strong>Cache Poisoning:</strong> Attacker sends fake DNS responses to a resolver, racing against the real response. If the fake arrives first with a matching transaction ID, the resolver caches it. All users of that resolver now get sent to the attacker\'s IP. <em>Kaminsky attack</em> (2008) made this trivially exploitable. Fix: DNSSEC + source port randomization + 0x20 encoding.',
+  amplification: '<strong>Amplification DDoS:</strong> Attacker sends small queries (60 bytes) to open DNS resolvers with the victim\'s spoofed source IP. The resolver sends large responses (~3000 bytes) to the victim. With thousands of amplifiers, 1 Gbps of attack traffic becomes 50+ Gbps hitting the victim. Fix: close open resolvers, Response Rate Limiting, BCP38 ingress filtering.',
+  rebinding: '<strong>DNS Rebinding:</strong> Attacker\'s domain initially resolves to attacker\'s server (passes same-origin checks). Then the DNS TTL expires and resolves to 192.168.1.1 (victim\'s internal network). The browser thinks it\'s still the attacker\'s domain, so JavaScript can now access internal services. Fix: DNS pinning, block private IPs in resolver responses.',
+  tunneling: '<strong>DNS Tunneling:</strong> Encode data in DNS query names (e.g., base32-encoded-payload.attacker.com). The attacker\'s authoritative DNS server decodes and responds with data in TXT records. Bypasses most firewalls since DNS is rarely blocked. Used for C2 communication and data exfiltration. Fix: monitor query entropy, block long/unusual subdomain labels.',
+};
+document.querySelectorAll('.attack-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.attack-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    document.getElementById('attackDesc')!.innerHTML = DESCS[(card as HTMLElement).dataset.attack!];
+  });
+});
+</script>
