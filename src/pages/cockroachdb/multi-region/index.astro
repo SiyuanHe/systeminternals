@@ -1,0 +1,284 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="CockroachDB Multi-Region Patterns" 
+  description="Interactive visualization of CockroachDB multi-region: regional tables, global tables, regional-by-row, survival goals, and latency tradeoffs"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "CockroachDB", href: "/cockroachdb/" },
+    { label: "Multi-Region", href: "/cockroachdb/multi-region/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌍 Multi-Region Patterns</h1>
+      <p class="subtitle">Regional, Global, and Regional-by-Row — Data Where Your Users Are</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          CockroachDB supports three multi-region table patterns: <strong>Regional tables</strong> keep data in
+          one region (low latency for local reads/writes), <strong>Global tables</strong> replicate everywhere
+          (low-latency reads globally, higher write latency), and <strong>Regional-by-row</strong> partitions
+          rows to their home region. Choose a <em>survival goal</em>: survive zone failure (default) or
+          region failure (5 replicas, higher latency).
+        </p>
+      </div>
+    </section>
+
+    <!-- Pattern Comparison -->
+    <section class="patterns-section">
+      <h2>🔀 Table Locality Patterns</h2>
+      <p class="section-desc">Click a pattern to see data placement and latency characteristics.</p>
+
+      <div class="pattern-cards">
+        <div class="pattern-card active" data-pattern="regional">
+          <div class="pc-icon">📍</div>
+          <div class="pc-name">REGIONAL BY TABLE</div>
+          <div class="pc-tagline">Data lives in one region</div>
+        </div>
+        <div class="pattern-card" data-pattern="global">
+          <div class="pc-icon">🌐</div>
+          <div class="pc-name">GLOBAL</div>
+          <div class="pc-tagline">Reads fast everywhere</div>
+        </div>
+        <div class="pattern-card" data-pattern="row">
+          <div class="pc-icon">🗺️</div>
+          <div class="pc-name">REGIONAL BY ROW</div>
+          <div class="pc-tagline">Each row has a home</div>
+        </div>
+      </div>
+
+      <div class="pattern-viz" id="patternViz">
+        <div class="region" id="regionUS">
+          <div class="rg-name">🇺🇸 US-East</div>
+          <div class="rg-data" id="rgDataUS">●●● Primary</div>
+          <div class="rg-latency" id="rgLatUS">Read: ~2ms | Write: ~5ms</div>
+        </div>
+        <div class="region" id="regionEU">
+          <div class="rg-name">🇪🇺 EU-West</div>
+          <div class="rg-data" id="rgDataEU">○○ Replicas</div>
+          <div class="rg-latency" id="rgLatEU">Read: ~85ms | Write: ~85ms</div>
+        </div>
+        <div class="region" id="regionAP">
+          <div class="rg-name">🇯🇵 AP-Tokyo</div>
+          <div class="rg-data" id="rgDataAP">— none</div>
+          <div class="rg-latency" id="rgLatAP">Read: ~160ms | Write: ~160ms</div>
+        </div>
+      </div>
+
+      <div class="pattern-desc" id="patternDesc">
+        <strong>REGIONAL BY TABLE:</strong> All leaseholders (primary replicas) are in the table's home region.
+        Local reads and writes are fast (~2-5ms). Cross-region access has full RTT latency.
+        Best for: data that's accessed primarily from one region (user profiles, regional inventory).
+      </div>
+    </section>
+
+    <!-- Survival Goals -->
+    <section class="survival-section">
+      <h2>🛡️ Survival Goals</h2>
+      <p class="section-desc">How many failures can your database survive?</p>
+
+      <div class="survival-compare">
+        <div class="surv-card">
+          <div class="surv-name">ZONE Failure</div>
+          <div class="surv-default">(default)</div>
+          <div class="surv-replicas">3 replicas</div>
+          <div class="surv-tolerates">Survives: 1 zone (AZ) down</div>
+          <div class="surv-latency">Write latency: 1 RTT within region</div>
+          <div class="surv-diagram">
+            <span class="sd-node alive">●</span>
+            <span class="sd-node alive">●</span>
+            <span class="sd-node dead">✗</span>
+            <span class="sd-label">Quorum: 2/3 ✓</span>
+          </div>
+        </div>
+        <div class="surv-card highlight">
+          <div class="surv-name">REGION Failure</div>
+          <div class="surv-replicas">5 replicas (3 regions)</div>
+          <div class="surv-tolerates">Survives: entire region down</div>
+          <div class="surv-latency">Write latency: cross-region RTT</div>
+          <div class="surv-diagram">
+            <span class="sd-node alive">●</span>
+            <span class="sd-node alive">●</span>
+            <span class="sd-node alive">●</span>
+            <span class="sd-node dead">✗</span>
+            <span class="sd-node dead">✗</span>
+            <span class="sd-label">Quorum: 3/5 ✓</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 When to Use Each Pattern</h3>
+          <p>
+            <strong>Regional:</strong> User data accessed from one region (US users → US region).
+            <strong>Global:</strong> Reference data read everywhere (currency rates, feature flags, config).
+            <strong>Regional-by-row:</strong> Multi-tenant with geo-aware routing (each user's data in their region).
+            Start with Regional, promote to Global/Row as needed.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Non-Voting Replicas</h3>
+          <p>
+            Global tables use <strong>non-voting replicas</strong> in remote regions. They receive all writes
+            (via Raft log) but don't participate in consensus. This means reads are locally fast (serve from
+            non-voting replica) while writes only need quorum in the home region.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔑 crdb_region Column</h3>
+          <p>
+            Regional-by-row tables have a hidden <code>crdb_region</code> column. Set it per row to control
+            placement. CockroachDB automatically moves the row's leaseholder to the specified region.
+            Gateway nodes route queries to the correct region based on this column.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Latency Budget</h3>
+          <p>
+            US-East ↔ EU-West: ~80ms RTT. US-East ↔ AP-Tokyo: ~150ms RTT. Region survival writes need
+            cross-region quorum — add ~80-150ms to write latency. For most apps, zone survival (3 replicas,
+            local quorum) is the right default. Only use region survival for critical financial/compliance data.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://www.cockroachlabs.com/docs/stable/multiregion-overview" target="_blank">CockroachDB Multi-Region Documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20CockroachDB%20Multi-Region%20Visualizer&url=https://systeminternals.dev/cockroachdb/multi-region/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/cockroachdb/multi-region/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/cockroachdb/multi-region/&t=Interactive%20CockroachDB%20Multi-Region%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #60a5fa, #34d399, #fbbf24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(52,211,153,0.05)); border: 1px solid rgba(96,165,250,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #60a5fa; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #60a5fa; }
+
+  /* Patterns */
+  .patterns-section { margin-bottom: 50px; }
+  .pattern-cards { display: flex; gap: 12px; margin-bottom: 16px; }
+  .pattern-card { flex: 1; padding: 16px; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 14px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .pattern-card:hover { transform: translateY(-3px); }
+  .pattern-card.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.08); }
+  .pc-icon { font-size: 2rem; margin-bottom: 6px; }
+  .pc-name { font-size: 0.85rem; font-weight: 700; color: #fff; font-family: 'Monaco','Menlo',monospace; }
+  .pc-tagline { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+  .pattern-viz { display: flex; gap: 12px; margin-bottom: 16px; }
+  .region { flex: 1; padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; text-align: center; transition: all 0.3s; }
+  .rg-name { font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .rg-data { font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+  .rg-latency { font-size: 0.75rem; color: #888; font-family: 'Monaco','Menlo',monospace; }
+
+  .pattern-desc { padding: 14px 18px; background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.2); border-radius: 10px; font-size: 0.9rem; color: #aaa; line-height: 1.6; }
+  .pattern-desc strong { color: #60a5fa; }
+
+  /* Survival */
+  .survival-section { margin-bottom: 50px; }
+  .survival-compare { display: flex; gap: 16px; }
+  .surv-card { flex: 1; padding: 20px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; text-align: center; }
+  .surv-card.highlight { border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.04); }
+  .surv-name { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 2px; }
+  .surv-default { font-size: 0.75rem; color: #34d399; margin-bottom: 8px; }
+  .surv-replicas { font-size: 0.85rem; color: #60a5fa; margin-bottom: 6px; }
+  .surv-tolerates { font-size: 0.85rem; color: #ccc; margin-bottom: 4px; }
+  .surv-latency { font-size: 0.8rem; color: #888; margin-bottom: 10px; }
+  .surv-diagram { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .sd-node { font-size: 1.2rem; }
+  .sd-node.alive { color: #34d399; }
+  .sd-node.dead { color: #ef4444; }
+  .sd-label { font-size: 0.75rem; color: #34d399; font-weight: 600; margin-left: 8px; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #60a5fa; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #60a5fa; }
+  .highlight-card { background: linear-gradient(135deg, rgba(96,165,250,0.08), rgba(52,211,153,0.08)); border-color: rgba(96,165,250,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #60a5fa; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .pattern-cards { flex-direction: column; }
+    .pattern-viz { flex-direction: column; }
+    .survival-compare { flex-direction: column; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  const PATTERNS: Record<string, { us: { data: string; lat: string; color: string }; eu: { data: string; lat: string; color: string }; ap: { data: string; lat: string; color: string }; desc: string }> = {
+    regional: {
+      us: { data: '●●● Primary', lat: 'Read: ~2ms | Write: ~5ms', color: '#34d399' },
+      eu: { data: '○○ Replicas', lat: 'Read: ~85ms | Write: ~85ms', color: '#888' },
+      ap: { data: '— none', lat: 'Read: ~160ms | Write: ~160ms', color: '#555' },
+      desc: '<strong>REGIONAL BY TABLE:</strong> All leaseholders (primary replicas) are in the table\'s home region. Local reads and writes are fast (~2-5ms). Cross-region access has full RTT latency. Best for: data accessed primarily from one region.',
+    },
+    global: {
+      us: { data: '●●● Voting replicas', lat: 'Read: ~2ms | Write: ~85ms', color: '#34d399' },
+      eu: { data: '○○ Non-voting replicas', lat: 'Read: ~2ms | Write: ~85ms', color: '#60a5fa' },
+      ap: { data: '○○ Non-voting replicas', lat: 'Read: ~2ms | Write: ~160ms', color: '#60a5fa' },
+      desc: '<strong>GLOBAL:</strong> Non-voting replicas in every region serve reads locally (~2ms). Writes need quorum in the home region, so write latency = cross-region RTT. Best for: reference data read everywhere (config, feature flags, exchange rates).',
+    },
+    row: {
+      us: { data: '●● US user rows', lat: 'US users: ~2ms R/W', color: '#34d399' },
+      eu: { data: '●● EU user rows', lat: 'EU users: ~2ms R/W', color: '#34d399' },
+      ap: { data: '●● AP user rows', lat: 'AP users: ~2ms R/W', color: '#34d399' },
+      desc: '<strong>REGIONAL BY ROW:</strong> Each row has a <code>crdb_region</code> column. Rows are automatically placed in their home region. Every user gets local latency. Best for: multi-tenant apps with geo-aware routing.',
+    },
+  };
+
+  document.querySelectorAll('.pattern-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      const p = (card as HTMLElement).dataset.pattern!;
+      const cfg = PATTERNS[p];
+
+      document.getElementById('rgDataUS')!.textContent = cfg.us.data;
+      document.getElementById('rgLatUS')!.textContent = cfg.us.lat;
+      document.getElementById('rgDataUS')!.style.color = cfg.us.color;
+      document.getElementById('rgDataEU')!.textContent = cfg.eu.data;
+      document.getElementById('rgLatEU')!.textContent = cfg.eu.lat;
+      document.getElementById('rgDataEU')!.style.color = cfg.eu.color;
+      document.getElementById('rgDataAP')!.textContent = cfg.ap.data;
+      document.getElementById('rgLatAP')!.textContent = cfg.ap.lat;
+      document.getElementById('rgDataAP')!.style.color = cfg.ap.color;
+      document.getElementById('patternDesc')!.innerHTML = cfg.desc;
+    });
+  });
+</script>
+</BaseLayout>

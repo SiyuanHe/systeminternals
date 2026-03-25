@@ -1,0 +1,433 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="RocksDB Write Path Deep Dive" 
+  description="Interactive visualization of RocksDB write path: WAL, MemTable, flush triggers, write stalls, and write buffer management"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "RocksDB", href: "/rocksdb/" },
+    { label: "Write Path", href: "/rocksdb/write-path/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>✍️ Write Path Deep Dive</h1>
+      <p class="subtitle">WAL, MemTable, Flush — Every Write's Journey to Disk</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Every RocksDB write follows the same path: append to the <strong>Write-Ahead Log</strong> (WAL) for durability,
+          then insert into the active <em>MemTable</em> (in-memory sorted structure). When the MemTable is full,
+          it becomes <strong>immutable</strong> and a background thread <em>flushes</em> it to an SST file on disk.
+          If flushes can't keep up, RocksDB triggers <strong>write stalls</strong> — deliberately slowing writes
+          to prevent memory exhaustion. Understanding this path is key to tuning write-heavy workloads.
+        </p>
+      </div>
+    </section>
+
+    <!-- Write Path Simulator -->
+    <section class="path-section">
+      <h2>🔀 Write Path</h2>
+      <p class="section-desc">Click "Write" to step through each stage of a write operation.</p>
+
+      <div class="path-viz">
+        <div class="path-stage" id="pwClient">
+          <div class="ps-icon">👤</div>
+          <div class="ps-name">Client</div>
+          <div class="ps-detail">Put(key, value)</div>
+        </div>
+        <div class="path-arrow">→</div>
+        <div class="path-stage" id="pwWAL">
+          <div class="ps-icon">📝</div>
+          <div class="ps-name">WAL</div>
+          <div class="ps-detail">Sequential append</div>
+          <div class="ps-metric" id="walSize">0 KB</div>
+        </div>
+        <div class="path-arrow">→</div>
+        <div class="path-stage" id="pwMemtable">
+          <div class="ps-icon">💾</div>
+          <div class="ps-name">MemTable</div>
+          <div class="ps-detail">SkipList (sorted)</div>
+          <div class="ps-bar"><div class="ps-fill" id="memFill" style="width:0%"></div></div>
+          <div class="ps-metric" id="memSize">0 / 64 MB</div>
+        </div>
+        <div class="path-arrow flush-arrow" id="flushArrow">→ flush</div>
+        <div class="path-stage" id="pwSST">
+          <div class="ps-icon">📦</div>
+          <div class="ps-name">SST File (L0)</div>
+          <div class="ps-detail">Sorted, immutable</div>
+          <div class="ps-metric" id="sstCount">0 files</div>
+        </div>
+      </div>
+
+      <div class="path-controls">
+        <button id="writeOneBtn" class="action-btn primary-btn">✍️ Write 1 MB</button>
+        <button id="writeBurstBtn" class="action-btn secondary-btn">🌊 Burst 100 MB</button>
+        <button id="flushBtn" class="action-btn commit-btn">💧 Force Flush</button>
+        <button id="pathResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="path-log" id="pathLog"></div>
+    </section>
+
+    <!-- Write Stall Simulator -->
+    <section class="stall-section">
+      <h2>⚠️ Write Stalls</h2>
+      <p class="section-desc">When writes outpace flushes/compaction, RocksDB slows or stops writes to protect itself.</p>
+
+      <div class="stall-conditions">
+        <div class="stall-card" id="stallL0">
+          <div class="sc-name">L0 File Count</div>
+          <div class="sc-bar"><div class="sc-fill" id="stallL0Fill" style="width:0%"></div></div>
+          <div class="sc-values">
+            <span>Current: <strong id="stallL0Val">0</strong></span>
+            <span>Slowdown: 20</span>
+            <span class="sc-stop">Stop: 36</span>
+          </div>
+          <div class="sc-status" id="stallL0Status">OK</div>
+        </div>
+        <div class="stall-card" id="stallMem">
+          <div class="sc-name">Immutable MemTables</div>
+          <div class="sc-bar"><div class="sc-fill" id="stallMemFill" style="width:0%"></div></div>
+          <div class="sc-values">
+            <span>Current: <strong id="stallMemVal">0</strong></span>
+            <span>Stop: 5</span>
+          </div>
+          <div class="sc-status" id="stallMemStatus">OK</div>
+        </div>
+        <div class="stall-card" id="stallPending">
+          <div class="sc-name">Pending Compaction</div>
+          <div class="sc-bar"><div class="sc-fill" id="stallPendFill" style="width:0%"></div></div>
+          <div class="sc-values">
+            <span>Current: <strong id="stallPendVal">0 GB</strong></span>
+            <span>Slowdown: 64 GB</span>
+          </div>
+          <div class="sc-status" id="stallPendStatus">OK</div>
+        </div>
+      </div>
+
+      <div class="stall-controls">
+        <button id="overloadBtn" class="action-btn danger-btn">🔥 Simulate Overload</button>
+        <button id="stallResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+    </section>
+
+    <!-- Write Buffer Config -->
+    <section class="config-section">
+      <h2>⚙️ Key Write Tuning Parameters</h2>
+      <div class="config-grid">
+        <div class="cfg-card">
+          <div class="cfg-name">write_buffer_size</div>
+          <div class="cfg-default">64 MB</div>
+          <div class="cfg-desc">Size of a single MemTable. Larger = fewer flushes but more memory. Each CF has its own.</div>
+        </div>
+        <div class="cfg-card">
+          <div class="cfg-name">max_write_buffer_number</div>
+          <div class="cfg-default">2</div>
+          <div class="cfg-desc">Max MemTables (active + immutable). Write stalls when all are full and flush is behind.</div>
+        </div>
+        <div class="cfg-card">
+          <div class="cfg-name">level0_slowdown_writes_trigger</div>
+          <div class="cfg-default">20</div>
+          <div class="cfg-desc">L0 file count that triggers write throttling. Gives compaction time to catch up.</div>
+        </div>
+        <div class="cfg-card">
+          <div class="cfg-name">level0_stop_writes_trigger</div>
+          <div class="cfg-default">36</div>
+          <div class="cfg-desc">L0 file count that completely stops writes. Emergency brake — compaction must clear L0 first.</div>
+        </div>
+        <div class="cfg-card">
+          <div class="cfg-name">bytes_per_sync</div>
+          <div class="cfg-default">1 MB</div>
+          <div class="cfg-desc">How often to fsync WAL/SST during writes. Lower = safer but slower.</div>
+        </div>
+        <div class="cfg-card">
+          <div class="cfg-name">wal_bytes_per_sync</div>
+          <div class="cfg-default">0 (OS)</div>
+          <div class="cfg-desc">WAL-specific sync interval. Default lets OS decide (risky on crash).</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card">
+          <h3>💡 Write Amplification</h3>
+          <p>
+            A single user write gets written multiple times: WAL (1x), MemTable flush to L0 (1x),
+            L0→L1 compaction (1x), L1→L2 (1x)... Total <strong>write amplification</strong> can be 10-30x.
+            This is the LSM-tree tradeoff: fast writes (sequential) at the cost of background I/O.
+            Monitor with <code>rocksdb.compaction.write.bytes</code>.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔀 Write Batching</h3>
+          <p>
+            RocksDB groups concurrent writes into a single WAL append via <strong>write batching</strong>.
+            One thread becomes the "leader" and writes the combined batch, then wakes all follower threads.
+            This amortizes fsync cost across many writers — critical for high-concurrency workloads.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>📊 Direct I/O</h3>
+          <p>
+            By default, writes go through OS page cache. Enable <code>use_direct_io_for_flush_and_compaction</code>
+            to bypass the cache for flush/compaction I/O. This prevents compaction from evicting your hot read data
+            from the page cache. Essential for production workloads.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>⚡ Pipeline Writes</h3>
+          <p>
+            <code>enable_pipelined_write=true</code> allows WAL write and MemTable insert to overlap.
+            While one batch writes to WAL, the previous batch inserts into MemTable. ~30% throughput improvement
+            for write-heavy workloads. Default since RocksDB 5.5.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://github.com/facebook/rocksdb/wiki/RocksDB-Overview" target="_blank">RocksDB Wiki</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20RocksDB%20Write%20Path%20Visualizer&url=https://systeminternals.dev/rocksdb/write-path/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/rocksdb/write-path/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/rocksdb/write-path/&t=Interactive%20RocksDB%20Write%20Path%20Visualizer" target="_blank" class="share-btn">🟧 HN</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.5rem; margin-bottom: 10px; background: linear-gradient(90deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 24px; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(96,165,250,0.05)); border: 1px solid rgba(52,211,153,0.3); border-radius: 16px; padding: 24px 28px; font-size: 1.05rem; line-height: 1.8; color: #ccc; }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #34d399; font-style: normal; font-weight: 500; }
+  .overview-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #34d399; }
+
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .primary-btn { background: linear-gradient(135deg, #34d399, #059669); color: white; }
+  .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(52,211,153,0.4); }
+  .secondary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .secondary-btn:hover { transform: translateY(-2px); }
+  .commit-btn { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+  .commit-btn:hover { transform: translateY(-2px); }
+  .danger-btn { background: linear-gradient(135deg, #f87171, #ef4444); color: white; }
+  .danger-btn:hover { transform: translateY(-2px); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Path */
+  .path-section { margin-bottom: 50px; }
+  .path-viz { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding: 10px 0; }
+  .path-stage { text-align: center; min-width: 110px; padding: 14px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; transition: all 0.4s; }
+  .path-stage.active { border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.06); }
+  .ps-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .ps-name { font-size: 0.85rem; font-weight: 700; color: #fff; }
+  .ps-detail { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .ps-metric { font-size: 0.75rem; color: #34d399; margin-top: 6px; font-family: 'Monaco','Menlo',monospace; }
+  .ps-bar { height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .ps-fill { height: 100%; background: linear-gradient(90deg, #34d399, #fbbf24); border-radius: 3px; transition: width 0.3s; }
+  .path-arrow { color: #555; font-size: 0.85rem; padding-top: 30px; }
+  .flush-arrow { color: #a78bfa; font-weight: 600; }
+  .path-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .path-log { font-size: 0.8rem; max-height: 80px; overflow-y: auto; color: #888; }
+  :global(.plog) { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+  /* Stall */
+  .stall-section { margin-bottom: 50px; }
+  .stall-conditions { display: flex; gap: 12px; margin-bottom: 16px; }
+  .stall-card { flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; }
+  .sc-name { font-size: 0.85rem; font-weight: 700; color: #ccc; margin-bottom: 8px; }
+  .sc-bar { height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+  .sc-fill { height: 100%; border-radius: 4px; transition: width 0.5s, background 0.5s; background: #34d399; }
+  .sc-fill.warning { background: #fbbf24; }
+  .sc-fill.danger { background: #ef4444; }
+  .sc-values { display: flex; justify-content: space-between; font-size: 0.7rem; color: #888; }
+  .sc-values strong { color: #fff; }
+  .sc-stop { color: #ef4444; }
+  .sc-status { font-size: 0.8rem; font-weight: 700; margin-top: 6px; text-align: center; }
+  .stall-controls { display: flex; gap: 12px; }
+
+  /* Config */
+  .config-section { margin-bottom: 50px; }
+  .config-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .cfg-card { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; }
+  .cfg-name { font-size: 0.8rem; font-weight: 700; color: #34d399; font-family: 'Monaco','Menlo',monospace; margin-bottom: 4px; }
+  .cfg-default { font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .cfg-desc { font-size: 0.75rem; color: #888; line-height: 1.4; }
+
+  /* Explain */
+  .explain-section { margin-bottom: 50px; }
+  .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .explain-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px; }
+  .explain-card h3 { font-size: 1rem; color: #fff; margin-bottom: 10px; }
+  .explain-card p { color: #aaa; line-height: 1.6; font-size: 0.9rem; }
+  .explain-card strong { color: #34d399; }
+  .explain-card code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #34d399; }
+  .highlight-card { background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(96,165,250,0.08)); border-color: rgba(52,211,153,0.3); }
+
+  .viz-footer { text-align: center; color: #666; font-size: 0.9rem; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px; }
+  .viz-footer a { color: #34d399; }
+  .share-buttons { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .share-buttons span { color: #666; }
+  .share-btn { padding: 10px 20px; background: rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 0.9rem; transition: background 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.2); }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .path-viz { flex-direction: column; align-items: stretch; }
+    .path-arrow { transform: rotate(90deg); text-align: center; padding: 0; }
+    .stall-conditions { flex-direction: column; }
+    .config-grid { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  let memUsed = 0; // MB
+  let walSize = 0;
+  let sstFiles = 0;
+  const MEM_MAX = 64;
+
+  function updatePath() {
+    const pct = (memUsed / MEM_MAX) * 100;
+    document.getElementById('memFill')!.style.width = Math.min(pct, 100) + '%';
+    document.getElementById('memSize')!.textContent = `${memUsed} / ${MEM_MAX} MB`;
+    document.getElementById('walSize')!.textContent = `${walSize} KB`;
+    document.getElementById('sstCount')!.textContent = `${sstFiles} files`;
+  }
+
+  function doFlush() {
+    if (memUsed === 0) return;
+    sstFiles++;
+    const logEl = document.getElementById('pathLog')!;
+    logEl.innerHTML += `<div class="plog">💧 Flush: MemTable (${memUsed} MB) → SST file #${sstFiles} (L0)</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+    memUsed = 0;
+    walSize = 0;
+    document.getElementById('pwSST')!.classList.add('active');
+    setTimeout(() => document.getElementById('pwSST')!.classList.remove('active'), 500);
+    updatePath();
+  }
+
+  function writeData(mb: number) {
+    walSize += mb * 1024;
+    memUsed += mb;
+    const logEl = document.getElementById('pathLog')!;
+
+    // Flash stages
+    ['pwWAL', 'pwMemtable'].forEach((id, i) => {
+      setTimeout(() => {
+        document.getElementById(id)!.classList.add('active');
+        setTimeout(() => document.getElementById(id)!.classList.remove('active'), 300);
+      }, i * 150);
+    });
+
+    logEl.innerHTML += `<div class="plog">✍️ Write ${mb} MB → WAL append + MemTable insert (${memUsed}/${MEM_MAX} MB)</div>`;
+
+    if (memUsed >= MEM_MAX) {
+      logEl.innerHTML += `<div class="plog">⚠️ MemTable full — triggering flush...</div>`;
+      setTimeout(doFlush, 300);
+    }
+
+    logEl.scrollTop = logEl.scrollHeight;
+    updatePath();
+  }
+
+  document.getElementById('writeOneBtn')?.addEventListener('click', () => writeData(1));
+
+  document.getElementById('writeBurstBtn')?.addEventListener('click', async () => {
+    for (let i = 0; i < 10; i++) {
+      writeData(10);
+      await new Promise(r => setTimeout(r, 200));
+    }
+  });
+
+  document.getElementById('flushBtn')?.addEventListener('click', doFlush);
+
+  document.getElementById('pathResetBtn')?.addEventListener('click', () => {
+    memUsed = 0; walSize = 0; sstFiles = 0;
+    document.getElementById('pathLog')!.innerHTML = '';
+    updatePath();
+  });
+
+  // ========== WRITE STALLS ==========
+  document.getElementById('overloadBtn')?.addEventListener('click', async () => {
+    // Simulate L0 files piling up
+    for (let l0 = 0; l0 <= 40; l0 += 2) {
+      const pct = (l0 / 40) * 100;
+      document.getElementById('stallL0Fill')!.style.width = pct + '%';
+      document.getElementById('stallL0Val')!.textContent = String(l0);
+
+      const fill = document.getElementById('stallL0Fill')!;
+      const status = document.getElementById('stallL0Status')!;
+      if (l0 >= 36) {
+        fill.className = 'sc-fill danger'; status.textContent = '🛑 WRITE STOP'; status.style.color = '#ef4444';
+      } else if (l0 >= 20) {
+        fill.className = 'sc-fill warning'; status.textContent = '⚠️ SLOWDOWN'; status.style.color = '#fbbf24';
+      } else {
+        fill.className = 'sc-fill'; status.textContent = '✅ OK'; status.style.color = '#34d399';
+      }
+
+      // Immutable memtables
+      const imm = Math.min(Math.floor(l0 / 8), 6);
+      document.getElementById('stallMemFill')!.style.width = (imm / 6) * 100 + '%';
+      document.getElementById('stallMemVal')!.textContent = String(imm);
+      const memStatus = document.getElementById('stallMemStatus')!;
+      if (imm >= 5) {
+        document.getElementById('stallMemFill')!.className = 'sc-fill danger';
+        memStatus.textContent = '🛑 STOP'; memStatus.style.color = '#ef4444';
+      } else {
+        document.getElementById('stallMemFill')!.className = 'sc-fill';
+        memStatus.textContent = '✅ OK'; memStatus.style.color = '#34d399';
+      }
+
+      // Pending compaction
+      const pending = (l0 * 1.6).toFixed(1);
+      document.getElementById('stallPendFill')!.style.width = Math.min(parseFloat(pending) / 80 * 100, 100) + '%';
+      document.getElementById('stallPendVal')!.textContent = pending + ' GB';
+      const pendStatus = document.getElementById('stallPendStatus')!;
+      if (parseFloat(pending) >= 64) {
+        document.getElementById('stallPendFill')!.className = 'sc-fill warning';
+        pendStatus.textContent = '⚠️ SLOWDOWN'; pendStatus.style.color = '#fbbf24';
+      } else {
+        document.getElementById('stallPendFill')!.className = 'sc-fill';
+        pendStatus.textContent = '✅ OK'; pendStatus.style.color = '#34d399';
+      }
+
+      await new Promise(r => setTimeout(r, 150));
+    }
+  });
+
+  document.getElementById('stallResetBtn')?.addEventListener('click', () => {
+    ['stallL0Fill', 'stallMemFill', 'stallPendFill'].forEach(id => {
+      document.getElementById(id)!.style.width = '0%';
+      document.getElementById(id)!.className = 'sc-fill';
+    });
+    document.getElementById('stallL0Val')!.textContent = '0';
+    document.getElementById('stallMemVal')!.textContent = '0';
+    document.getElementById('stallPendVal')!.textContent = '0 GB';
+    ['stallL0Status', 'stallMemStatus', 'stallPendStatus'].forEach(id => {
+      const el = document.getElementById(id)!;
+      el.textContent = '✅ OK'; el.style.color = '#34d399';
+    });
+  });
+
+  // Init
+  updatePath();
+</script>
+</BaseLayout>
