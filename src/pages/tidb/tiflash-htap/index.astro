@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="TiFlash HTAP" 
+  description="Interactive visualization of TiFlash HTAP"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"TiDB",href:"/tidb/"},{label:"TiFlash HTAP",href:"/tidb/tiflash-htap/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ TiFlash HTAP</h1>
+      <p class="subtitle">Row Store vs Column Store — Real-Time Analytics on Live Data</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>TiFlash is TiDB's columnar storage engine for <strong>HTAP</strong> (Hybrid Transactional/Analytical Processing). It maintains a real-time columnar replica of TiKV data via Raft learner. OLTP queries hit TiKV (row store), OLAP queries hit TiFlash (column store) — all on the same live data with <em>strong consistency</em>. The optimizer automatically routes queries to the best engine.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🏗️ Architecture</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>TiKV: row store (OLTP)</li><li>TiFlash: column store (OLAP)</li><li>Raft learner replicates in real-time</li><li>Same data, two formats</li><li>Strong consistency guaranteed</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>📊 When TiFlash Wins</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Full table scans (column pruning)</li><li>Aggregations (SUM, COUNT, AVG)</li><li>GROUP BY on few columns</li><li>JOINs with large tables</li><li>Compression: 5-10x smaller on disk</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🔀 Query Routing</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Optimizer checks cost for TiKV vs TiFlash</li><li>Can use both in same query (MPP joins)</li><li>Hint: /*+ READ_FROM_STORAGE(TIFLASH[t]) */</li><li>SET tidb_isolation_read_engines='tiflash'</li><li>MPP: distributed among TiFlash nodes</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 No ETL Pipeline</h3><p>Traditional HTAP requires ETL from OLTP DB to a data warehouse (hours of delay). TiDB/TiFlash replicates via Raft in <strong>sub-second</strong> latency. Analysts query live transactional data. No stale reports, no pipeline to maintain.</p></div>
+<div class="explain-card"><h3>⚡ MPP Engine</h3><p>TiFlash supports Massively Parallel Processing — large queries are split across TiFlash nodes. Shuffle-based distributed joins, parallel aggregation. Think mini-Spark inside your database, but on real-time data.</p></div>
+<div class="explain-card"><h3>📊 Column Pruning</h3><p>SELECT name, email FROM users WHERE age > 25 — TiFlash only reads 3 columns, not all 50. On wide tables, this is 10-20x less I/O than row store. The wider your table, the bigger the advantage.</p></div>
+<div class="explain-card"><h3>🔧 Adding TiFlash</h3><p>ALTER TABLE t SET TIFLASH REPLICA 1; — that's it. TiDB starts replicating to TiFlash. No schema changes, no data migration, no application changes. Takes minutes for small tables, hours for TB-scale.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/tiflash-overview" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=TiFlash%20HTAP&url=https://systeminternals.dev/tidb/tiflash-htap/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/tiflash-htap/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#818cf8, #60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(129,140,248,0.1),rgba(129,140,248,0.03));border:1px solid rgba(129,140,248,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#818cf8;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#818cf8}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#818cf8}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#818cf8}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#818cf8}.highlight-card{background:linear-gradient(135deg,rgba(129,140,248,0.08),rgba(129,140,248,0.04));border-color:rgba(129,140,248,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#818cf8}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

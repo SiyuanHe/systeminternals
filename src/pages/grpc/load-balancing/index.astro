@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="gRPC Load Balancing" 
+  description="Interactive visualization of gRPC Load Balancing"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"gRPC",href:"/grpc/"},{label:"gRPC Load Balancing",href:"/grpc/load-balancing/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚖️ gRPC Load Balancing</h1>
+      <p class="subtitle">Client-Side, Proxy, xDS — Routing RPCs at Scale</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>gRPC uses HTTP/2 with long-lived connections and multiplexing. Traditional L4 load balancers can't distribute individual RPCs — they pin an entire connection to one backend. Solutions: <strong>client-side LB</strong> (pick_first, round_robin), <strong>proxy LB</strong> (Envoy L7), or <strong>xDS</strong> (dynamic service discovery). In Kubernetes, use headless services + client-side LB or an Envoy sidecar.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>📱 Client-Side LB</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Client resolves DNS → gets all backend IPs</li><li>pick_first: use first healthy backend</li><li>round_robin: cycle through backends</li><li>No extra hop, lowest latency</li><li>Client must handle health checking</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🔀 Proxy LB (Envoy)</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Client → Envoy → Backend</li><li>Envoy understands HTTP/2 frames</li><li>Per-RPC load balancing</li><li>Health checking, circuit breaking</li><li>Extra network hop (~0.5ms)</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>📡 xDS Protocol</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Control plane pushes config to clients/proxies</li><li>LDS: Listener Discovery</li><li>RDS: Route Discovery</li><li>CDS: Cluster Discovery</li><li>EDS: Endpoint Discovery</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 The HTTP/2 Problem</h3><p>HTTP/2 multiplexes many RPCs over one TCP connection. An L4 LB sees ONE connection and sends ALL RPCs to one backend. Result: completely unbalanced load. You MUST use L7 (application-layer) load balancing for gRPC.</p></div>
+<div class="explain-card"><h3>🔧 K8s + gRPC</h3><p>Default K8s Service (ClusterIP) is L4 — bad for gRPC. Fix: use headless Service (clusterIP: None) + client-side LB, or deploy Envoy/Linkerd sidecar. Istio handles this automatically with per-pod Envoy proxies.</p></div>
+<div class="explain-card"><h3>⚡ Connection Draining</h3><p>gRPC supports graceful shutdown: server sends GOAWAY frame, client stops sending new RPCs on that connection, in-flight RPCs complete, then connection closes. Essential for rolling deployments.</p></div>
+<div class="explain-card"><h3>📊 Retry & Hedging</h3><p>gRPC has built-in retry policies (configurable per-method). Hedging sends the same RPC to multiple backends simultaneously and uses the first response. Reduces tail latency at the cost of extra load.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://grpc.io/docs/guides/custom-load-balancing/" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=gRPC%20Load%20Balancing&url=https://systeminternals.dev/grpc/load-balancing/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/grpc/load-balancing/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#34d399, #60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(52,211,153,0.1),rgba(52,211,153,0.03));border:1px solid rgba(52,211,153,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#34d399;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#34d399}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#34d399}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#34d399}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#34d399}.highlight-card{background:linear-gradient(135deg,rgba(52,211,153,0.08),rgba(52,211,153,0.04));border-color:rgba(52,211,153,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#34d399}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

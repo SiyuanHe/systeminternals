@@ -38,7 +38,7 @@ const cassandraTopics = [
 
 const zookeeperTopics = [
   { title: "ZNodes & Watches", description: "Tree hierarchy, ephemeral nodes, watches, leader election recipes", href: "/zookeeper/znodes-watches/", status: "live" },
-  { title: "Sessions & Quorums", description: "Client sessions, ZAB protocol, and quorum mechanics", href: "#", status: "coming" },
+  { title: "Sessions & Quorums", description: "Client sessions, ZAB protocol, and quorum mechanics", href: "/zookeeper/sessions-quorums/", status: "live" },
 ];
 
 const elasticsearchTopics = [
@@ -62,11 +62,11 @@ const tidbTopics = [
   { title: "Raft Region Size", description: "The invisible lever for performance & recovery", href: "/tidb/raft-region-size/", status: "live" },
   { title: "LSM-Tree & Compaction", description: "How TiKV stores data and manages write amplification", href: "/tidb/lsm-tree/", status: "live" },
   { title: "Distributed Transactions", description: "Percolator 2PC: prewrite, commit, and lock resolution", href: "/tidb/distributed-transactions/", status: "live" },
-  { title: "Hot Regions & Load Balancing", description: "PD scheduler: splitting, scattering, and rebalancing", href: "#", status: "coming" },
-  { title: "TiFlash HTAP", description: "Row store vs column store, when to use each", href: "#", status: "coming" },
-  { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "#", status: "coming" },
-  { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "#", status: "coming" },
-  { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "#", status: "coming" },
+  { title: "Hot Regions & Load Balancing", description: "PD scheduler: splitting, scattering, and rebalancing", href: "/tidb/hot-regions/", status: "live" },
+  { title: "TiFlash HTAP", description: "Row store vs column store, when to use each", href: "/tidb/tiflash-htap/", status: "live" },
+  { title: "Coprocessor Push-Down", description: "Moving computation to storage nodes", href: "/tidb/coprocessor/", status: "live" },
+  { title: "GC & MVCC", description: "Multi-version concurrency and garbage collection", href: "/tidb/gc-mvcc/", status: "live" },
+  { title: "Backup & PITR", description: "Full backups, incremental, and point-in-time recovery", href: "/tidb/backup-pitr/", status: "live" },
 ];
 
 const dynamodbTopics = [
@@ -76,7 +76,7 @@ const dynamodbTopics = [
 
 const grpcTopics = [
   { title: "gRPC Internals", description: "HTTP/2 multiplexing, Protobuf encoding, streaming, deadlines", href: "/grpc/internals/", status: "live" },
-  { title: "Load Balancing", description: "Client-side vs proxy LB, xDS, service mesh integration", href: "#", status: "coming" },
+  { title: "Load Balancing", description: "Client-side vs proxy LB, xDS, service mesh integration", href: "/grpc/load-balancing/", status: "live" },
 ];
 
 const rocksdbTopics = [
@@ -91,7 +91,7 @@ const dockerTopics = [
 
 const vitessTopics = [
   { title: "Sharding", description: "VSchema, vindexes, query routing, and zero-downtime resharding", href: "/vitess/sharding/", status: "live" },
-  { title: "VReplication", description: "Stream-based data movement and materialized views", href: "#", status: "coming" },
+  { title: "VReplication", description: "Stream-based data movement and materialized views", href: "/vitess/vreplication/", status: "live" },
 ];
 
 const envoyTopics = [
@@ -112,7 +112,7 @@ const cockroachdbTopics = [
 
 const natsTopics = [
   { title: "JetStream", description: "Persistent streams, consumers, replay policies, KV store", href: "/nats/jetstream/", status: "live" },
-  { title: "Clustering & Super-Clusters", description: "Route, gateway, and leaf node topologies", href: "#", status: "coming" },
+  { title: "Clustering & Super-Clusters", description: "Route, gateway, and leaf node topologies", href: "/nats/clustering/", status: "live" },
 ];
 
 const prometheusTopics = [
@@ -122,7 +122,7 @@ const prometheusTopics = [
 
 const spannerTopics = [
   { title: "TrueTime & Commit-Wait", description: "GPS clocks, bounded uncertainty, external consistency, Paxos groups", href: "/spanner/truetime/", status: "live" },
-  { title: "Schema & SQL Layer", description: "Interleaved tables, secondary indexes, query processing", href: "#", status: "coming" },
+  { title: "Schema & SQL Layer", description: "Interleaved tables, secondary indexes, query processing", href: "/spanner/schema-sql/", status: "live" },
 ];
 
 const linuxTopics = [

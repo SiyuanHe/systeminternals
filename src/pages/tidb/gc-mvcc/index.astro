@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="GC & MVCC" 
+  description="Interactive visualization of GC & MVCC"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"TiDB",href:"/tidb/"},{label:"GC & MVCC",href:"/tidb/gc-mvcc/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗑️ GC & MVCC</h1>
+      <p class="subtitle">Multi-Version Concurrency and Garbage Collection in TiDB</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>TiDB uses <strong>MVCC</strong> (Multi-Version Concurrency Control) — every write creates a new version with a timestamp. Readers see a consistent snapshot without blocking writers. Old versions accumulate and must be cleaned by <em>GC</em> (Garbage Collection). GC runs periodically, removing versions older than <code>tikv_gc_life_time</code> (default 10 minutes). If GC falls behind, storage bloats and reads slow down.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>📝 MVCC Versions</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Each key has multiple versions</li><li>Version = (start_ts, commit_ts)</li><li>Reader picks version ≤ snapshot_ts</li><li>No read locks needed</li><li>Snapshot isolation by default</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🗑️ GC Process</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>GC leader elected (one TiDB node)</li><li>Calculate safe point = now - gc_life_time</li><li>Resolve expired locks</li><li>Delete versions older than safe point</li><li>Runs every gc_run_interval (default 10min)</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>⚙️ GC Modes</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Distributed GC: each TiKV GCs locally</li><li>Central GC (legacy): TiDB sends GC requests</li><li>Compaction filter GC: piggyback on RocksDB compaction</li><li>Green GC: scan + delete in one pass</li><li>Default: distributed + compaction filter</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 Why GC Matters</h3><p>Without GC, every UPDATE keeps the old version forever. A table updated 1M times/day accumulates 1M versions per key per day. Reads slow down (skip old versions), disk fills up, compaction gets heavier. GC is not optional.</p></div>
+<div class="explain-card"><h3>⚠️ GC Blocked</h3><p>Long-running transactions block GC — their snapshot must see old versions. A forgotten BEGIN without COMMIT can block GC for hours. Monitor: SHOW GLOBAL STATUS LIKE 'tikv_gc_safe_point'. If it stops advancing, find and kill the blocking transaction.</p></div>
+<div class="explain-card"><h3>📊 Tuning</h3><p>tikv_gc_life_time: default 10min. Increase for long analytics queries (1h+). Decrease for write-heavy workloads with lots of updates. tikv_gc_concurrency: parallelism of GC workers. Higher = faster but more CPU.</p></div>
+<div class="explain-card"><h3>🔧 Compaction Filter GC</h3><p>Instead of separate GC passes, old versions are cleaned during RocksDB compaction. Zero additional I/O — GC is free! Enabled by default since TiDB 5.0. The single biggest GC improvement.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/garbage-collection-overview" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=GC%20%26%20MVCC&url=https://systeminternals.dev/tidb/gc-mvcc/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/gc-mvcc/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#f97316, #fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(249,115,22,0.1),rgba(249,115,22,0.03));border:1px solid rgba(249,115,22,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#f97316;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#f97316}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#f97316}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#f97316}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#f97316}.highlight-card{background:linear-gradient(135deg,rgba(249,115,22,0.08),rgba(249,115,22,0.04));border-color:rgba(249,115,22,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#f97316}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

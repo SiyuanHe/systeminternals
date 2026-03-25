@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Hot Regions & Load Balancing" 
+  description="Interactive visualization of Hot Regions & Load Balancing"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"TiDB",href:"/tidb/"},{label:"Hot Regions & Load Balancing",href:"/tidb/hot-regions/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔥 Hot Regions & Load Balancing</h1>
+      <p class="subtitle">PD Scheduler: Splitting, Scattering, and Rebalancing Regions</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>In TiDB, data is split into <strong>Regions</strong> (~96MB each), distributed across TiKV nodes. When one Region gets too much traffic, it becomes <em>hot</em>. The <strong>PD scheduler</strong> detects hot Regions and rebalances them: splitting hot Regions, moving leaders to less-loaded nodes, and scattering writes. Without proper scheduling, a single hot Region can bottleneck the entire cluster.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🌡️ Hot Region Detection</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>PD collects heartbeats from TiKV</li><li>Track read/write bytes + keys per Region</li><li>Identify top-N hot Regions</li><li>Calculate flow rate trends</li><li>Threshold: configurable (default auto)</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>⚙️ Scheduling Actions</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Split: divide 1 Region → 2</li><li>Transfer leader: move read load</li><li>Transfer peer: move data to cold node</li><li>Merge: combine small adjacent Regions</li><li>Scatter: spread sequential writes</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>⚠️ Common Hot Spots</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Auto-increment PKs → sequential writes</li><li>Timestamp-prefix keys</li><li>Single counter row (UPDATE SET cnt=cnt+1)</li><li>Uneven index distribution</li><li>Fix: SHARD_ROW_ID_BITS, hash partition</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 SHARD_ROW_ID_BITS</h3><p>Adds random bits to the implicit _tidb_rowid, scattering sequential inserts across multiple Regions. Setting SHARD_ROW_ID_BITS=4 distributes writes across 16 Regions. Zero-cost for point reads.</p></div>
+<div class="explain-card"><h3>⚡ AUTO_RANDOM</h3><p>Replaces AUTO_INCREMENT with a randomly distributed ID. The top 5 bits are random (configurable), rest is sequential. Eliminates write hotspots while maintaining uniqueness. Recommended for all new tables.</p></div>
+<div class="explain-card"><h3>📊 Dashboard</h3><p>TiDB Dashboard shows a real-time heatmap of Region traffic. Key Visualizer shows read/write patterns over time. Use these to identify hotspots before they become problems.</p></div>
+<div class="explain-card"><h3>🔧 Placement Rules</h3><p>Control which TiKV nodes host specific Regions. Pin hot tables to SSD nodes, cold tables to HDD. Schedule leaders in the same DC as the application for lower latency.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/troubleshoot-hot-spot-issues" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Hot%20Regions%20%26%20Load%20Balancing&url=https://systeminternals.dev/tidb/hot-regions/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/hot-regions/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#ef4444, #f97316);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(239,68,68,0.1),rgba(239,68,68,0.03));border:1px solid rgba(239,68,68,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#ef4444;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#ef4444}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#ef4444}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#ef4444}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#ef4444}.highlight-card{background:linear-gradient(135deg,rgba(239,68,68,0.08),rgba(239,68,68,0.04));border-color:rgba(239,68,68,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#ef4444}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

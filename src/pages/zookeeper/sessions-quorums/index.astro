@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Sessions & Quorums" 
+  description="Interactive visualization of Sessions & Quorums"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"ZooKeeper",href:"/zookeeper/"},{label:"Sessions & Quorums",href:"/zookeeper/sessions-quorums/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔐 Sessions & Quorums</h1>
+      <p class="subtitle">Client Sessions, ZAB Protocol, and Quorum Mechanics</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>ZooKeeper maintains <strong>client sessions</strong> with heartbeats and ephemeral nodes. The <em>ZAB protocol</em> (ZooKeeper Atomic Broadcast) ensures all servers agree on state changes. A <strong>quorum</strong> (majority) must acknowledge every write before it's committed. Sessions survive leader failover — the client reconnects to another server and resumes with the same session ID.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🔄 Session Lifecycle</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Connect → session ID assigned</li><li>Heartbeats maintain session</li><li>Session timeout → ephemeral nodes deleted</li><li>Reconnect within timeout → session preserved</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>📡 ZAB Protocol</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Leader receives write request</li><li>Leader broadcasts proposal to followers</li><li>Followers ACK (write to disk)</li><li>Leader commits when quorum ACKs</li><li>Leader broadcasts COMMIT</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🔢 Quorum Math</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>3 nodes → quorum = 2 (survives 1 failure)</li><li>5 nodes → quorum = 3 (survives 2 failures)</li><li>7 nodes → quorum = 4 (survives 3 failures)</li><li>Always use ODD numbers!</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 Why Odd Numbers?</h3><p>With 4 nodes, quorum is 3 — same as 5 nodes. But 4 nodes has more failure surface. 5 nodes gives you the same quorum with an extra node of redundancy. Even numbers waste a server.</p></div>
+<div class="explain-card"><h3>⚡ Ephemeral Nodes</h3><p>Tied to the session — automatically deleted when the session ends. Used for: service discovery (register on connect, disappear on crash), leader election (create ephemeral sequential node, lowest wins), distributed locks.</p></div>
+<div class="explain-card"><h3>📊 Observer Nodes</h3><p>Non-voting members that receive state updates but don't participate in quorum. Scale read throughput without increasing write latency. Useful for cross-datacenter deployments where you want local reads.</p></div>
+<div class="explain-card"><h3>🔄 Leader Election</h3><p>On startup or leader failure, ZAB runs election. Each server votes for the server with the highest transaction ID (most up-to-date). Server with majority votes becomes leader. Election takes ~200ms typically.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://zookeeper.apache.org/doc/current/zookeeperInternals.html" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Sessions%20%26%20Quorums&url=https://systeminternals.dev/zookeeper/sessions-quorums/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/zookeeper/sessions-quorums/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#60a5fa, #818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(96,165,250,0.1),rgba(96,165,250,0.03));border:1px solid rgba(96,165,250,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#60a5fa;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#60a5fa}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#60a5fa}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#60a5fa}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#60a5fa}.highlight-card{background:linear-gradient(135deg,rgba(96,165,250,0.08),rgba(96,165,250,0.04));border-color:rgba(96,165,250,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#60a5fa}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

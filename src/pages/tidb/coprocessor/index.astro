@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Coprocessor Push-Down" 
+  description="Interactive visualization of Coprocessor Push-Down"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"TiDB",href:"/tidb/"},{label:"Coprocessor Push-Down",href:"/tidb/coprocessor/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📤 Coprocessor Push-Down</h1>
+      <p class="subtitle">Moving Computation to Storage — Skip the Network</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>Instead of pulling all data to the TiDB SQL layer, TiDB <strong>pushes down</strong> filters, aggregations, and expressions to TiKV's <em>coprocessor</em>. Each TiKV node processes its local Regions and returns only the filtered/aggregated results. This massively reduces network transfer and leverages distributed CPU. Think of it as MapReduce inside your database.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>⬇️ What Gets Pushed</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>WHERE filters (predicates)</li><li>Column projections (SELECT a, b)</li><li>Aggregations (COUNT, SUM, MIN, MAX)</li><li>TopN (ORDER BY ... LIMIT)</li><li>Simple expressions (a + b, CONCAT)</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>⬆️ What Stays in TiDB</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Complex JOINs (hash join, merge join)</li><li>Subqueries</li><li>Window functions</li><li>User-defined functions</li><li>Non-pushable built-in functions</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🔀 How It Works</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>TiDB builds execution plan</li><li>Identifies pushable operators</li><li>Sends coprocessor requests to TiKV</li><li>Each Region processes locally</li><li>TiDB merges partial results</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 10x-100x Speedup</h3><p>SELECT COUNT(*) FROM orders WHERE status='shipped' — without push-down: scan 1B rows over network. With push-down: each TiKV node counts locally, TiDB sums 100 partial counts. Network: 1B rows → 100 numbers.</p></div>
+<div class="explain-card"><h3>📊 EXPLAIN ANALYZE</h3><p>Check if push-down happened: EXPLAIN ANALYZE SELECT ... Look for 'cop[tikv]' tasks (pushed to TiKV) vs 'root' tasks (TiDB layer). If you see full table scan at root, your filter didn't push down.</p></div>
+<div class="explain-card"><h3>⚡ Vectorized Execution</h3><p>TiKV's coprocessor processes data in batches (vectors) of 1024 rows using SIMD-friendly layouts. This is 3-5x faster than row-by-row processing. Combined with push-down, it's a massive performance multiplier.</p></div>
+<div class="explain-card"><h3>⚠️ Limitations</h3><p>Not all expressions push down. JSON functions, some string functions, and UDFs stay in TiDB. Check tidb_opt_coprocessor_push_down variable. If a function can't push down, consider restructuring the query.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.pingcap.com/tidb/stable/expression-push-down" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Coprocessor%20Push-Down&url=https://systeminternals.dev/tidb/coprocessor/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/tidb/coprocessor/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#34d399, #60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(52,211,153,0.1),rgba(52,211,153,0.03));border:1px solid rgba(52,211,153,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#34d399;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#34d399}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#34d399}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#34d399}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#34d399}.highlight-card{background:linear-gradient(135deg,rgba(52,211,153,0.08),rgba(52,211,153,0.04));border-color:rgba(52,211,153,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#34d399}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

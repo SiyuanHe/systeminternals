@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Vitess VReplication" 
+  description="Interactive visualization of Vitess VReplication"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"Vitess",href:"/vitess/"},{label:"Vitess VReplication",href:"/vitess/vreplication/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔄 Vitess VReplication</h1>
+      <p class="subtitle">Stream-Based Data Movement, Resharding, and Materialized Views</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>VReplication is Vitess's unified framework for moving data between keyspaces and shards. It reads MySQL binlog events, applies optional transformations, and writes to target tables. Used internally for <strong>resharding</strong> (splitting/merging shards), <strong>materialized views</strong> (cross-shard aggregations), and <strong>schema migrations</strong>. Externally, it enables <strong>MoveTables</strong> (migrate between keyspaces) and data replication workflows.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🔀 VReplication Flow</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Source vttablet streams binlog events</li><li>VStreamer filters by table/query</li><li>Target vttablet applies events</li><li>Position tracking for resumption</li><li>Runs continuously until cutover</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>📋 Workflows</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Reshard: split 2 shards → 4 shards</li><li>MoveTables: migrate between keyspaces</li><li>Materialize: cross-shard aggregation</li><li>OnlineDDL: schema change via vrepl</li><li>CreateLookupVindex: create lookup table</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>✂️ Cutover</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Stop writes on source</li><li>Wait for target to catch up</li><li>Verify data consistency</li><li>Switch routing rules</li><li>Resume traffic on target</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 Zero-Downtime Resharding</h3><p>VReplication copies data to new shards while the old shards serve traffic. Once caught up, a brief cutover (~seconds) switches routing. No downtime, no data loss. This is how YouTube scaled their MySQL infrastructure.</p></div>
+<div class="explain-card"><h3>⚡ Binlog Streaming</h3><p>VStreamer reads MySQL GTID-based binlog. It's position-aware — if interrupted, resumes from the last position. Each stream is a lightweight goroutine, so hundreds of streams can run concurrently.</p></div>
+<div class="explain-card"><h3>🔧 Materialized Views</h3><p>Unlike ClickHouse (insert triggers), Vitess materializations are continuous VReplication streams. They can aggregate across shards — something MySQL can't do natively. Updated in near-real-time.</p></div>
+<div class="explain-card"><h3>⚠️ Reverse Replication</h3><p>After cutover, VReplication can run in reverse (target → source). This enables instant rollback if issues are found. Traffic switches back to the original shards with no data loss.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://vitess.io/docs/reference/vreplication/vreplication/" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Vitess%20VReplication&url=https://systeminternals.dev/vitess/vreplication/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/vitess/vreplication/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#a78bfa, #818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(167,139,250,0.1),rgba(167,139,250,0.03));border:1px solid rgba(167,139,250,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#a78bfa;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#a78bfa}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#a78bfa}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#a78bfa}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#a78bfa}.highlight-card{background:linear-gradient(135deg,rgba(167,139,250,0.08),rgba(167,139,250,0.04));border-color:rgba(167,139,250,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#a78bfa}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

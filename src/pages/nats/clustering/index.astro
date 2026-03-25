@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="NATS Clustering & Super-Clusters" 
+  description="Interactive visualization of NATS Clustering & Super-Clusters"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"NATS",href:"/nats/"},{label:"NATS Clustering & Super-Clusters",href:"/nats/clustering/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌐 NATS Clustering & Super-Clusters</h1>
+      <p class="subtitle">Routes, Gateways, and Leaf Nodes — Global Messaging Topology</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>NATS has three connectivity layers: <strong>Routes</strong> connect servers within a cluster (full mesh, same region). <strong>Gateways</strong> connect clusters into a <em>super-cluster</em> (cross-region, interest-based forwarding). <strong>Leaf nodes</strong> extend the network to edge locations or IoT devices with a single connection. This architecture scales from a single server to a globally distributed messaging backbone.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🔗 Cluster (Routes)</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Full mesh within a cluster</li><li>Every server knows all subjects</li><li>Messages forwarded to interested servers</li><li>Auto-discovery via gossip</li><li>Typically 3-5 servers per cluster</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🌍 Super-Cluster (Gateways)</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Connects clusters across regions</li><li>Interest-based forwarding (not flood)</li><li>Gateway sends only if remote has subscribers</li><li>Automatic failover between gateway connections</li><li>Reduces cross-region bandwidth</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>🍃 Leaf Nodes</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Single connection to a cluster</li><li>Ideal for edge/IoT/branch offices</li><li>Transparent subject mapping</li><li>Can bridge between separate NATS systems</li><li>Lightweight — runs on Raspberry Pi</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 Interest-Based Forwarding</h3><p>Unlike Kafka (replicate everything), NATS only forwards messages to clusters that have subscribers for that subject. No subscribers in EU for 'us.orders'? No traffic crosses the Atlantic. Massive bandwidth savings.</p></div>
+<div class="explain-card"><h3>⚡ Subject Mapping</h3><p>Leaf nodes can transform subjects: local 'sensor.temp' → hub 'factory-1.sensor.temp'. This enables hierarchical namespacing without requiring edge devices to know the global subject space.</p></div>
+<div class="explain-card"><h3>🔄 Auto-Discovery</h3><p>Cluster servers gossip routes to each other. Add a new server → it discovers all existing servers automatically. No central configuration needed. Same with gateways — new clusters are discovered via gossip.</p></div>
+<div class="explain-card"><h3>📊 Scale Numbers</h3><p>Single NATS server: ~18M msgs/sec. 3-node cluster: ~50M msgs/sec. Leaf node connection overhead: ~2KB RAM. Synadia (NATS creators) runs a global super-cluster spanning 30+ regions for their cloud offering.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.nats.io/nats-server/configuration/clustering" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=NATS%20Clustering%20%26%20Super-Clusters&url=https://systeminternals.dev/nats/clustering/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/nats/clustering/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#34d399, #60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(52,211,153,0.1),rgba(52,211,153,0.03));border:1px solid rgba(52,211,153,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#34d399;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#34d399}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#34d399}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#34d399}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#34d399}.highlight-card{background:linear-gradient(135deg,rgba(52,211,153,0.08),rgba(52,211,153,0.04));border-color:rgba(52,211,153,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#34d399}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>

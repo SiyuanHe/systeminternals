@@ -1,0 +1,72 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Spanner Schema & SQL Layer" 
+  description="Interactive visualization of Spanner Schema & SQL Layer"
+  breadcrumbs={[{label:"Home",href:"/"},{label:"Spanner",href:"/spanner/"},{label:"Spanner Schema & SQL Layer",href:"/spanner/schema-sql/"}]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📋 Spanner Schema & SQL Layer</h1>
+      <p class="subtitle">Interleaved Tables, Secondary Indexes, and Distributed Query Processing</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>Spanner's schema design is unique: <strong>interleaved tables</strong> co-locate parent-child rows in the same split for fast joins. Secondary indexes are <em>global</em> by default (distributed) or can be <strong>interleaved</strong> (local to parent). The SQL layer supports <em>distributed joins</em>, <em>batch reads</em>, and <em>stale reads</em> (read at a past timestamp to avoid locks). Query execution uses a distributed execution engine that pushes computation to data.</p>
+      </div>
+    </section>
+
+    
+    <section class="items-section">
+      <h2>🔗 Interleaved Tables</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Child rows stored next to parent row</li><li>Same split = same server</li><li>Parent-child JOIN is local (no network)</li><li>DELETE CASCADE across interleaved rows</li><li>Max 7 levels of interleaving</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>📑 Index Types</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>Global index: separate split, distributed</li><li>Interleaved index: local to parent</li><li>STORING clause: cover extra columns</li><li>NULL_FILTERED: skip NULL values</li><li>Unique indexes enforced globally</li></ul></div>
+      </div>
+    </section>
+    <section class="items-section">
+      <h2>⚡ Query Execution</h2>
+      <div class="items-grid">
+        <div class="item-card" style="grid-column: span 3"><ul class="item-list"><li>SQL parsed → distributed plan</li><li>Computation pushed to splits</li><li>Partial results streamed back</li><li>Merge at coordinator</li><li>Stale reads: 15s old = no locks</li></ul></div>
+      </div>
+    </section>
+
+    <section class="explain-section">
+      <div class="explain-grid">
+        <div class="explain-card highlight-card"><h3>💡 Why Interleave?</h3><p>Without interleaving, a JOIN between Users and Orders requires a distributed join across different splits. With interleaving, a user's orders are physically next to the user row — the JOIN is a local scan. 10-100x faster for parent-child access patterns.</p></div>
+<div class="explain-card"><h3>⚠️ Hot Splits</h3><p>Monotonically increasing primary keys (timestamps, auto-increment) cause all writes to hit the same split. Use UUIDs, bit-reversed sequences, or ShardId prefixes. Spanner can auto-split hot ranges, but prevention is better.</p></div>
+<div class="explain-card"><h3>📊 Stale Reads</h3><p>Read at a timestamp 15 seconds in the past: no locks, no coordination with writes, served from any replica. Perfect for analytics, dashboards, and read-heavy workloads where slight staleness is acceptable.</p></div>
+<div class="explain-card"><h3>🔧 Change Streams</h3><p>Spanner change streams capture row-level changes (like CDC). Use for event-driven architectures, materialized views in other systems, or audit logging. Partitioned by split for parallel consumption.</p></div>
+
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://cloud.google.com/spanner/docs/schema-and-data-model" target="_blank">official documentation</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share:</span>
+      <a href="https://twitter.com/intent/tweet?text=Spanner%20Schema%20%26%20SQL%20Layer&url=https://systeminternals.dev/spanner/schema-sql/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/spanner/schema-sql/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+.viz-container{max-width:1100px;margin:0 auto}.viz-header{text-align:center;margin-bottom:40px}.viz-header h1{font-size:2.5rem;margin-bottom:10px;background:linear-gradient(90deg,#60a5fa, #34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.subtitle{color:#888;font-size:1.1rem}h2{font-size:1.5rem;color:#fff;margin-bottom:12px}.section-desc{color:#888;margin-bottom:24px}
+.overview-section{margin-bottom:50px}.overview-card{background:linear-gradient(135deg,rgba(96,165,250,0.1),rgba(96,165,250,0.03));border:1px solid rgba(96,165,250,0.3);border-radius:16px;padding:24px 28px;font-size:1.05rem;line-height:1.8;color:#ccc}.overview-card strong{color:#fff}.overview-card em{color:#60a5fa;font-style:normal;font-weight:500}.overview-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.9rem;color:#60a5fa}
+.flow-section{margin-bottom:50px}.flow-steps{display:flex;flex-direction:column;gap:0}.flow-step{display:flex;gap:14px;padding:12px 16px;border-left:3px solid rgba(255,255,255,0.1)}.flow-step:nth-child(1){border-left-color:#60a5fa}.fs-icon{font-size:1.1rem}.fs-text{font-size:0.9rem;color:#ccc}
+.items-section{margin-bottom:50px}.items-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.item-card{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:20px}.item-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.item-list{list-style:none;padding:0}.item-list li{font-size:0.8rem;color:#aaa;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)}.item-list li:last-child{border-bottom:none}
+.explain-section{margin-bottom:50px}.explain-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.explain-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px}.explain-card h3{font-size:1rem;color:#fff;margin-bottom:10px}.explain-card p{color:#aaa;line-height:1.6;font-size:0.9rem}.explain-card strong{color:#60a5fa}.explain-card code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.85rem;color:#60a5fa}.highlight-card{background:linear-gradient(135deg,rgba(96,165,250,0.08),rgba(96,165,250,0.04));border-color:rgba(96,165,250,0.3)}
+.viz-footer{text-align:center;color:#666;font-size:0.9rem;padding:20px 0;border-top:1px solid rgba(255,255,255,0.1);margin-bottom:30px}.viz-footer a{color:#60a5fa}.share-buttons{display:flex;align-items:center;justify-content:center;gap:16px}.share-buttons span{color:#666}.share-btn{padding:10px 20px;background:rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:0.9rem;transition:background 0.2s}.share-btn:hover{background:rgba(255,255,255,0.2)}
+@media(max-width:768px){.viz-header h1{font-size:1.8rem}.items-grid{grid-template-columns:1fr}.explain-grid{grid-template-columns:1fr}}
+</style>
