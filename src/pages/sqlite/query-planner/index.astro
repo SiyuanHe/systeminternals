@@ -1,0 +1,585 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="SQLite Virtual Machine & Query Planning" 
+  description="Interactive visualization of SQLite's VDBE bytecode engine, query planning, and index selection"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "SQLite", href: "/sqlite/" }, { label: "Query Planner", href: "/sqlite/query-planner/" }]}
+>
+  <section class="section-header">
+    <h1>⚙️ Virtual Machine & Query Planning</h1>
+    <p>
+      SQLite compiles every SQL statement into bytecode for its <strong>VDBE</strong> (Virtual Database Engine).
+      The query planner decides which indexes to use and generates optimal opcodes. Understanding this pipeline
+      reveals why some queries are fast and others scan the entire table.
+    </p>
+  </section>
+
+  <div class="panel query-input-panel">
+    <h2>SQL Query</h2>
+    <div class="query-bar">
+      <select id="queryPreset" class="query-select">
+        <option value="">— Choose a preset —</option>
+        <option value="scan">SELECT * FROM users WHERE age > 25</option>
+        <option value="pk">SELECT * FROM users WHERE id = 42</option>
+        <option value="idx">SELECT * FROM users WHERE email = 'alice@example.com'</option>
+        <option value="cover">SELECT name FROM users WHERE age BETWEEN 20 AND 30</option>
+        <option value="join">SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 100</option>
+        <option value="sort">SELECT * FROM users ORDER BY name LIMIT 10</option>
+        <option value="agg">SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 5</option>
+      </select>
+      <textarea id="queryInput" placeholder="Type SQL or choose a preset..." rows="2">SELECT * FROM users WHERE age > 25</textarea>
+      <button id="btnExplain" class="btn btn-primary">EXPLAIN</button>
+    </div>
+
+    <div class="schema-info">
+      <h3>Schema</h3>
+      <pre id="schemaDisplay">CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE,
+  age INTEGER
+);
+CREATE INDEX idx_users_age ON users(age);
+CREATE INDEX idx_users_email ON users(email);
+
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  total REAL,
+  created_at TEXT
+);
+CREATE INDEX idx_orders_user ON orders(user_id);
+CREATE INDEX idx_orders_total ON orders(total);</pre>
+    </div>
+  </div>
+
+  <div class="viz-container">
+    <div class="panel bytecode-panel">
+      <h2>VDBE Bytecode</h2>
+      <div class="vm-controls">
+        <button id="btnStep" class="btn btn-primary">Step →</button>
+        <button id="btnRun" class="btn btn-secondary">Run All</button>
+        <button id="btnResetVm" class="btn btn-danger">Reset</button>
+        <span class="pc-display" id="pcDisplay">PC: 0</span>
+      </div>
+      <div class="opcode-table" id="opcodeTable"></div>
+    </div>
+
+    <div class="panel vm-panel">
+      <h2>VM State</h2>
+      <div class="vm-state" id="vmState">
+        <div class="vm-section">
+          <h3>Registers</h3>
+          <div class="register-grid" id="registerGrid"></div>
+        </div>
+        <div class="vm-section">
+          <h3>Cursors</h3>
+          <div class="cursor-list" id="cursorList"></div>
+        </div>
+        <div class="vm-section">
+          <h3>Result Rows</h3>
+          <div class="result-rows" id="resultRows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Query Plan</h2>
+    <div class="plan-visual" id="planVisual"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Scan Strategy Comparison</h2>
+    <div class="scan-comparison" id="scanComparison">
+      <div class="scan-cards" id="scanCards"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>How It Works</h2>
+    <div class="explanation-grid">
+      <div class="exp-card">
+        <h3>🔧 VDBE</h3>
+        <p>The Virtual Database Engine is a register-based virtual machine. Each opcode has 3 operands (P1, P2, P3) plus optional P4/P5. The program counter (PC) advances through opcodes sequentially unless a jump occurs. Opcodes manipulate registers, cursors, and produce result rows.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📋 Query Planning</h3>
+        <p>SQLite's query planner evaluates candidate indexes for each table in the FROM clause. It estimates the cost (rows scanned × I/O) for each option and picks the cheapest plan. ANALYZE helps by providing actual row count statistics.</p>
+      </div>
+      <div class="exp-card">
+        <h3>🔍 Scan Types</h3>
+        <p><strong>Full table scan:</strong> reads every row. <strong>Index scan:</strong> walks the index B-tree, then looks up each row. <strong>Covering index:</strong> all needed columns are in the index — no table lookup needed. Always fastest.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📊 EXPLAIN</h3>
+        <p>EXPLAIN shows the raw VDBE bytecode. EXPLAIN QUERY PLAN shows the high-level strategy (which indexes, join order). Both are essential for understanding and optimizing query performance.</p>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 24px; }
+  .section-header h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .section-header p { font-size: 1.05rem; color: #999; max-width: 750px; line-height: 1.7; }
+
+  .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 1.1rem; color: #fff; margin-bottom: 16px; }
+
+  .query-bar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  .query-select {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; color: #ccc; padding: 8px 12px; font-size: 0.85rem; font-family: inherit;
+  }
+  .query-bar textarea {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: #4ade80; padding: 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.9rem;
+    resize: vertical; width: 100%;
+  }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #ccc; }
+  .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+  .btn-danger { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+  .schema-info { margin-top: 12px; }
+  .schema-info h3 { font-size: 0.85rem; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .schema-info pre {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+    padding: 12px; font-size: 0.75rem; color: #888; overflow-x: auto; line-height: 1.5;
+  }
+
+  .viz-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .viz-container { grid-template-columns: 1fr; } }
+
+  .vm-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .pc-display { font-family: 'SF Mono', monospace; font-size: 0.85rem; color: #f59e0b; margin-left: 8px; }
+
+  .opcode-table { max-height: 400px; overflow-y: auto; }
+  .opcode-row {
+    display: grid; grid-template-columns: 35px 90px 40px 40px 40px 1fr;
+    gap: 4px; padding: 5px 8px; font-size: 0.75rem; font-family: 'SF Mono', monospace;
+    border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; cursor: pointer;
+  }
+  .opcode-row:hover { background: rgba(255,255,255,0.05); }
+  .opcode-row.current { background: rgba(245,158,11,0.15); border-left: 3px solid #f59e0b; }
+  .opcode-row.executed { opacity: 0.5; }
+  .opcode-row.header { color: #666; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); opacity: 1; }
+  .op-addr { color: #888; }
+  .op-name { color: #60a5fa; font-weight: 600; }
+  .op-param { color: #888; }
+  .op-comment { color: #555; font-size: 0.7rem; }
+
+  .vm-section { margin-bottom: 16px; }
+  .vm-section h3 { font-size: 0.85rem; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .register-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  .register-cell {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+    padding: 6px 8px; font-family: monospace; font-size: 0.75rem;
+  }
+  .register-cell.changed { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.1); animation: regPulse 0.4s; }
+  @keyframes regPulse { from { box-shadow: 0 0 10px rgba(245,158,11,0.4); } to { box-shadow: none; } }
+  .reg-name { color: #60a5fa; font-weight: 600; font-size: 0.65rem; }
+  .reg-value { color: #fff; margin-top: 2px; word-break: break-all; }
+
+  .cursor-list { display: flex; flex-direction: column; gap: 4px; }
+  .cursor-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: rgba(255,255,255,0.03); border-radius: 6px; font-size: 0.8rem;
+  }
+  .cursor-name { color: #a855f7; font-weight: 600; font-family: monospace; }
+  .cursor-info { color: #888; }
+
+  .result-rows { max-height: 150px; overflow-y: auto; }
+  .result-row { padding: 4px 8px; font-family: monospace; font-size: 0.75rem; color: #4ade80; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .result-empty { color: #555; font-size: 0.85rem; padding: 8px; }
+
+  .plan-visual { min-height: 60px; }
+  .plan-tree { padding: 12px; }
+  .plan-node {
+    padding: 8px 14px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 8px; margin-bottom: 8px; font-size: 0.85rem; display: inline-block;
+  }
+  .plan-node.scan { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.1); }
+  .plan-node.index { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.1); }
+  .plan-node.covering { border-color: rgba(168,85,247,0.4); background: rgba(168,85,247,0.1); }
+  .plan-label { color: #fff; font-weight: 600; }
+  .plan-detail { color: #888; font-size: 0.8rem; margin-top: 4px; }
+  .plan-indent { margin-left: 24px; border-left: 2px solid rgba(255,255,255,0.1); padding-left: 16px; }
+
+  .scan-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+  .scan-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 16px; position: relative;
+  }
+  .scan-card.active { border-color: rgba(34,197,94,0.4); }
+  .scan-card h4 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .scan-card p { font-size: 0.8rem; color: #888; line-height: 1.5; margin-bottom: 8px; }
+  .scan-bar { height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+  .scan-bar-inner { height: 100%; border-radius: 4px; transition: width 1s ease-out; }
+  .scan-cost { font-size: 0.75rem; color: #666; font-family: monospace; }
+  .scan-badge { position: absolute; top: 12px; right: 12px; font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
+  .badge-chosen { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .badge-rejected { background: rgba(255,255,255,0.05); color: #555; }
+
+  .explanation-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .exp-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+  .exp-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .exp-card p { font-size: 0.85rem; color: #888; line-height: 1.6; }
+</style>
+
+<script is:inline>
+(function() {
+  const QUERIES = {
+    scan: {
+      sql: "SELECT * FROM users WHERE age > 25",
+      plan: [{ type: 'scan', label: 'SCAN users', detail: 'Using index idx_users_age (age > 25)', nodeClass: 'index' }],
+      scanOptions: [
+        { name: 'Full Table Scan', cost: 1000, rows: 1000, chosen: false, desc: 'Read every row, check age > 25', color: '#ef4444' },
+        { name: 'Index Scan (idx_users_age)', cost: 350, rows: 350, chosen: true, desc: 'Walk B-tree from age=25, lookup each rowid', color: '#22c55e' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 12, p3: 0, comment: 'Start at 12; jump back to 1' },
+        { op: 'OpenRead', p1: 0, p2: 2, p3: 0, comment: 'Open cursor 0 on table users (root page 2)' },
+        { op: 'OpenRead', p1: 1, p2: 4, p3: 0, comment: 'Open cursor 1 on index idx_users_age' },
+        { op: 'Integer', p1: 25, p2: 1, p3: 0, comment: 'r[1] = 25' },
+        { op: 'SeekGT', p1: 1, p2: 10, p3: 1, comment: 'Seek index cursor 1 to first entry > r[1]' },
+        { op: 'IdxRowid', p1: 1, p2: 2, p3: 0, comment: 'r[2] = rowid from index cursor 1' },
+        { op: 'Seek', p1: 0, p2: 0, p3: 2, comment: 'Position table cursor 0 to rowid r[2]' },
+        { op: 'Column', p1: 0, p2: 0, p3: 3, comment: 'r[3] = users.id' },
+        { op: 'Column', p1: 0, p2: 1, p3: 4, comment: 'r[4] = users.name' },
+        { op: 'Column', p1: 0, p2: 2, p3: 5, comment: 'r[5] = users.email' },
+        { op: 'Column', p1: 0, p2: 3, p3: 6, comment: 'r[6] = users.age' },
+        { op: 'ResultRow', p1: 3, p2: 4, p3: 0, comment: 'Output r[3..6]' },
+        { op: 'Next', p1: 1, p2: 5, p3: 0, comment: 'Advance index cursor; jump to 5 if valid' },
+        { op: 'Close', p1: 0, p2: 0, p3: 0, comment: 'Close cursor 0' },
+        { op: 'Close', p1: 1, p2: 0, p3: 0, comment: 'Close cursor 1' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    pk: {
+      sql: "SELECT * FROM users WHERE id = 42",
+      plan: [{ type: 'pk', label: 'SEARCH users', detail: 'Using INTEGER PRIMARY KEY (rowid=42)', nodeClass: 'index' }],
+      scanOptions: [
+        { name: 'Full Table Scan', cost: 1000, rows: 1000, chosen: false, desc: 'Read every row, check id = 42', color: '#ef4444' },
+        { name: 'Rowid Lookup', cost: 1, rows: 1, chosen: true, desc: 'Direct B-tree seek to rowid 42 — O(log n)', color: '#22c55e' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 8, p3: 0, comment: 'Jump to 8' },
+        { op: 'OpenRead', p1: 0, p2: 2, p3: 0, comment: 'Open cursor 0 on table users' },
+        { op: 'Integer', p1: 42, p2: 1, p3: 0, comment: 'r[1] = 42' },
+        { op: 'SeekRowid', p1: 0, p2: 7, p3: 1, comment: 'Seek to rowid r[1]; jump to 7 if not found' },
+        { op: 'Column', p1: 0, p2: 0, p3: 2, comment: 'r[2] = id' },
+        { op: 'Column', p1: 0, p2: 1, p3: 3, comment: 'r[3] = name' },
+        { op: 'Column', p1: 0, p2: 2, p3: 4, comment: 'r[4] = email' },
+        { op: 'Column', p1: 0, p2: 3, p3: 5, comment: 'r[5] = age' },
+        { op: 'ResultRow', p1: 2, p2: 4, p3: 0, comment: 'Output r[2..5]' },
+        { op: 'Close', p1: 0, p2: 0, p3: 0, comment: 'Close cursor' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    idx: {
+      sql: "SELECT * FROM users WHERE email = 'alice@example.com'",
+      plan: [{ type: 'idx', label: 'SEARCH users', detail: 'Using index idx_users_email (email=?)', nodeClass: 'index' }],
+      scanOptions: [
+        { name: 'Full Table Scan', cost: 1000, rows: 1000, chosen: false, desc: 'Scan all rows checking email', color: '#ef4444' },
+        { name: 'Unique Index Lookup', cost: 2, rows: 1, chosen: true, desc: 'Index seek + one rowid lookup', color: '#22c55e' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 9, p3: 0, comment: 'Jump to 9' },
+        { op: 'OpenRead', p1: 0, p2: 2, p3: 0, comment: 'Open table cursor' },
+        { op: 'OpenRead', p1: 1, p2: 3, p3: 0, comment: 'Open index cursor (idx_users_email)' },
+        { op: 'String8', p1: 0, p2: 1, p3: 0, comment: "r[1] = 'alice@example.com'" },
+        { op: 'SeekEQ', p1: 1, p2: 8, p3: 1, comment: 'Seek index to r[1]; jump 8 if not found' },
+        { op: 'IdxRowid', p1: 1, p2: 2, p3: 0, comment: 'r[2] = rowid from index' },
+        { op: 'Seek', p1: 0, p2: 0, p3: 2, comment: 'Seek table to rowid' },
+        { op: 'Column', p1: 0, p2: 0, p3: 3, comment: 'r[3] = id' },
+        { op: 'Column', p1: 0, p2: 1, p3: 4, comment: 'r[4] = name' },
+        { op: 'Column', p1: 0, p2: 2, p3: 5, comment: 'r[5] = email' },
+        { op: 'Column', p1: 0, p2: 3, p3: 6, comment: 'r[6] = age' },
+        { op: 'ResultRow', p1: 3, p2: 4, p3: 0, comment: 'Output r[3..6]' },
+        { op: 'Close', p1: 0, p2: 0, p3: 0, comment: 'Close cursors' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    cover: {
+      sql: "SELECT name FROM users WHERE age BETWEEN 20 AND 30",
+      plan: [{ type: 'cover', label: 'SCAN users', detail: 'Using covering index (if idx on age,name existed) — actually uses idx_users_age + lookup', nodeClass: 'index' }],
+      scanOptions: [
+        { name: 'Full Table Scan', cost: 1000, rows: 1000, chosen: false, desc: 'Read all rows, filter by age', color: '#ef4444' },
+        { name: 'Index Scan + Lookup', cost: 300, rows: 300, chosen: true, desc: 'idx_users_age range scan, then fetch name from table', color: '#22c55e' },
+        { name: 'Covering Index (age, name)', cost: 150, rows: 300, chosen: false, desc: 'Would avoid table lookups entirely if this index existed', color: '#a855f7' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 10, p3: 0, comment: 'Start' },
+        { op: 'OpenRead', p1: 0, p2: 2, p3: 0, comment: 'Open table cursor' },
+        { op: 'OpenRead', p1: 1, p2: 4, p3: 0, comment: 'Open idx_users_age cursor' },
+        { op: 'Integer', p1: 20, p2: 1, p3: 0, comment: 'r[1] = 20' },
+        { op: 'Integer', p1: 30, p2: 2, p3: 0, comment: 'r[2] = 30' },
+        { op: 'SeekGE', p1: 1, p2: 9, p3: 1, comment: 'Seek to age >= 20' },
+        { op: 'IdxGT', p1: 1, p2: 9, p3: 2, comment: 'Stop if age > 30' },
+        { op: 'IdxRowid', p1: 1, p2: 3, p3: 0, comment: 'r[3] = rowid' },
+        { op: 'Seek', p1: 0, p2: 0, p3: 3, comment: 'Seek table cursor' },
+        { op: 'Column', p1: 0, p2: 1, p3: 4, comment: 'r[4] = name' },
+        { op: 'ResultRow', p1: 4, p2: 1, p3: 0, comment: 'Output name' },
+        { op: 'Next', p1: 1, p2: 6, p3: 0, comment: 'Next index entry' },
+        { op: 'Close', p1: 0, p2: 0, p3: 0, comment: '' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    join: {
+      sql: "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 100",
+      plan: [
+        { type: 'outer', label: 'SCAN orders', detail: 'Using index idx_orders_total (total > 100)', nodeClass: 'index' },
+        { type: 'inner', label: '  SEARCH users', detail: 'Using INTEGER PRIMARY KEY (id=orders.user_id)', nodeClass: 'index' },
+      ],
+      scanOptions: [
+        { name: 'Nested Loop (orders → users)', cost: 200, rows: 150, chosen: true, desc: 'Scan orders by total index, lookup each user by rowid', color: '#22c55e' },
+        { name: 'Nested Loop (users → orders)', cost: 5000, rows: 150, chosen: false, desc: 'Full scan users, then scan orders for each — expensive', color: '#ef4444' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 11, p3: 0, comment: 'Start' },
+        { op: 'OpenRead', p1: 0, p2: 5, p3: 0, comment: 'Open orders table' },
+        { op: 'OpenRead', p1: 1, p2: 7, p3: 0, comment: 'Open idx_orders_total' },
+        { op: 'OpenRead', p1: 2, p2: 2, p3: 0, comment: 'Open users table' },
+        { op: 'Real', p1: 0, p2: 1, p3: 0, comment: 'r[1] = 100.0' },
+        { op: 'SeekGT', p1: 1, p2: 10, p3: 1, comment: 'Seek idx to total > 100' },
+        { op: 'IdxRowid', p1: 1, p2: 2, p3: 0, comment: 'r[2] = orders rowid' },
+        { op: 'Seek', p1: 0, p2: 0, p3: 2, comment: 'Position on orders row' },
+        { op: 'Column', p1: 0, p2: 1, p3: 3, comment: 'r[3] = user_id' },
+        { op: 'SeekRowid', p1: 2, p2: 9, p3: 3, comment: 'Seek users to user_id' },
+        { op: 'Column', p1: 2, p2: 1, p3: 4, comment: 'r[4] = users.name' },
+        { op: 'Column', p1: 0, p2: 2, p3: 5, comment: 'r[5] = orders.total' },
+        { op: 'ResultRow', p1: 4, p2: 2, p3: 0, comment: 'Output name, total' },
+        { op: 'Next', p1: 1, p2: 6, p3: 0, comment: 'Next index entry' },
+        { op: 'Close', p1: 0, p2: 0, p3: 0, comment: '' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    sort: {
+      sql: "SELECT * FROM users ORDER BY name LIMIT 10",
+      plan: [{ type: 'sort', label: 'SCAN users + SORT', detail: 'Full table scan, then sort by name, limit 10', nodeClass: 'scan' }],
+      scanOptions: [
+        { name: 'Full Scan + Sort', cost: 1200, rows: 1000, chosen: true, desc: 'Read all rows, sort in memory/temp, return first 10', color: '#f59e0b' },
+        { name: 'Index on (name)', cost: 10, rows: 10, chosen: false, desc: 'Would walk name index in order — but this index doesn\'t exist!', color: '#555' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 9, p3: 0, comment: 'Start' },
+        { op: 'OpenRead', p1: 0, p2: 2, p3: 0, comment: 'Open users' },
+        { op: 'SorterOpen', p1: 1, p2: 4, p3: 0, comment: 'Open sorter' },
+        { op: 'Rewind', p1: 0, p2: 7, p3: 0, comment: 'Go to first row' },
+        { op: 'Column', p1: 0, p2: 1, p3: 1, comment: 'r[1] = name (sort key)' },
+        { op: 'MakeRecord', p1: 0, p2: 4, p3: 2, comment: 'r[2] = full record' },
+        { op: 'SorterInsert', p1: 1, p2: 2, p3: 0, comment: 'Insert into sorter' },
+        { op: 'Next', p1: 0, p2: 4, p3: 0, comment: 'Next row' },
+        { op: 'SorterSort', p1: 1, p2: 0, p3: 0, comment: 'Sort all records' },
+        { op: 'SorterData', p1: 1, p2: 3, p3: 0, comment: 'Get sorted record' },
+        { op: 'ResultRow', p1: 3, p2: 4, p3: 0, comment: 'Output' },
+        { op: 'DecrJumpZero', p1: 10, p2: 13, p3: 0, comment: 'Decrement limit; stop at 0' },
+        { op: 'SorterNext', p1: 1, p2: 9, p3: 0, comment: 'Next sorted' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+    agg: {
+      sql: "SELECT age, COUNT(*) FROM users GROUP BY age HAVING COUNT(*) > 5",
+      plan: [{ type: 'agg', label: 'SCAN users + GROUP BY', detail: 'Index scan on idx_users_age (already ordered), then aggregate', nodeClass: 'index' }],
+      scanOptions: [
+        { name: 'Full Scan + Hash Aggregate', cost: 1100, rows: 1000, chosen: false, desc: 'Hash table for grouping — O(n) memory', color: '#ef4444' },
+        { name: 'Index Scan (sorted) + Stream Agg', cost: 400, rows: 1000, chosen: true, desc: 'idx_users_age is already sorted by age — stream aggregate', color: '#22c55e' },
+      ],
+      opcodes: [
+        { op: 'Init', p1: 0, p2: 10, p3: 0, comment: 'Start' },
+        { op: 'OpenRead', p1: 0, p2: 4, p3: 0, comment: 'Open idx_users_age' },
+        { op: 'Rewind', p1: 0, p2: 9, p3: 0, comment: 'First entry' },
+        { op: 'Column', p1: 0, p2: 0, p3: 1, comment: 'r[1] = age' },
+        { op: 'AggStep', p1: 0, p2: 0, p3: 2, comment: 'count++ → r[2]' },
+        { op: 'Compare', p1: 1, p2: 3, p3: 0, comment: 'Compare current age with prev group' },
+        { op: 'Jump', p1: 7, p2: 8, p3: 7, comment: 'If same group continue, else finalize' },
+        { op: 'AggFinal', p1: 2, p2: 0, p3: 0, comment: 'Finalize count' },
+        { op: 'IfPos', p1: 2, p2: 5, p3: 0, comment: 'HAVING count > 5' },
+        { op: 'ResultRow', p1: 1, p2: 2, p3: 0, comment: 'Output age, count' },
+        { op: 'Next', p1: 0, p2: 3, p3: 0, comment: 'Next index entry' },
+        { op: 'Halt', p1: 0, p2: 0, p3: 0, comment: 'Done' },
+      ],
+    },
+  };
+
+  let currentQuery = null;
+  let pc = 0;
+  let registers = {};
+  let cursors = {};
+  let results = [];
+  let executedSet = new Set();
+
+  function loadQuery(key) {
+    currentQuery = QUERIES[key];
+    if (!currentQuery) return;
+    pc = 0;
+    registers = {};
+    cursors = {};
+    results = [];
+    executedSet = new Set();
+    document.getElementById('queryInput').value = currentQuery.sql;
+    renderAll();
+  }
+
+  function renderOpcodes() {
+    const el = document.getElementById('opcodeTable');
+    if (!currentQuery) { el.innerHTML = '<div style="color:#555;padding:20px;text-align:center;">Choose a query and click EXPLAIN</div>'; return; }
+    let html = '<div class="opcode-row header"><span>Addr</span><span>Opcode</span><span>P1</span><span>P2</span><span>P3</span><span>Comment</span></div>';
+    currentQuery.opcodes.forEach((op, i) => {
+      const cls = i === pc ? 'current' : (executedSet.has(i) ? 'executed' : '');
+      html += `<div class="opcode-row ${cls}" data-addr="${i}">
+        <span class="op-addr">${i}</span>
+        <span class="op-name">${op.op}</span>
+        <span class="op-param">${op.p1}</span>
+        <span class="op-param">${op.p2}</span>
+        <span class="op-param">${op.p3}</span>
+        <span class="op-comment">${op.comment}</span>
+      </div>`;
+    });
+    el.innerHTML = html;
+    // Scroll current into view
+    const cur = el.querySelector('.current');
+    if (cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function stepVM() {
+    if (!currentQuery || pc >= currentQuery.opcodes.length) return;
+    const op = currentQuery.opcodes[pc];
+    executedSet.add(pc);
+
+    // Simulate register changes
+    switch (op.op) {
+      case 'Integer': registers[`r[${op.p2}]`] = op.p1; break;
+      case 'Real': registers[`r[${op.p2}]`] = '100.0'; break;
+      case 'String8': registers[`r[${op.p2}]`] = "'alice@...'"; break;
+      case 'OpenRead': cursors[`c${op.p1}`] = { table: op.p2, pos: 'start' }; break;
+      case 'SeekGT': case 'SeekGE': case 'SeekEQ': case 'SeekRowid':
+        if (cursors[`c${op.p1}`]) cursors[`c${op.p1}`].pos = `seeking r[${op.p3}]`;
+        break;
+      case 'Column': registers[`r[${op.p3}]`] = `col${op.p2}`; break;
+      case 'IdxRowid': registers[`r[${op.p2}]`] = 'rowid'; break;
+      case 'ResultRow':
+        const row = [];
+        for (let i = op.p1; i < op.p1 + op.p2; i++) row.push(registers[`r[${i}]`] || 'NULL');
+        results.push(row.join(' | '));
+        break;
+      case 'Close': delete cursors[`c${op.p1}`]; break;
+      case 'Next':
+        if (cursors[`c${op.p1}`]) cursors[`c${op.p1}`].pos = 'next';
+        break;
+      case 'Halt': break;
+    }
+    pc++;
+    renderAll();
+  }
+
+  function renderVM() {
+    // Registers
+    const regEl = document.getElementById('registerGrid');
+    const regKeys = Object.keys(registers);
+    if (regKeys.length === 0) {
+      regEl.innerHTML = '<div style="color:#555;font-size:0.8rem;">No registers set</div>';
+    } else {
+      regEl.innerHTML = regKeys.map(k => `<div class="register-cell"><div class="reg-name">${k}</div><div class="reg-value">${registers[k]}</div></div>`).join('');
+    }
+
+    // Cursors
+    const curEl = document.getElementById('cursorList');
+    const curKeys = Object.keys(cursors);
+    if (curKeys.length === 0) {
+      curEl.innerHTML = '<div style="color:#555;font-size:0.8rem;">No open cursors</div>';
+    } else {
+      curEl.innerHTML = curKeys.map(k => `<div class="cursor-item"><span class="cursor-name">${k}</span><span class="cursor-info">table root=${cursors[k].table} pos=${cursors[k].pos}</span></div>`).join('');
+    }
+
+    // Results
+    const resEl = document.getElementById('resultRows');
+    if (results.length === 0) {
+      resEl.innerHTML = '<div class="result-empty">No results yet — step through opcodes</div>';
+    } else {
+      resEl.innerHTML = results.map(r => `<div class="result-row">${r}</div>`).join('');
+    }
+
+    document.getElementById('pcDisplay').textContent = `PC: ${pc}`;
+  }
+
+  function renderPlan() {
+    const el = document.getElementById('planVisual');
+    if (!currentQuery) { el.innerHTML = '<div style="color:#555;padding:20px;text-align:center;">Run EXPLAIN to see the query plan</div>'; return; }
+    let html = '<div class="plan-tree">';
+    currentQuery.plan.forEach((node, i) => {
+      const indent = node.label.startsWith('  ') ? ' style="margin-left:24px;border-left:2px solid rgba(255,255,255,0.1);padding-left:12px;"' : '';
+      html += `<div${indent}><div class="plan-node ${node.nodeClass}"><div class="plan-label">${node.label.trim()}</div><div class="plan-detail">${node.detail}</div></div></div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function renderScanComparison() {
+    const el = document.getElementById('scanCards');
+    if (!currentQuery) { el.innerHTML = ''; return; }
+    const maxCost = Math.max(...currentQuery.scanOptions.map(s => s.cost));
+    el.innerHTML = currentQuery.scanOptions.map(s => {
+      const pct = Math.round((s.cost / maxCost) * 100);
+      const badge = s.chosen ? '<span class="scan-badge badge-chosen">✓ CHOSEN</span>' : '<span class="scan-badge badge-rejected">✗</span>';
+      return `<div class="scan-card ${s.chosen ? 'active' : ''}">
+        ${badge}
+        <h4>${s.name}</h4>
+        <p>${s.desc}</p>
+        <div class="scan-bar"><div class="scan-bar-inner" style="width:${pct}%;background:${s.color}"></div></div>
+        <div class="scan-cost">Est. cost: ${s.cost} | Est. rows: ${s.rows}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderAll() {
+    renderOpcodes();
+    renderVM();
+    renderPlan();
+    renderScanComparison();
+  }
+
+  document.getElementById('queryPreset').addEventListener('change', (e) => {
+    if (e.target.value) loadQuery(e.target.value);
+  });
+
+  document.getElementById('btnExplain').addEventListener('click', () => {
+    const sql = document.getElementById('queryInput').value.trim().toLowerCase();
+    // Try to match to a preset
+    let key = null;
+    if (sql.includes('id = 42') || sql.includes('id=42')) key = 'pk';
+    else if (sql.includes('email')) key = 'idx';
+    else if (sql.includes('between')) key = 'cover';
+    else if (sql.includes('join')) key = 'join';
+    else if (sql.includes('order by')) key = 'sort';
+    else if (sql.includes('group by')) key = 'agg';
+    else if (sql.includes('age')) key = 'scan';
+    else key = 'scan';
+    loadQuery(key);
+  });
+
+  document.getElementById('btnStep').addEventListener('click', stepVM);
+  document.getElementById('btnRun').addEventListener('click', () => {
+    if (!currentQuery) return;
+    const run = () => {
+      if (pc < currentQuery.opcodes.length) { stepVM(); setTimeout(run, 200); }
+    };
+    run();
+  });
+  document.getElementById('btnResetVm').addEventListener('click', () => {
+    if (!currentQuery) return;
+    pc = 0; registers = {}; cursors = {}; results = []; executedSet = new Set();
+    renderAll();
+  });
+
+  // Default
+  loadQuery('scan');
+})();
+</script>

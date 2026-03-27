@@ -23,6 +23,19 @@ const { title, description = "Interactive visualizations for understanding distr
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Cloudflare Web Analytics: add beacon token when ready -->
+
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site).href}>
+    <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site).href}>
+    <script type="application/ld+json" set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Systems Explained",
+      "url": "https://systeminternals.dev",
+      "description": description,
+    })} />
+
+    <!-- Google AdSense -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6745734815427337" crossorigin="anonymous"></script>
 </head>
 <body>
     <nav class="nav">
@@ -73,6 +86,12 @@ const { title, description = "Interactive visualizations for understanding distr
                         <a href="/linux/">🐧 Linux</a>
                         <a href="/dns/">🌍 DNS</a>
                         <a href="/tls/">🔒 TLS</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-trigger">AI / ML <span class="nav-caret">▾</span></button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/llm/">🧠 LLM Internals</a>
                     </div>
                 </div>
                 <div class="nav-dropdown">
@@ -129,6 +148,10 @@ const { title, description = "Interactive visualizations for understanding distr
                 <a href="/tls/">🔒 TLS</a>
             </div>
             <div class="nav-mobile-group">
+                <div class="nav-mobile-heading">AI / ML</div>
+                <a href="/llm/">🧠 LLM Internals</a>
+            </div>
+            <div class="nav-mobile-group">
                 <div class="nav-mobile-heading">Blockchain</div>
                 <a href="/ethereum/">⟠ Ethereum</a>
             </div>
@@ -154,6 +177,16 @@ const { title, description = "Interactive visualizations for understanding distr
     <main>
         <slot />
     </main>
+
+    <!-- Bottom ad unit (auto-placed) -->
+    <div class="ad-container" style="max-width:1200px;margin:0 auto 40px;padding:0 20px;text-align:center;">
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="ca-pub-6745734815427337"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+      <script is:inline>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+    </div>
 
     <footer class="footer">
         <div class="footer-container">

@@ -1,6 +1,12 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
+const llmTopics = [
+  { title: "Transformer Architecture", description: "Interactive attention heatmaps, layer-by-layer forward pass, Q/K/V matrices", href: "/llm/transformer/", status: "live" },
+  { title: "Tokenization & BPE", description: "Live tokenizer, BPE merge step-through, vocabulary explorer", href: "/llm/tokenization/", status: "live" },
+  { title: "KV Cache & Inference", description: "Autoregressive generation, KV cache memory, PagedAttention, continuous batching", href: "/llm/kv-cache/", status: "live" },
+];
+
 const consensusTopics = [
   { title: "Raft Consensus", description: "Leader election, log replication, and safety — the interactive way", href: "/raft/", status: "live" },
   { title: "Paxos vs Raft", description: "Split-screen comparison — same scenarios, different protocols", href: "/consensus/paxos-vs-raft/", status: "live" },
@@ -161,6 +167,24 @@ const ethereumTopics = [
       Interactive visualizations that let you <em>play</em> with distributed systems concepts.
       Drag sliders, click buttons, watch data flow — and finally understand why things break.
     </p>
+  </section>
+
+  <section class="topics-section">
+    <h2>
+      <span class="section-icon">🧠</span>
+      LLM Internals
+    </h2>
+    <div class="topics-grid">
+      {llmTopics.map(topic => (
+        <a href={topic.href} class={`topic-card ${topic.status}`}>
+          <div class="topic-status">
+            {topic.status === "live" ? "✦ Live" : "Coming soon"}
+          </div>
+          <h3>{topic.title}</h3>
+          <p>{topic.description}</p>
+        </a>
+      ))}
+    </div>
   </section>
 
   <section class="topics-section">

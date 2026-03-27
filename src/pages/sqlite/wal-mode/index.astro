@@ -1,0 +1,549 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="SQLite WAL Mode & Concurrency" 
+  description="Interactive visualization of SQLite's WAL mode, checkpoint strategies, and reader/writer concurrency"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "SQLite", href: "/sqlite/" }, { label: "WAL Mode", href: "/sqlite/wal-mode/" }]}
+>
+  <section class="section-header">
+    <h1>📝 WAL Mode & Concurrency</h1>
+    <p>
+      SQLite supports two journaling modes: <strong>rollback journal</strong> (the default) and <strong>WAL</strong> (Write-Ahead Logging).
+      WAL mode enables concurrent readers and a single writer without blocking each other — a major improvement for
+      multi-threaded applications.
+    </p>
+  </section>
+
+  <div class="mode-toggle">
+    <button id="btnRollback" class="mode-btn active">Rollback Journal</button>
+    <button id="btnWal" class="mode-btn">WAL Mode</button>
+  </div>
+
+  <div class="viz-container">
+    <div class="panel db-panel">
+      <h2>Database File</h2>
+      <div class="db-visual" id="dbVisual"></div>
+    </div>
+    <div class="panel journal-panel" id="journalPanel">
+      <h2 id="journalTitle">Rollback Journal</h2>
+      <div class="journal-visual" id="journalVisual"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Concurrent Operations</h2>
+    <div class="controls-bar">
+      <div class="btn-group">
+        <button id="btnAddReader" class="btn btn-primary">+ Reader</button>
+        <button id="btnStartWrite" class="btn btn-secondary">✏️ Write</button>
+        <button id="btnCheckpoint" class="btn btn-accent">⚡ Checkpoint</button>
+        <button id="btnReset" class="btn btn-danger">Reset</button>
+      </div>
+      <div class="control-group">
+        <label>Checkpoint Mode</label>
+        <select id="checkpointMode">
+          <option value="PASSIVE">PASSIVE</option>
+          <option value="FULL">FULL</option>
+          <option value="RESTART">RESTART</option>
+          <option value="TRUNCATE">TRUNCATE</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="concurrency-visual" id="concurrencyVisual"></div>
+
+    <div class="timeline" id="timeline">
+      <div class="timeline-header">
+        <span>Time →</span>
+      </div>
+      <div class="timeline-tracks" id="timelineTracks"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>WAL File Structure</h2>
+    <div class="wal-structure" id="walStructure">
+      <div class="wal-empty">Switch to WAL mode and perform writes to see the WAL file structure</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>How It Works</h2>
+    <div class="explanation-grid">
+      <div class="exp-card">
+        <h3>📓 Rollback Journal</h3>
+        <p>Before modifying a page, SQLite copies the <em>original</em> page to a separate journal file. If the transaction fails or is rolled back, it restores from the journal. <strong>Problem:</strong> writers block all readers, and readers block writers.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📝 WAL Mode</h3>
+        <p>Instead of writing to the database file, changes go to a separate WAL (Write-Ahead Log) file. Readers read from the database + WAL. Each reader sees a consistent snapshot based on which WAL frames existed when it started. Writers never block readers!</p>
+      </div>
+      <div class="exp-card">
+        <h3>🔄 Checkpointing</h3>
+        <p><strong>PASSIVE:</strong> Transfer WAL frames to DB if no readers hold them. <strong>FULL:</strong> Wait for readers, then transfer all. <strong>RESTART:</strong> Like FULL, then reset WAL to beginning. <strong>TRUNCATE:</strong> Like RESTART, then truncate WAL to zero length.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📸 Snapshots</h3>
+        <p>Each reader captures a "snapshot" — a record of which WAL frame was the latest when the read transaction began. The reader sees all frames up to that point but ignores newer frames. This is how concurrent reads see consistent (but possibly different) views.</p>
+      </div>
+      <div class="exp-card">
+        <h3>⚠️ WAL Tradeoffs</h3>
+        <p>WAL mode trades write amplification for concurrency. The WAL file can grow large if checkpoints don't keep up. Also, WAL mode doesn't work over network filesystems, and shared-memory (WAL-index) is required for multi-process access.</p>
+      </div>
+      <div class="exp-card">
+        <h3>🔐 Locking</h3>
+        <p>Rollback uses 5 lock states: UNLOCKED → SHARED → RESERVED → PENDING → EXCLUSIVE. WAL simplifies this: readers take a shared read-lock, the writer takes a write-lock. They don't conflict. The only blocking point is checkpoint vs active readers.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="logPanel">
+    <h2>Event Log</h2>
+    <div class="log-entries" id="logEntries"></div>
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 24px; }
+  .section-header h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .section-header p { font-size: 1.05rem; color: #999; max-width: 750px; line-height: 1.7; }
+
+  .mode-toggle { display: flex; gap: 0; margin-bottom: 24px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden; width: fit-content; border: 1px solid rgba(255,255,255,0.1); }
+  .mode-btn { padding: 10px 24px; border: none; background: transparent; color: #888; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .mode-btn.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.05); color: #ccc; }
+
+  .viz-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .viz-container { grid-template-columns: 1fr; } }
+
+  .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 1.1rem; color: #fff; margin-bottom: 16px; }
+
+  .controls-bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
+  .control-group label { display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
+  .control-group select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #fff; padding: 8px 12px; font-size: 0.9rem; font-family: inherit; }
+  .btn-group { display: flex; gap: 8px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #ccc; }
+  .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+  .btn-accent { background: rgba(168,85,247,0.3); color: #c084fc; }
+  .btn-accent:hover { background: rgba(168,85,247,0.4); }
+  .btn-danger { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .btn-danger:hover { background: rgba(239,68,68,0.3); }
+
+  .db-visual { min-height: 180px; }
+  .db-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+  .db-page {
+    width: 50px; height: 50px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; font-weight: 600; transition: all 0.3s; position: relative;
+    font-family: monospace;
+  }
+  .db-page.clean { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+  .db-page.dirty { background: rgba(245,158,11,0.2); border: 1px solid rgba(245,158,11,0.4); color: #fbbf24; animation: dirtyPulse 0.5s ease-out; }
+  .db-page.locked { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+  @keyframes dirtyPulse { from { box-shadow: 0 0 15px rgba(245,158,11,0.5); } to { box-shadow: none; } }
+
+  .journal-visual { min-height: 180px; }
+  .wal-empty, .journal-empty { color: #555; text-align: center; padding: 40px 20px; font-size: 0.9rem; }
+
+  .journal-entries { display: flex; flex-direction: column; gap: 4px; }
+  .journal-entry {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: rgba(255,255,255,0.03); border-radius: 6px; font-size: 0.8rem;
+    border-left: 3px solid;
+  }
+  .journal-entry.original { border-color: #60a5fa; }
+  .journal-entry.wal-frame { border-color: #a855f7; }
+  .journal-entry .je-label { color: #888; font-family: monospace; min-width: 60px; }
+  .journal-entry .je-content { color: #ccc; }
+
+  .concurrency-visual { margin-bottom: 20px; }
+  .conn-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+  .conn-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 12px 16px; min-width: 160px; transition: all 0.3s;
+  }
+  .conn-card.reader { border-left: 3px solid #22c55e; }
+  .conn-card.writer { border-left: 3px solid #f59e0b; }
+  .conn-card.blocked { border-left: 3px solid #ef4444; opacity: 0.6; }
+  .conn-card.checkpoint { border-left: 3px solid #a855f7; }
+  .conn-name { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .conn-status { font-size: 0.75rem; color: #888; }
+  .conn-snapshot { font-size: 0.7rem; color: #666; margin-top: 4px; font-family: monospace; }
+
+  .timeline { margin-top: 16px; }
+  .timeline-header { font-size: 0.75rem; color: #666; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .timeline-tracks { display: flex; flex-direction: column; gap: 4px; }
+  .timeline-track { display: flex; align-items: center; gap: 8px; }
+  .track-label { font-size: 0.75rem; color: #888; min-width: 80px; font-family: monospace; }
+  .track-bar { flex: 1; height: 20px; background: rgba(255,255,255,0.03); border-radius: 4px; overflow: hidden; position: relative; display: flex; }
+  .track-segment { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; font-weight: 600; transition: width 0.3s; }
+  .seg-read { background: rgba(34,197,94,0.3); color: #4ade80; }
+  .seg-write { background: rgba(245,158,11,0.3); color: #fbbf24; }
+  .seg-blocked { background: rgba(239,68,68,0.2); color: #f87171; }
+  .seg-checkpoint { background: rgba(168,85,247,0.3); color: #c084fc; }
+  .seg-idle { background: rgba(255,255,255,0.02); }
+
+  .wal-structure { min-height: 100px; }
+  .wal-header-box {
+    display: inline-flex; align-items: center; gap: 12px; padding: 8px 16px;
+    background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3);
+    border-radius: 8px; margin-bottom: 12px; font-size: 0.8rem; color: #c084fc;
+  }
+  .wal-frames { display: flex; flex-wrap: wrap; gap: 4px; }
+  .wal-frame-box {
+    padding: 6px 10px; border-radius: 6px; font-size: 0.7rem; font-family: monospace;
+    transition: all 0.3s; cursor: default;
+  }
+  .wal-frame-box.active { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+  .wal-frame-box.checkpointed { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); color: #555; text-decoration: line-through; }
+
+  .explanation-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .exp-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+  .exp-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .exp-card p { font-size: 0.85rem; color: #888; line-height: 1.6; }
+
+  .log-entries { max-height: 200px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.8rem; }
+  .log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: #888; }
+  .log-ok { color: #22c55e; }
+  .log-warn { color: #f59e0b; }
+  .log-err { color: #ef4444; }
+  .log-info { color: #60a5fa; }
+</style>
+
+<script is:inline>
+(function() {
+  let mode = 'rollback'; // 'rollback' | 'wal'
+  let dbPages = [];
+  let journalEntries = [];
+  let walFrames = [];
+  let walSalt = [Math.floor(Math.random()*0xFFFF), Math.floor(Math.random()*0xFFFF)];
+  let connections = [];
+  let nextConnId = 1;
+  let writeVersion = 0;
+  let timeSteps = [];
+  let currentTime = 0;
+  let logs = [];
+  let checkpointedUpTo = 0;
+
+  function init() {
+    dbPages = [];
+    for (let i = 1; i <= 12; i++) dbPages.push({ id: i, state: 'clean', version: 0 });
+    journalEntries = [];
+    walFrames = [];
+    connections = [];
+    nextConnId = 1;
+    writeVersion = 0;
+    timeSteps = [];
+    currentTime = 0;
+    logs = [];
+    checkpointedUpTo = 0;
+  }
+
+  init();
+
+  function addLog(msg, cls) {
+    logs.unshift({ msg, cls: cls || '' });
+    if (logs.length > 50) logs.pop();
+    const el = document.getElementById('logEntries');
+    el.innerHTML = logs.map(l => `<div class="log-entry"><span class="${l.cls}">${l.msg}</span></div>`).join('');
+  }
+
+  function renderDB() {
+    const el = document.getElementById('dbVisual');
+    el.innerHTML = '<div class="db-pages">' + dbPages.map(p => {
+      const isWriting = connections.some(c => c.type === 'writer' && c.dirtyPages && c.dirtyPages.includes(p.id));
+      const st = isWriting && mode === 'rollback' ? 'dirty' : p.state;
+      return `<div class="db-page ${st}">P${p.id}<br><span style="font-size:0.55rem;color:#666">v${p.version}</span></div>`;
+    }).join('') + '</div>';
+  }
+
+  function renderJournal() {
+    const el = document.getElementById('journalVisual');
+    const title = document.getElementById('journalTitle');
+
+    if (mode === 'rollback') {
+      title.textContent = 'Rollback Journal';
+      if (journalEntries.length === 0) {
+        el.innerHTML = '<div class="journal-empty">No active journal — begin a write to see the rollback journal</div>';
+      } else {
+        el.innerHTML = '<div class="journal-entries">' + journalEntries.map(e =>
+          `<div class="journal-entry original"><span class="je-label">Page ${e.pageId}</span><span class="je-content">Original content (v${e.version}) saved before modification</span></div>`
+        ).join('') + '</div>';
+      }
+    } else {
+      title.textContent = 'WAL File';
+      if (walFrames.length === 0) {
+        el.innerHTML = '<div class="journal-empty">WAL file is empty — perform a write to append frames</div>';
+      } else {
+        el.innerHTML = '<div class="journal-entries">' + walFrames.map((f, i) =>
+          `<div class="journal-entry wal-frame"><span class="je-label">Frame ${i+1}</span><span class="je-content">Page ${f.pageId} → v${f.version} ${f.checkpointed ? '(checkpointed)' : ''}</span></div>`
+        ).join('') + '</div>';
+      }
+    }
+  }
+
+  function renderWalStructure() {
+    const el = document.getElementById('walStructure');
+    if (mode !== 'wal' || walFrames.length === 0) {
+      el.innerHTML = '<div class="wal-empty">' + (mode === 'wal' ? 'Perform writes to see WAL frames' : 'Switch to WAL mode to see the WAL file structure') + '</div>';
+      return;
+    }
+    let html = `<div class="wal-header-box">WAL Header: magic=0x377F0682 | format=3007000 | page_size=${4096} | salt=[0x${walSalt[0].toString(16)}, 0x${walSalt[1].toString(16)}]</div>`;
+    html += '<div class="wal-frames">';
+    walFrames.forEach((f, i) => {
+      const cls = f.checkpointed ? 'checkpointed' : 'active';
+      html += `<div class="wal-frame-box ${cls}">F${i+1}: P${f.pageId} v${f.version}</div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function renderConnections() {
+    const el = document.getElementById('concurrencyVisual');
+    if (connections.length === 0) {
+      el.innerHTML = '<div style="color:#555;text-align:center;padding:20px;font-size:0.9rem;">No active connections — add readers or start a write</div>';
+      return;
+    }
+    el.innerHTML = '<div class="conn-grid">' + connections.map(c => {
+      let cls = c.type;
+      if (c.blocked) cls += ' blocked';
+      let statusText = c.type === 'reader' ? 'Reading' : c.type === 'writer' ? 'Writing' : 'Checkpointing';
+      if (c.blocked) statusText = 'BLOCKED';
+      let snapshot = '';
+      if (mode === 'wal' && c.type === 'reader') {
+        snapshot = `<div class="conn-snapshot">snapshot: frame ${c.snapshotFrame || 0}</div>`;
+      }
+      return `<div class="conn-card ${cls}">
+        <div class="conn-name">${c.name}</div>
+        <div class="conn-status">${statusText} ${c.blocked ? '🔒' : ''}</div>
+        ${snapshot}
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  function renderTimeline() {
+    const el = document.getElementById('timelineTracks');
+    const allConns = [...new Set(timeSteps.flatMap(s => s.map(e => e.name)))];
+    if (allConns.length === 0) { el.innerHTML = ''; return; }
+
+    const totalSlots = Math.max(currentTime, 8);
+    el.innerHTML = allConns.map(name => {
+      let segments = '';
+      for (let t = 0; t < totalSlots; t++) {
+        const step = timeSteps[t];
+        const ev = step ? step.find(e => e.name === name) : null;
+        const cls = ev ? `seg-${ev.type}` : 'seg-idle';
+        const label = ev ? ev.type[0].toUpperCase() : '';
+        const w = (100 / totalSlots);
+        segments += `<div class="track-segment ${cls}" style="width:${w}%">${label}</div>`;
+      }
+      return `<div class="timeline-track"><span class="track-label">${name}</span><div class="track-bar">${segments}</div></div>`;
+    }).join('');
+  }
+
+  function advanceTime() {
+    const step = [];
+    connections.forEach(c => {
+      if (c.type === 'reader' && !c.blocked) step.push({ name: c.name, type: 'read' });
+      if (c.type === 'writer' && !c.blocked) step.push({ name: c.name, type: 'write' });
+      if (c.type === 'writer' && c.blocked) step.push({ name: c.name, type: 'blocked' });
+      if (c.type === 'reader' && c.blocked) step.push({ name: c.name, type: 'blocked' });
+      if (c.type === 'checkpoint') step.push({ name: c.name, type: 'checkpoint' });
+    });
+    timeSteps.push(step);
+    currentTime++;
+  }
+
+  function doWrite() {
+    writeVersion++;
+    const pagesToModify = [
+      dbPages[Math.floor(Math.random() * dbPages.length)].id,
+      dbPages[Math.floor(Math.random() * dbPages.length)].id,
+    ];
+    const unique = [...new Set(pagesToModify)];
+
+    if (mode === 'rollback') {
+      // In rollback mode, check for active readers
+      const activeReaders = connections.filter(c => c.type === 'reader');
+      if (activeReaders.length > 0) {
+        addLog(`⚠️ Writer blocked — ${activeReaders.length} reader(s) hold SHARED lock`, 'log-err');
+        const w = { id: nextConnId++, name: `Writer ${nextConnId-1}`, type: 'writer', blocked: true, dirtyPages: unique };
+        connections.push(w);
+        advanceTime();
+        renderAll();
+        return;
+      }
+
+      // Block all new readers
+      connections.filter(c => c.type === 'reader').forEach(c => { c.blocked = true; });
+
+      unique.forEach(pid => {
+        const page = dbPages.find(p => p.id === pid);
+        journalEntries.push({ pageId: pid, version: page.version });
+        addLog(`Journal: saved original page ${pid} (v${page.version})`, 'log-info');
+      });
+
+      unique.forEach(pid => {
+        const page = dbPages.find(p => p.id === pid);
+        page.version = writeVersion;
+        page.state = 'dirty';
+      });
+
+      const w = { id: nextConnId++, name: `Writer ${nextConnId-1}`, type: 'writer', dirtyPages: unique };
+      connections.push(w);
+      addLog(`Write v${writeVersion}: modified pages [${unique.join(', ')}]`, 'log-ok');
+
+      // Auto-commit after short delay
+      setTimeout(() => {
+        unique.forEach(pid => { dbPages.find(p => p.id === pid).state = 'clean'; });
+        journalEntries = [];
+        connections = connections.filter(c => c.id !== w.id);
+        addLog(`Committed write v${writeVersion}, journal deleted`, 'log-ok');
+        advanceTime();
+        renderAll();
+      }, 1500);
+
+    } else {
+      // WAL mode — writer never blocks readers
+      unique.forEach(pid => {
+        walFrames.push({ pageId: pid, version: writeVersion, checkpointed: false });
+      });
+
+      const w = { id: nextConnId++, name: `Writer ${nextConnId-1}`, type: 'writer', dirtyPages: unique };
+      connections.push(w);
+      addLog(`WAL write v${writeVersion}: appended ${unique.length} frames [pages ${unique.join(', ')}]`, 'log-ok');
+
+      setTimeout(() => {
+        connections = connections.filter(c => c.id !== w.id);
+        addLog(`Writer committed — WAL now has ${walFrames.length} frames`, 'log-ok');
+        advanceTime();
+        renderAll();
+      }, 800);
+    }
+
+    advanceTime();
+    renderAll();
+  }
+
+  function addReader() {
+    const hasWriter = connections.some(c => c.type === 'writer' && !c.blocked);
+    const blocked = mode === 'rollback' && hasWriter;
+    const r = {
+      id: nextConnId++,
+      name: `Reader ${nextConnId-1}`,
+      type: 'reader',
+      blocked: blocked,
+      snapshotFrame: walFrames.length,
+    };
+    connections.push(r);
+    if (blocked) {
+      addLog(`Reader ${r.name} blocked — writer holds EXCLUSIVE lock`, 'log-warn');
+    } else if (mode === 'wal') {
+      addLog(`${r.name} started — snapshot at WAL frame ${r.snapshotFrame} (sees v${writeVersion})`, 'log-ok');
+    } else {
+      addLog(`${r.name} started — reading database v${writeVersion}`, 'log-ok');
+    }
+
+    // Auto-remove after a bit
+    const lifetime = 3000 + Math.random() * 4000;
+    setTimeout(() => {
+      connections = connections.filter(c => c.id !== r.id);
+      addLog(`${r.name} finished reading`, 'log-info');
+      advanceTime();
+      renderAll();
+    }, lifetime);
+
+    advanceTime();
+    renderAll();
+  }
+
+  function doCheckpoint() {
+    if (mode !== 'wal') { addLog('Checkpoint only applies in WAL mode', 'log-warn'); return; }
+    if (walFrames.length === 0) { addLog('Nothing to checkpoint — WAL is empty', 'log-warn'); return; }
+
+    const cpMode = document.getElementById('checkpointMode').value;
+    const activeReaders = connections.filter(c => c.type === 'reader');
+
+    const cp = { id: nextConnId++, name: 'Checkpoint', type: 'checkpoint' };
+    connections.push(cp);
+
+    if (cpMode === 'PASSIVE') {
+      // Only checkpoint frames not held by readers
+      const minSnapshot = activeReaders.length > 0 ? Math.min(...activeReaders.map(r => r.snapshotFrame)) : walFrames.length;
+      let transferred = 0;
+      walFrames.forEach((f, i) => {
+        if (i < minSnapshot && !f.checkpointed) {
+          f.checkpointed = true;
+          const page = dbPages.find(p => p.id === f.pageId);
+          if (page) { page.version = f.version; page.state = 'clean'; }
+          transferred++;
+        }
+      });
+      checkpointedUpTo = minSnapshot;
+      addLog(`PASSIVE checkpoint: transferred ${transferred} frames to DB (${walFrames.length - transferred} remain)`, transferred > 0 ? 'log-ok' : 'log-warn');
+    } else if (cpMode === 'FULL' || cpMode === 'RESTART' || cpMode === 'TRUNCATE') {
+      if (activeReaders.length > 0 && cpMode !== 'PASSIVE') {
+        addLog(`${cpMode} checkpoint: waiting for ${activeReaders.length} reader(s) to finish...`, 'log-warn');
+      }
+      walFrames.forEach(f => {
+        f.checkpointed = true;
+        const page = dbPages.find(p => p.id === f.pageId);
+        if (page) { page.version = f.version; page.state = 'clean'; }
+      });
+      addLog(`${cpMode} checkpoint: all ${walFrames.length} frames transferred to DB`, 'log-ok');
+      if (cpMode === 'RESTART' || cpMode === 'TRUNCATE') {
+        walFrames = [];
+        checkpointedUpTo = 0;
+        addLog(`${cpMode}: WAL ${cpMode === 'TRUNCATE' ? 'truncated to zero' : 'reset to beginning'}`, 'log-ok');
+      }
+    }
+
+    setTimeout(() => {
+      connections = connections.filter(c => c.id !== cp.id);
+      advanceTime();
+      renderAll();
+    }, 1000);
+
+    advanceTime();
+    renderAll();
+  }
+
+  function renderAll() {
+    renderDB();
+    renderJournal();
+    renderConnections();
+    renderTimeline();
+    renderWalStructure();
+  }
+
+  document.getElementById('btnRollback').addEventListener('click', () => {
+    mode = 'rollback';
+    document.getElementById('btnRollback').classList.add('active');
+    document.getElementById('btnWal').classList.remove('active');
+    init();
+    addLog('Switched to rollback journal mode', 'log-info');
+    renderAll();
+  });
+
+  document.getElementById('btnWal').addEventListener('click', () => {
+    mode = 'wal';
+    document.getElementById('btnWal').classList.add('active');
+    document.getElementById('btnRollback').classList.remove('active');
+    init();
+    addLog('Switched to WAL mode (PRAGMA journal_mode=WAL)', 'log-info');
+    renderAll();
+  });
+
+  document.getElementById('btnAddReader').addEventListener('click', addReader);
+  document.getElementById('btnStartWrite').addEventListener('click', doWrite);
+  document.getElementById('btnCheckpoint').addEventListener('click', doCheckpoint);
+  document.getElementById('btnReset').addEventListener('click', () => { init(); addLog('Reset', 'log-info'); renderAll(); });
+
+  renderAll();
+})();
+</script>

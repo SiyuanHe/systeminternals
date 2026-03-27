@@ -1,0 +1,966 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="KV Cache & Inference Optimization" 
+  description="Interactive visualization of autoregressive generation, KV cache memory, PagedAttention, and continuous batching"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "LLM Internals", href: "/llm/" },
+    { label: "KV Cache & Inference", href: "/llm/kv-cache/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗄️ KV Cache &amp; Inference Optimization</h1>
+      <p class="subtitle">Why autoregressive generation is expensive — and how caching makes it practical</p>
+    </header>
+
+    <!-- Autoregressive Generation -->
+    <section class="panel">
+      <h2>Autoregressive Generation</h2>
+      <p class="panel-desc">Each new token requires attending to ALL previous tokens. Without caching, we recompute K and V for every token at every step — the red cells show wasted work.</p>
+      <div class="gen-controls">
+        <button id="genStep" class="action-btn">Generate Next Token →</button>
+        <button id="genAuto" class="action-btn secondary">▶ Auto Generate</button>
+        <button id="genReset" class="action-btn tertiary">↺ Reset</button>
+        <div class="gen-toggle">
+          <label class="toggle-label">
+            <input type="checkbox" id="cacheToggle" checked>
+            <span class="toggle-slider"></span>
+            KV Cache
+          </label>
+        </div>
+      </div>
+      <div class="gen-display">
+        <div class="gen-text" id="genText"></div>
+        <div class="gen-grid-container">
+          <div class="gen-grid-label">Computation per step (each column = one generation step):</div>
+          <canvas id="genCanvas" width="700" height="300"></canvas>
+          <div class="gen-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span> Recomputed (wasted without cache)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#22c55e"></span> Cached (skipped)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#00d4ff"></span> New computation</span>
+          </div>
+        </div>
+        <div class="gen-stats">
+          <div class="stat"><span class="stat-val" id="genOpsNoCache">0</span><span class="stat-label">Ops without cache</span></div>
+          <div class="stat"><span class="stat-val" id="genOpsCache">0</span><span class="stat-label">Ops with cache</span></div>
+          <div class="stat"><span class="stat-val" id="genSavings">0%</span><span class="stat-label">Savings</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KV Cache Memory Calculator -->
+    <section class="panel">
+      <h2>KV Cache Memory</h2>
+      <p class="panel-desc">KV cache stores Key and Value tensors for all previous tokens across all layers and heads. Memory = layers × heads × seq_len × head_dim × 2 (K+V) × bytes.</p>
+      <div class="mem-controls">
+        <div class="mem-presets">
+          <button class="preset-btn active" data-preset="7b">Llama 7B</button>
+          <button class="preset-btn" data-preset="13b">Llama 13B</button>
+          <button class="preset-btn" data-preset="70b">Llama 70B</button>
+          <button class="preset-btn" data-preset="custom">Custom</button>
+        </div>
+        <div class="mem-params" id="memParams">
+          <div class="param"><label>Layers</label><input type="number" id="memLayers" value="32" min="1" max="128"></div>
+          <div class="param"><label>Heads</label><input type="number" id="memHeads" value="32" min="1" max="128"></div>
+          <div class="param"><label>Head Dim</label><input type="number" id="memHeadDim" value="128" min="16" max="512"></div>
+          <div class="param"><label>Precision</label><select id="memPrec"><option value="2" selected>FP16 (2B)</option><option value="1">INT8 (1B)</option><option value="4">FP32 (4B)</option></select></div>
+        </div>
+        <div class="seq-slider-wrap">
+          <label>Sequence Length: <span id="seqLenVal">2048</span></label>
+          <input type="range" id="seqLen" min="7" max="17" value="11" step="1">
+          <div class="seq-ticks">
+            <span>128</span><span>512</span><span>2K</span><span>8K</span><span>32K</span><span>128K</span>
+          </div>
+        </div>
+      </div>
+      <div class="mem-viz">
+        <div class="mem-blocks" id="memBlocks"></div>
+        <div class="mem-result">
+          <div class="mem-formula" id="memFormula"></div>
+          <div class="mem-total">KV Cache: <span id="memTotal">0</span></div>
+          <div class="mem-context" id="memContext"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sequence Length Impact -->
+    <section class="panel">
+      <h2>Sequence Length Impact</h2>
+      <p class="panel-desc">Attention is O(n²) in sequence length, but KV cache grows linearly. Drag the slider to see how costs scale.</p>
+      <div class="cost-chart-container">
+        <canvas id="costChart" width="700" height="350"></canvas>
+        <div class="cost-chart-labels">
+          <span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span> Attention compute (O(n²))</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#22c55e"></span> KV cache memory (O(n))</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;opacity:0.5"></span> Current position</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PagedAttention -->
+    <section class="panel">
+      <h2>PagedAttention (vLLM)</h2>
+      <p class="panel-desc">Like virtual memory for KV cache. Logical blocks map to physical GPU memory pages, enabling efficient memory sharing across requests.</p>
+      <div class="paged-controls">
+        <button id="pagedAddReq" class="action-btn">+ Add Request</button>
+        <button id="pagedStep" class="action-btn secondary">Step →</button>
+        <button id="pagedReset" class="action-btn tertiary">↺ Reset</button>
+      </div>
+      <div class="paged-layout">
+        <div class="paged-logical">
+          <h4>Logical Blocks (per request)</h4>
+          <div id="pagedLogical"></div>
+        </div>
+        <div class="paged-arrow">→</div>
+        <div class="paged-physical">
+          <h4>Physical GPU Memory</h4>
+          <div class="gpu-mem" id="gpuMem"></div>
+          <div class="gpu-stats">
+            <span>Used: <strong id="gpuUsed">0</strong>/<strong id="gpuTotal">16</strong> blocks</span>
+            <span>Utilization: <strong id="gpuUtil">0%</strong></span>
+          </div>
+        </div>
+      </div>
+      <div class="paged-insight" id="pagedInsight">
+        <strong>Why PagedAttention?</strong> Traditional serving wastes 60-80% of GPU memory on fragmentation. PagedAttention eliminates this by allocating memory in fixed-size blocks, like OS page tables. This lets vLLM serve 2-4× more concurrent requests.
+      </div>
+    </section>
+
+    <!-- Optimization Techniques -->
+    <section class="panel">
+      <h2>Optimization Techniques</h2>
+      <p class="panel-desc">Different attention variants trade off memory for compute. Toggle each to see the memory impact.</p>
+      <div class="opt-toggles">
+        <button class="opt-btn active" data-opt="mha">MHA (Standard)</button>
+        <button class="opt-btn" data-opt="mqa">MQA</button>
+        <button class="opt-btn" data-opt="gqa">GQA</button>
+        <button class="opt-btn" data-opt="swa">Sliding Window</button>
+      </div>
+      <div class="opt-viz">
+        <div class="opt-desc" id="optDesc"></div>
+        <div class="opt-bars" id="optBars"></div>
+      </div>
+    </section>
+
+    <!-- Continuous Batching -->
+    <section class="panel">
+      <h2>Continuous Batching</h2>
+      <p class="panel-desc">Static batching wastes GPU when requests finish at different times. Continuous batching fills slots immediately.</p>
+      <div class="batch-controls">
+        <button id="batchStep" class="action-btn">Step →</button>
+        <button id="batchAuto" class="action-btn secondary">▶ Auto</button>
+        <button id="batchReset" class="action-btn tertiary">↺ Reset</button>
+      </div>
+      <div class="batch-viz">
+        <canvas id="batchCanvas" width="700" height="250"></canvas>
+        <div class="batch-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#00d4ff"></span> Active</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#22c55e"></span> Complete</span>
+          <span class="legend-item"><span class="legend-dot" style="background:rgba(255,255,255,0.05)"></span> Idle (wasted)</span>
+        </div>
+        <div class="batch-stats">
+          <div class="stat"><span class="stat-val" id="batchUtil">0%</span><span class="stat-label">GPU Utilization</span></div>
+          <div class="stat"><span class="stat-val" id="batchCompleted">0</span><span class="stat-label">Completed</span></div>
+          <div class="stat"><span class="stat-val" id="batchStep_">0</span><span class="stat-label">Time Step</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Educational footer -->
+    <section class="edu-section">
+      <h3>Why This Matters</h3>
+      <div class="edu-grid">
+        <div class="edu-card">
+          <h4>💸 Inference Cost</h4>
+          <p>KV cache is the dominant memory cost during inference. A single 70B model with 128K context needs ~160GB just for KV cache — more than the model weights themselves.</p>
+        </div>
+        <div class="edu-card">
+          <h4>⚡ Latency</h4>
+          <p>Without KV cache, generating 100 tokens would require ~5,050 attention computations instead of ~100. That's a 50× speedup for free memory.</p>
+        </div>
+        <div class="edu-card">
+          <h4>📈 Throughput</h4>
+          <p>PagedAttention and continuous batching together can increase serving throughput by 10-20× compared to naive implementations, making LLM APIs economically viable.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style is:inline>
+.viz-container { max-width: 1000px; margin: 0 auto; }
+.viz-header { text-align: center; margin-bottom: 30px; }
+.viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+.subtitle { color: #888; font-size: 1.1rem; }
+
+.panel {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.panel h2 { font-size: 1.4rem; color: #fff; margin-bottom: 6px; }
+.panel-desc { color: #888; font-size: 0.95rem; margin-bottom: 16px; line-height: 1.5; }
+
+.action-btn {
+  padding: 8px 16px;
+  border: 1px solid rgba(0,212,255,0.3);
+  background: rgba(0,212,255,0.1);
+  color: #00d4ff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.action-btn:hover { background: rgba(0,212,255,0.2); }
+.action-btn.secondary { border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.1); color: #4ade80; }
+.action-btn.tertiary { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: #aaa; }
+
+.stat { text-align: center; }
+.stat-val { display: block; font-size: 1.4rem; font-weight: 700; color: #00d4ff; }
+.stat-label { font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Autoregressive gen */
+.gen-controls {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.gen-toggle { margin-left: auto; }
+.toggle-label {
+  display: flex; align-items: center; gap: 8px; color: #ccc; font-size: 0.85rem; cursor: pointer;
+}
+.toggle-label input { display: none; }
+.toggle-slider {
+  width: 36px; height: 20px; background: #444; border-radius: 10px; position: relative; transition: background 0.3s;
+}
+.toggle-slider::after {
+  content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px;
+  background: #fff; border-radius: 50%; transition: transform 0.3s;
+}
+.toggle-label input:checked + .toggle-slider { background: #22c55e; }
+.toggle-label input:checked + .toggle-slider::after { transform: translateX(16px); }
+
+.gen-text {
+  font-size: 1.1rem; color: #fff; margin-bottom: 12px; min-height: 30px; line-height: 1.8;
+}
+.gen-word { display: inline; }
+.gen-word.new { color: #4ade80; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.gen-grid-container { margin-bottom: 12px; }
+.gen-grid-label { font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+.gen-grid-container canvas { max-width: 100%; border-radius: 8px; }
+.gen-legend, .cost-chart-labels, .batch-legend {
+  display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #888; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+.gen-stats { display: flex; gap: 24px; margin-top: 12px; }
+
+/* Memory calculator */
+.mem-controls { margin-bottom: 16px; }
+.mem-presets { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.preset-btn {
+  padding: 6px 14px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03);
+  color: #888; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 0.85rem; transition: all 0.2s;
+}
+.preset-btn:hover { border-color: #7c3aed; color: #ccc; }
+.preset-btn.active { background: rgba(124,58,237,0.15); border-color: #7c3aed; color: #fff; }
+.mem-params { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.param { display: flex; align-items: center; gap: 6px; }
+.param label { color: #888; font-size: 0.8rem; }
+.param input, .param select {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+  color: #fff; padding: 4px 8px; border-radius: 6px; font-family: inherit; font-size: 0.85rem; width: 70px;
+}
+.param select { width: 100px; }
+.seq-slider-wrap { margin-top: 8px; }
+.seq-slider-wrap label { color: #aaa; font-size: 0.85rem; }
+.seq-slider-wrap label span { color: #00d4ff; font-weight: 700; }
+.seq-slider-wrap input[type="range"] { width: 100%; margin-top: 4px; }
+.seq-ticks { display: flex; justify-content: space-between; font-size: 0.7rem; color: #666; }
+
+.mem-viz { display: flex; gap: 20px; flex-wrap: wrap; }
+.mem-blocks { flex: 1; min-width: 250px; display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+.mem-block {
+  width: 18px; height: 18px; border-radius: 3px; transition: all 0.3s;
+}
+.mem-result { flex: 1; min-width: 250px; }
+.mem-formula {
+  font-family: monospace; font-size: 0.85rem; color: #aaa; margin-bottom: 12px;
+  background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; line-height: 1.6;
+}
+.mem-total { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+.mem-total span { color: #f59e0b; }
+.mem-context { font-size: 0.85rem; color: #888; line-height: 1.5; }
+
+/* Cost chart */
+.cost-chart-container { text-align: center; }
+.cost-chart-container canvas { max-width: 100%; }
+
+/* PagedAttention */
+.paged-controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.paged-layout { display: flex; gap: 20px; margin-bottom: 16px; align-items: flex-start; flex-wrap: wrap; }
+.paged-logical, .paged-physical { flex: 1; min-width: 250px; }
+.paged-logical h4, .paged-physical h4 { font-size: 0.85rem; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+.paged-arrow { color: #555; font-size: 1.5rem; padding-top: 30px; }
+.req-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.req-label { font-size: 0.8rem; color: #ccc; min-width: 50px; }
+.req-blocks { display: flex; gap: 3px; }
+.req-block {
+  width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: 0.65rem; color: #fff; font-weight: 600;
+}
+.gpu-mem { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
+.gpu-block {
+  width: 28px; height: 28px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: #888;
+  transition: all 0.3s;
+}
+.gpu-block.used { border-color: transparent; color: #fff; font-weight: 600; }
+.gpu-stats { font-size: 0.8rem; color: #888; display: flex; gap: 16px; }
+.paged-insight {
+  background: rgba(74,222,128,0.06); border: 1px solid rgba(74,222,128,0.15);
+  border-radius: 10px; padding: 14px 18px; color: #aaa; font-size: 0.9rem; line-height: 1.5;
+}
+
+/* Optimization */
+.opt-toggles { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.opt-btn {
+  padding: 8px 16px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03);
+  color: #888; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 0.85rem; transition: all 0.2s;
+}
+.opt-btn:hover { border-color: #00d4ff; color: #ccc; }
+.opt-btn.active { background: rgba(0,212,255,0.12); border-color: #00d4ff; color: #fff; }
+.opt-desc { color: #aaa; font-size: 0.9rem; margin-bottom: 16px; line-height: 1.5; }
+.opt-bars { display: flex; flex-direction: column; gap: 10px; }
+.opt-bar-row { display: flex; align-items: center; gap: 10px; }
+.opt-bar-label { min-width: 100px; font-size: 0.85rem; color: #ccc; }
+.opt-bar-wrap { flex: 1; height: 28px; background: rgba(255,255,255,0.04); border-radius: 6px; overflow: hidden; position: relative; }
+.opt-bar { height: 100%; border-radius: 6px; transition: width 0.5s; display: flex; align-items: center; padding-left: 8px; font-size: 0.75rem; color: #fff; font-weight: 600; }
+.opt-bar-val { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; color: #888; }
+
+/* Batch */
+.batch-controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.batch-viz canvas { max-width: 100%; border-radius: 8px; }
+.batch-stats { display: flex; gap: 24px; margin-top: 12px; }
+
+/* Edu */
+.edu-section { margin-top: 40px; }
+.edu-section h3 { font-size: 1.3rem; color: #fff; margin-bottom: 16px; }
+.edu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.edu-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; }
+.edu-card h4 { color: #fff; margin-bottom: 8px; }
+.edu-card p { color: #888; font-size: 0.9rem; line-height: 1.5; }
+
+@media (max-width: 768px) {
+  .paged-layout { flex-direction: column; }
+  .paged-arrow { transform: rotate(90deg); padding: 0; text-align: center; }
+  .mem-viz { flex-direction: column; }
+}
+</style>
+
+<script is:inline>
+(function() {
+  var reqColors = ['#00d4ff','#7c3aed','#4ade80','#f59e0b','#ef4444','#ec4899','#06b6d4','#8b5cf6'];
+
+  // === Autoregressive Generation ===
+  var genTokens = ['The','cat','sat','on','the','mat','because','it','was','tired','and','sleepy'];
+  var genStep = 0;
+  var genAutoInterval = null;
+  var useCache = true;
+
+  document.getElementById('cacheToggle').addEventListener('change', function() {
+    useCache = this.checked;
+    drawGen();
+  });
+
+  function drawGen() {
+    // Text
+    var textDiv = document.getElementById('genText');
+    var html = '';
+    for (var i = 0; i < genStep + 1 && i < genTokens.length; i++) {
+      var cls = i === genStep && i > 0 ? 'gen-word new' : 'gen-word';
+      html += '<span class="' + cls + '">' + genTokens[i] + ' </span>';
+    }
+    textDiv.innerHTML = html;
+
+    // Grid
+    var canvas = document.getElementById('genCanvas');
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var maxSteps = Math.min(genStep + 1, genTokens.length);
+    if (maxSteps === 0) return;
+
+    var cellW = Math.min(40, (w - 60) / maxSteps);
+    var cellH = Math.min(25, (h - 40) / genTokens.length);
+    var offsetX = 50;
+    var offsetY = 20;
+
+    // Column headers
+    ctx.fillStyle = '#888';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    for (var s = 0; s < maxSteps; s++) {
+      ctx.fillText('t' + s, offsetX + s * cellW + cellW / 2, offsetY - 4);
+    }
+
+    // Row headers
+    ctx.textAlign = 'right';
+    for (var t = 0; t < Math.min(maxSteps, genTokens.length); t++) {
+      ctx.fillText(genTokens[t], offsetX - 4, offsetY + t * cellH + cellH / 2 + 3);
+    }
+
+    var opsNoCache = 0;
+    var opsCache = 0;
+
+    for (var s = 0; s < maxSteps; s++) {
+      for (var t = 0; t <= s; t++) {
+        var x = offsetX + s * cellW;
+        var y = offsetY + t * cellH;
+
+        if (t === s) {
+          // New computation (always needed)
+          ctx.fillStyle = '#00d4ff';
+          ctx.globalAlpha = 0.8;
+          opsNoCache++;
+          opsCache++;
+        } else if (useCache) {
+          // Cached
+          ctx.fillStyle = '#22c55e';
+          ctx.globalAlpha = 0.3;
+          opsNoCache++;
+        } else {
+          // Recomputed
+          ctx.fillStyle = '#ef4444';
+          ctx.globalAlpha = 0.6;
+          opsNoCache++;
+          opsCache++;
+        }
+        ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    document.getElementById('genOpsNoCache').textContent = opsNoCache;
+    document.getElementById('genOpsCache').textContent = opsCache;
+    var savings = opsNoCache > 0 ? Math.round((1 - opsCache / opsNoCache) * 100) : 0;
+    document.getElementById('genSavings').textContent = savings + '%';
+  }
+
+  document.getElementById('genStep').addEventListener('click', function() {
+    if (genStep < genTokens.length - 1) { genStep++; drawGen(); }
+  });
+  document.getElementById('genReset').addEventListener('click', function() {
+    genStep = 0;
+    if (genAutoInterval) { clearInterval(genAutoInterval); genAutoInterval = null; }
+    document.getElementById('genAuto').textContent = '▶ Auto Generate';
+    drawGen();
+  });
+  document.getElementById('genAuto').addEventListener('click', function() {
+    if (genAutoInterval) {
+      clearInterval(genAutoInterval); genAutoInterval = null;
+      this.textContent = '▶ Auto Generate';
+      return;
+    }
+    this.textContent = '⏸ Pause';
+    genAutoInterval = setInterval(function() {
+      if (genStep >= genTokens.length - 1) {
+        clearInterval(genAutoInterval); genAutoInterval = null;
+        document.getElementById('genAuto').textContent = '▶ Auto Generate';
+        return;
+      }
+      genStep++;
+      drawGen();
+    }, 500);
+  });
+  drawGen();
+
+  // === Memory Calculator ===
+  var presets = {
+    '7b': { layers: 32, heads: 32, headDim: 128 },
+    '13b': { layers: 40, heads: 40, headDim: 128 },
+    '70b': { layers: 80, heads: 64, headDim: 128 },
+  };
+
+  function getSeqLen() {
+    return Math.pow(2, parseInt(document.getElementById('seqLen').value));
+  }
+
+  function formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return bytes + ' B';
+  }
+
+  function formatSeqLen(n) {
+    if (n >= 1024) return (n / 1024) + 'K';
+    return n.toString();
+  }
+
+  function updateMem() {
+    var layers = parseInt(document.getElementById('memLayers').value);
+    var heads = parseInt(document.getElementById('memHeads').value);
+    var headDim = parseInt(document.getElementById('memHeadDim').value);
+    var prec = parseInt(document.getElementById('memPrec').value);
+    var seqLen = getSeqLen();
+
+    document.getElementById('seqLenVal').textContent = formatSeqLen(seqLen);
+
+    var totalBytes = layers * heads * seqLen * headDim * 2 * prec;
+
+    // Formula display
+    document.getElementById('memFormula').innerHTML =
+      layers + ' layers × ' + heads + ' heads × ' + formatSeqLen(seqLen) + ' seq × ' + headDim + ' dim × 2 (K+V) × ' + prec + 'B';
+
+    document.getElementById('memTotal').textContent = formatBytes(totalBytes);
+
+    // Context
+    var a100Mem = 80 * 1073741824;
+    var pctA100 = (totalBytes / a100Mem * 100).toFixed(1);
+    document.getElementById('memContext').innerHTML =
+      'That\'s <strong>' + pctA100 + '%</strong> of an A100 80GB. ' +
+      (totalBytes > a100Mem ? '<span style="color:#ef4444">⚠️ Exceeds single GPU memory!</span>' : 'Leaves ' + formatBytes(a100Mem - totalBytes) + ' for model weights + activations.');
+
+    // Memory blocks visualization
+    var blockContainer = document.getElementById('memBlocks');
+    blockContainer.innerHTML = '';
+    var numBlocks = Math.min(200, Math.max(20, Math.floor(totalBytes / (1024 * 1024)))); // ~1 block per MB
+    for (var i = 0; i < numBlocks; i++) {
+      var block = document.createElement('div');
+      block.className = 'mem-block';
+      var progress = i / numBlocks;
+      if (progress < 0.5) {
+        block.style.background = 'rgba(0,212,255,' + (0.3 + progress * 0.8) + ')';
+      } else {
+        block.style.background = 'rgba(245,158,11,' + (0.3 + (progress - 0.5) * 0.8) + ')';
+      }
+      blockContainer.appendChild(block);
+    }
+
+    // Update cost chart
+    drawCostChart(seqLen);
+  }
+
+  document.querySelectorAll('.preset-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.preset-btn').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+      var p = this.getAttribute('data-preset');
+      if (presets[p]) {
+        document.getElementById('memLayers').value = presets[p].layers;
+        document.getElementById('memHeads').value = presets[p].heads;
+        document.getElementById('memHeadDim').value = presets[p].headDim;
+      }
+      updateMem();
+    });
+  });
+
+  ['memLayers','memHeads','memHeadDim','memPrec','seqLen'].forEach(function(id) {
+    document.getElementById(id).addEventListener('input', updateMem);
+  });
+  updateMem();
+
+  // === Cost Chart ===
+  function drawCostChart(currentSeq) {
+    var canvas = document.getElementById('costChart');
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var padding = { left: 60, right: 20, top: 20, bottom: 40 };
+    var plotW = w - padding.left - padding.right;
+    var plotH = h - padding.top - padding.bottom;
+
+    // Points from 128 to 128K
+    var points = [];
+    for (var p = 7; p <= 17; p += 0.5) {
+      points.push(Math.pow(2, p));
+    }
+
+    var maxSeq = Math.pow(2, 17);
+    var maxAttn = maxSeq * maxSeq;
+
+    // Axes
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, h - padding.bottom);
+    ctx.lineTo(w - padding.right, h - padding.bottom);
+    ctx.stroke();
+
+    // X labels
+    ctx.fillStyle = '#666';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    [128, 512, 2048, 8192, 32768, 131072].forEach(function(val) {
+      var x = padding.left + (Math.log2(val) - 7) / 10 * plotW;
+      ctx.fillText(formatSeqLen(val), x, h - padding.bottom + 16);
+    });
+
+    // Attention curve (O(n²))
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    points.forEach(function(seq, i) {
+      var x = padding.left + (Math.log2(seq) - 7) / 10 * plotW;
+      var y = padding.top + plotH - (seq * seq / maxAttn) * plotH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // KV cache curve (O(n))
+    ctx.strokeStyle = '#22c55e';
+    ctx.beginPath();
+    points.forEach(function(seq, i) {
+      var x = padding.left + (Math.log2(seq) - 7) / 10 * plotW;
+      var y = padding.top + plotH - (seq / maxSeq) * plotH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Current position line
+    if (currentSeq) {
+      var cx = padding.left + (Math.log2(currentSeq) - 7) / 10 * plotW;
+      ctx.strokeStyle = 'rgba(245,158,11,0.5)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(cx, padding.top);
+      ctx.lineTo(cx, h - padding.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.lineWidth = 1;
+  }
+
+  // === PagedAttention ===
+  var pagedRequests = [];
+  var pagedPhysical = new Array(16).fill(null); // 16 physical blocks
+  var pagedReqId = 0;
+  var pagedStepCount = 0;
+
+  function addPagedRequest() {
+    if (pagedReqId >= 8) return;
+    var len = 2 + Math.floor(Math.random() * 3);
+    pagedRequests.push({ id: pagedReqId, blocks: len, generated: 0, color: reqColors[pagedReqId % reqColors.length] });
+    // Allocate physical blocks
+    var allocated = 0;
+    for (var i = 0; i < pagedPhysical.length && allocated < len; i++) {
+      if (pagedPhysical[i] === null) {
+        pagedPhysical[i] = pagedReqId;
+        allocated++;
+      }
+    }
+    pagedReqId++;
+    renderPaged();
+  }
+
+  function stepPaged() {
+    pagedStepCount++;
+    // Generate one token for each active request
+    pagedRequests.forEach(function(req) {
+      if (req.generated < 3) {
+        req.generated++;
+        // Maybe need another block
+        if (req.generated % 2 === 0) {
+          for (var i = 0; i < pagedPhysical.length; i++) {
+            if (pagedPhysical[i] === null) {
+              pagedPhysical[i] = req.id;
+              req.blocks++;
+              break;
+            }
+          }
+        }
+      }
+    });
+    // Remove completed requests (generated >= 3)
+    pagedRequests = pagedRequests.filter(function(r) {
+      if (r.generated >= 3) {
+        // Free blocks
+        for (var i = 0; i < pagedPhysical.length; i++) {
+          if (pagedPhysical[i] === r.id) pagedPhysical[i] = null;
+        }
+        return false;
+      }
+      return true;
+    });
+    renderPaged();
+  }
+
+  function renderPaged() {
+    // Logical
+    var logicalDiv = document.getElementById('pagedLogical');
+    logicalDiv.innerHTML = '';
+    pagedRequests.forEach(function(req) {
+      var row = document.createElement('div');
+      row.className = 'req-row';
+      row.innerHTML = '<span class="req-label" style="color:' + req.color + '">Req ' + req.id + '</span>';
+      var blocks = document.createElement('div');
+      blocks.className = 'req-blocks';
+      for (var b = 0; b < req.blocks; b++) {
+        var block = document.createElement('div');
+        block.className = 'req-block';
+        block.style.background = req.color + '66';
+        block.textContent = b;
+        blocks.appendChild(block);
+      }
+      row.appendChild(blocks);
+      logicalDiv.appendChild(row);
+    });
+
+    // Physical
+    var gpuDiv = document.getElementById('gpuMem');
+    gpuDiv.innerHTML = '';
+    var used = 0;
+    for (var i = 0; i < pagedPhysical.length; i++) {
+      var block = document.createElement('div');
+      block.className = 'gpu-block';
+      if (pagedPhysical[i] !== null) {
+        var req = pagedRequests.find(function(r) { return r.id === pagedPhysical[i]; });
+        var color = req ? req.color : reqColors[pagedPhysical[i] % reqColors.length];
+        block.classList.add('used');
+        block.style.background = color + '66';
+        block.textContent = 'R' + pagedPhysical[i];
+        used++;
+      } else {
+        block.textContent = i;
+      }
+      gpuDiv.appendChild(block);
+    }
+    document.getElementById('gpuUsed').textContent = used;
+    document.getElementById('gpuTotal').textContent = pagedPhysical.length;
+    document.getElementById('gpuUtil').textContent = Math.round(used / pagedPhysical.length * 100) + '%';
+  }
+
+  document.getElementById('pagedAddReq').addEventListener('click', addPagedRequest);
+  document.getElementById('pagedStep').addEventListener('click', stepPaged);
+  document.getElementById('pagedReset').addEventListener('click', function() {
+    pagedRequests = [];
+    pagedPhysical = new Array(16).fill(null);
+    pagedReqId = 0;
+    pagedStepCount = 0;
+    renderPaged();
+  });
+  renderPaged();
+
+  // === Optimization Techniques ===
+  var optData = {
+    mha: {
+      desc: '<strong>Multi-Head Attention (MHA)</strong> — Standard transformer attention. Each head has its own Q, K, and V projections. Maximum expressiveness, maximum memory.',
+      bars: [
+        { label: 'MHA', pct: 100, color: '#00d4ff', val: '100%' },
+        { label: 'MQA', pct: 3, color: '#22c55e', val: '3%' },
+        { label: 'GQA-4', pct: 12.5, color: '#7c3aed', val: '12.5%' },
+      ]
+    },
+    mqa: {
+      desc: '<strong>Multi-Query Attention (MQA)</strong> — All heads share ONE set of K and V. Only Q differs per head. Used by PaLM, Falcon. Massive memory savings at slight quality cost.',
+      bars: [
+        { label: 'MHA', pct: 100, color: '#00d4ff', val: '32 KV heads' },
+        { label: 'MQA', pct: 3, color: '#22c55e', val: '1 KV head' },
+        { label: 'GQA-4', pct: 12.5, color: '#7c3aed', val: '4 KV heads' },
+      ]
+    },
+    gqa: {
+      desc: '<strong>Grouped-Query Attention (GQA)</strong> — A middle ground: groups of query heads share K/V heads. Used by Llama 2 70B (8 KV heads for 64 Q heads). Best quality/memory tradeoff.',
+      bars: [
+        { label: 'MHA', pct: 100, color: '#00d4ff', val: '32 KV heads' },
+        { label: 'MQA', pct: 3, color: '#22c55e', val: '1 KV head' },
+        { label: 'GQA-8', pct: 25, color: '#7c3aed', val: '8 KV heads' },
+      ]
+    },
+    swa: {
+      desc: '<strong>Sliding Window Attention (SWA)</strong> — Each token only attends to a fixed window of recent tokens (e.g., 4096). Used by Mistral. KV cache is bounded regardless of sequence length.',
+      bars: [
+        { label: 'Full Attn (128K)', pct: 100, color: '#00d4ff', val: '128K cache' },
+        { label: 'SWA (4K window)', pct: 3.1, color: '#f59e0b', val: '4K cache' },
+        { label: 'SWA (32K window)', pct: 25, color: '#ef4444', val: '32K cache' },
+      ]
+    }
+  };
+
+  function renderOpt(type) {
+    var data = optData[type];
+    document.getElementById('optDesc').innerHTML = data.desc;
+    var container = document.getElementById('optBars');
+    container.innerHTML = '';
+    data.bars.forEach(function(bar) {
+      var row = document.createElement('div');
+      row.className = 'opt-bar-row';
+      row.innerHTML = '<span class="opt-bar-label">' + bar.label + '</span>' +
+        '<div class="opt-bar-wrap"><div class="opt-bar" style="width:' + bar.pct + '%;background:' + bar.color + '">' + bar.val + '</div></div>';
+      container.appendChild(row);
+    });
+  }
+
+  document.querySelectorAll('.opt-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.opt-btn').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+      renderOpt(this.getAttribute('data-opt'));
+    });
+  });
+  renderOpt('mha');
+
+  // === Continuous Batching ===
+  var batchSlots = 4;
+  var batchMaxSteps = 20;
+  var batchState = []; // array of { id, start, end, color }
+  var batchTimeStep = 0;
+  var batchNextId = 0;
+  var batchAutoInterval = null;
+  var batchCompleted = 0;
+
+  function initBatch() {
+    batchState = [];
+    batchTimeStep = 0;
+    batchNextId = 0;
+    batchCompleted = 0;
+    // Pre-schedule some requests
+    for (var s = 0; s < batchSlots; s++) {
+      var len = 3 + Math.floor(Math.random() * 5);
+      batchState.push({ id: batchNextId++, slot: s, start: 0, end: len, color: reqColors[s % reqColors.length] });
+    }
+    drawBatch();
+  }
+
+  function stepBatch() {
+    batchTimeStep++;
+    // Check for completions and add new requests
+    batchState.forEach(function(req) {
+      if (batchTimeStep >= req.end && !req.completed) {
+        req.completed = true;
+        batchCompleted++;
+        // Continuous batching: immediately fill the slot
+        var len = 2 + Math.floor(Math.random() * 6);
+        batchState.push({
+          id: batchNextId++, slot: req.slot, start: batchTimeStep,
+          end: batchTimeStep + len, color: reqColors[batchNextId % reqColors.length]
+        });
+      }
+    });
+    drawBatch();
+  }
+
+  function drawBatch() {
+    var canvas = document.getElementById('batchCanvas');
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    var padding = { left: 50, right: 10, top: 10, bottom: 30 };
+    var plotW = w - padding.left - padding.right;
+    var plotH = h - padding.top - padding.bottom;
+    var slotH = plotH / batchSlots;
+    var maxVisible = 15;
+    var cellW = plotW / maxVisible;
+
+    // Slot labels
+    ctx.fillStyle = '#888';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    for (var s = 0; s < batchSlots; s++) {
+      ctx.fillText('Slot ' + s, padding.left - 6, padding.top + s * slotH + slotH / 2 + 4);
+    }
+
+    // Time labels
+    ctx.textAlign = 'center';
+    for (var t = 0; t < maxVisible; t++) {
+      var timeVal = Math.max(0, batchTimeStep - maxVisible + 1 + t);
+      ctx.fillText('t' + timeVal, padding.left + t * cellW + cellW / 2, h - padding.bottom + 14);
+    }
+
+    // Draw cells
+    var startTime = Math.max(0, batchTimeStep - maxVisible + 1);
+    for (var t = startTime; t <= batchTimeStep; t++) {
+      var col = t - startTime;
+      for (var s = 0; s < batchSlots; s++) {
+        var x = padding.left + col * cellW;
+        var y = padding.top + s * slotH;
+
+        // Find request for this slot at this time
+        var req = null;
+        for (var r = batchState.length - 1; r >= 0; r--) {
+          if (batchState[r].slot === s && t >= batchState[r].start && t < batchState[r].end) {
+            req = batchState[r];
+            break;
+          }
+        }
+
+        if (req) {
+          ctx.fillStyle = req.completed && t >= req.end ? '#22c55e' : req.color;
+          ctx.globalAlpha = 0.6;
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.03)';
+          ctx.globalAlpha = 1;
+        }
+        ctx.fillRect(x + 1, y + 1, cellW - 2, slotH - 2);
+
+        if (req) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#fff';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('R' + req.id, x + cellW / 2, y + slotH / 2 + 3);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Stats
+    document.getElementById('batchStep_').textContent = batchTimeStep;
+    document.getElementById('batchCompleted').textContent = batchCompleted;
+
+    // Utilization: active slots / total slots over visible window
+    var activeCount = 0;
+    var totalSlots = 0;
+    for (var t = startTime; t <= batchTimeStep; t++) {
+      for (var s = 0; s < batchSlots; s++) {
+        totalSlots++;
+        for (var r = 0; r < batchState.length; r++) {
+          if (batchState[r].slot === s && t >= batchState[r].start && t < batchState[r].end) {
+            activeCount++;
+            break;
+          }
+        }
+      }
+    }
+    document.getElementById('batchUtil').textContent = totalSlots > 0 ? Math.round(activeCount / totalSlots * 100) + '%' : '0%';
+  }
+
+  document.getElementById('batchStep').addEventListener('click', stepBatch);
+  document.getElementById('batchReset').addEventListener('click', function() {
+    if (batchAutoInterval) { clearInterval(batchAutoInterval); batchAutoInterval = null; }
+    document.getElementById('batchAuto').textContent = '▶ Auto';
+    initBatch();
+  });
+  document.getElementById('batchAuto').addEventListener('click', function() {
+    if (batchAutoInterval) {
+      clearInterval(batchAutoInterval); batchAutoInterval = null;
+      this.textContent = '▶ Auto';
+      return;
+    }
+    this.textContent = '⏸ Pause';
+    batchAutoInterval = setInterval(function() {
+      if (batchTimeStep >= 30) {
+        clearInterval(batchAutoInterval); batchAutoInterval = null;
+        document.getElementById('batchAuto').textContent = '▶ Auto';
+        return;
+      }
+      stepBatch();
+    }, 600);
+  });
+  initBatch();
+})();
+</script>
+</BaseLayout>

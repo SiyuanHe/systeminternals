@@ -1,0 +1,117 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "B-tree & Page Structure", description: "Page-based storage, B-tree nodes, page splits, overflow pages, and hex inspector", href: "/sqlite/btree-pages/", status: "live" },
+  { title: "WAL Mode & Concurrency", description: "Rollback journal vs WAL, reader/writer concurrency, checkpoint strategies", href: "/sqlite/wal-mode/", status: "live" },
+  { title: "Virtual Machine & Query Planning", description: "VDBE opcodes, index selection, full scan vs index scan, bytecode step-through", href: "/sqlite/query-planner/", status: "live" },
+];
+---
+
+<BaseLayout 
+  title="SQLite Internals" 
+  description="Interactive visualizations for understanding SQLite's storage engine, WAL mode, and query execution"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "SQLite", href: "/sqlite/" }]}
+>
+  <section class="section-header">
+    <h1>🪶 SQLite Internals</h1>
+    <p>
+      SQLite is the most deployed database engine in the world — embedded in every phone, browser, and countless applications.
+      Despite its simplicity, it packs a sophisticated B-tree storage engine, a bytecode virtual machine, and a WAL-based
+      concurrency model. These visualizations let you explore how it all works under the hood.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(topic => (
+      <a href={topic.href} class={`topic-card ${topic.status}`}>
+        <div class="topic-status">
+          {topic.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{topic.title}</h3>
+        <p>{topic.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  .section-header p {
+    font-size: 1.1rem;
+    color: #888;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  .topics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+    display: block;
+    color: inherit;
+  }
+
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(245, 158, 11, 0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+
+  .topic-card.coming {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .topic-card.coming:hover {
+    transform: none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .topic-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    color: #666;
+  }
+
+  .topic-card.live .topic-status {
+    color: #22c55e;
+  }
+
+  .topic-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .topic-card p {
+    font-size: 0.95rem;
+    color: #888;
+    line-height: 1.5;
+  }
+</style>

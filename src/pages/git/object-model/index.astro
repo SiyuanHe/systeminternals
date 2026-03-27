@@ -1,0 +1,535 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Git Objects, Trees & Commits" 
+  description="Interactive visualization of Git's content-addressable object model: blobs, trees, commits, and tags"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Git", href: "/git/" }, { label: "Object Model", href: "/git/object-model/" }]}
+>
+  <section class="section-header">
+    <h1>🧬 Objects, Trees & Commits</h1>
+    <p>
+      At its core, Git is a <strong>content-addressable filesystem</strong>. Every piece of data — file contents, 
+      directory listings, commits, and tags — is stored as an object identified by its SHA-1 hash. Understanding 
+      these four object types reveals how Git really works.
+    </p>
+  </section>
+
+  <div class="panel">
+    <h2>SHA-1 Content Addressing</h2>
+    <p style="color:#888;font-size:0.9rem;margin-bottom:12px;">Type content below and watch the hash change in real-time. Git hashes: <code style="color:#60a5fa;">sha1("blob &lbrace;size&rbrace;\0&lbrace;content&rbrace;")</code></p>
+    <div class="hash-demo">
+      <textarea id="hashInput" placeholder="Type anything here..." rows="3">Hello, World!</textarea>
+      <div class="hash-result">
+        <div class="hash-label">SHA-1 Hash (blob object)</div>
+        <div class="hash-value" id="hashValue">computing...</div>
+        <div class="hash-raw" id="hashRaw"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Object Types</h2>
+    <div class="obj-type-tabs">
+      <button class="obj-tab active" data-type="blob">📄 Blob</button>
+      <button class="obj-tab" data-type="tree">📁 Tree</button>
+      <button class="obj-tab" data-type="commit">📝 Commit</button>
+      <button class="obj-tab" data-type="tag">🏷️ Tag</button>
+    </div>
+    <div class="obj-type-content" id="objTypeContent"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Build a Commit Graph</h2>
+    <div class="controls-bar">
+      <div class="btn-group">
+        <button id="btnAddCommit" class="btn btn-primary">+ Commit</button>
+        <button id="btnBranch" class="btn btn-secondary">🌿 Branch</button>
+        <button id="btnMerge" class="btn btn-accent">🔀 Merge</button>
+        <button id="btnResetGraph" class="btn btn-danger">Reset</button>
+      </div>
+      <div class="control-group">
+        <label>Current Branch</label>
+        <select id="branchSelect"><option value="main">main</option></select>
+      </div>
+      <div class="control-group">
+        <label>Commit Message</label>
+        <input type="text" id="commitMsg" placeholder="feat: add feature" value="" style="width:200px">
+      </div>
+    </div>
+    <div class="graph-canvas" id="graphCanvas"></div>
+    <div class="branch-labels" id="branchLabels"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Object Store</h2>
+    <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">Click any object to see its raw content. This is what <code style="color:#60a5fa;">.git/objects/</code> looks like.</p>
+    <div class="object-store" id="objectStore"></div>
+    <div class="object-detail" id="objectDetail">
+      <div style="color:#555;text-align:center;padding:30px;">Click an object above to inspect it</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Working Directory → Tree → Commit</h2>
+    <div class="tree-viz" id="treeViz"></div>
+  </div>
+
+  <div class="panel">
+    <h2>How It Works</h2>
+    <div class="explanation-grid">
+      <div class="exp-card">
+        <h3>📄 Blob</h3>
+        <p>Stores file content (just the bytes, no filename or metadata). The same content always produces the same hash — so identical files share a single blob. Format: <code>blob &lbrace;size&rbrace;\0&lbrace;content&rbrace;</code></p>
+      </div>
+      <div class="exp-card">
+        <h3>📁 Tree</h3>
+        <p>Represents a directory. Contains entries like: <code>100644 blob {'{'+'hash}'} filename</code>. Trees can reference other trees (subdirectories) or blobs (files). This is how Git tracks directory structure.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📝 Commit</h3>
+        <p>Points to a tree (snapshot of the project) plus metadata: author, committer, timestamp, message, and parent commit(s). Merge commits have multiple parents. The first commit has no parent.</p>
+      </div>
+      <div class="exp-card">
+        <h3>🏷️ Tag</h3>
+        <p>An annotated tag is an object pointing to a commit with a name, tagger, date, and message. Lightweight tags are just refs (pointers) — not objects. Tags provide human-friendly names for commits.</p>
+      </div>
+      <div class="exp-card">
+        <h3>🔗 Content Addressing</h3>
+        <p>Every object's name IS its SHA-1 hash. This gives Git: deduplication (same content = same hash), integrity (corruption changes the hash), and efficient comparison (same hash = same content).</p>
+      </div>
+      <div class="exp-card">
+        <h3>📂 Object Storage</h3>
+        <p>Objects live in <code>.git/objects/{'{'+'first 2 chars}'}/{'{'+'remaining 38 chars}'}</code>. They're zlib-compressed. Pack files further compress objects using delta encoding for storage efficiency.</p>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style is:inline>
+  .section-header { margin-bottom: 24px; }
+  .section-header h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .section-header p { font-size: 1.05rem; color: #999; max-width: 750px; line-height: 1.7; }
+  .section-header code { color: #60a5fa; background: rgba(96,165,250,0.1); padding: 1px 4px; border-radius: 3px; }
+
+  .panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 1.1rem; color: #fff; margin-bottom: 16px; }
+  .panel code { color: #60a5fa; background: rgba(96,165,250,0.1); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
+
+  .hash-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 700px) { .hash-demo { grid-template-columns: 1fr; } }
+  .hash-demo textarea {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: #4ade80; padding: 12px; font-family: 'SF Mono', monospace; font-size: 0.9rem; resize: vertical; width: 100%;
+  }
+  .hash-result { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 16px; }
+  .hash-label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .hash-value { font-family: 'SF Mono', monospace; font-size: 1.1rem; color: #f59e0b; word-break: break-all; margin-bottom: 8px; }
+  .hash-raw { font-size: 0.75rem; color: #555; font-family: monospace; word-break: break-all; }
+
+  .obj-type-tabs { display: flex; gap: 0; margin-bottom: 16px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); width: fit-content; }
+  .obj-tab { padding: 10px 20px; border: none; background: transparent; color: #888; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .obj-tab.active { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .obj-tab:hover:not(.active) { background: rgba(255,255,255,0.05); color: #ccc; }
+
+  .obj-type-content { min-height: 200px; }
+  .obj-raw {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+    padding: 16px; font-family: 'SF Mono', monospace; font-size: 0.8rem; line-height: 1.6;
+    overflow-x: auto; white-space: pre;
+  }
+  .obj-raw .obj-key { color: #60a5fa; }
+  .obj-raw .obj-hash { color: #f59e0b; }
+  .obj-raw .obj-val { color: #4ade80; }
+  .obj-desc { color: #888; font-size: 0.9rem; line-height: 1.6; margin-bottom: 16px; }
+
+  .controls-bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
+  .control-group label { display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
+  .control-group select, .control-group input {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; color: #fff; padding: 8px 12px; font-size: 0.9rem; font-family: inherit;
+  }
+  .btn-group { display: flex; gap: 8px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #ccc; }
+  .btn-accent { background: rgba(168,85,247,0.3); color: #c084fc; }
+  .btn-danger { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+  .graph-canvas { min-height: 200px; overflow-x: auto; padding: 20px 0; }
+  .commit-graph { display: flex; flex-direction: row; align-items: flex-start; gap: 0; position: relative; }
+  .commit-column { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 90px; position: relative; }
+  .commit-node {
+    width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.6rem; font-family: monospace; cursor: pointer; transition: all 0.3s;
+    position: relative; z-index: 2;
+  }
+  .commit-node.normal { background: rgba(59,130,246,0.2); border: 2px solid #3b82f6; color: #60a5fa; }
+  .commit-node.merge { background: rgba(168,85,247,0.2); border: 2px solid #a855f7; color: #c084fc; }
+  .commit-node.initial { background: rgba(34,197,94,0.2); border: 2px solid #22c55e; color: #4ade80; }
+  .commit-node:hover { transform: scale(1.15); z-index: 3; }
+  .commit-node.selected { box-shadow: 0 0 20px rgba(245,158,11,0.4); border-color: #f59e0b; }
+  .commit-msg { font-size: 0.65rem; color: #888; text-align: center; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .commit-branch-tag { font-size: 0.6rem; padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+  .tag-main { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .tag-branch { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .tag-head { background: rgba(239,68,68,0.2); color: #f87171; }
+
+  .branch-labels { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .branch-label { font-size: 0.8rem; padding: 4px 10px; border-radius: 6px; }
+
+  .object-store { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; max-height: 200px; overflow-y: auto; }
+  .obj-entry {
+    padding: 6px 10px; border-radius: 6px; font-family: monospace; font-size: 0.7rem;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .obj-entry:hover { transform: translateY(-2px); }
+  .obj-entry.blob { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+  .obj-entry.tree { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa; }
+  .obj-entry.commit { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #c084fc; }
+  .obj-entry.tag { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; }
+  .obj-entry.selected { border-width: 2px; box-shadow: 0 0 10px rgba(255,255,255,0.1); }
+
+  .object-detail {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+    padding: 16px; min-height: 100px; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all;
+  }
+
+  .tree-viz { min-height: 200px; }
+  .tree-level { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-start; }
+  .tree-node {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 10px 14px; min-width: 120px;
+  }
+  .tree-node-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .tree-node-type { font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+  .type-commit { background: rgba(168,85,247,0.2); color: #c084fc; }
+  .type-tree { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .type-blob { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .tree-node-hash { font-size: 0.7rem; color: #f59e0b; font-family: monospace; }
+  .tree-node-entries { font-size: 0.75rem; color: #888; }
+  .tree-arrow { color: #555; font-size: 1.2rem; align-self: center; }
+
+  .explanation-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .exp-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+  .exp-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .exp-card p { font-size: 0.85rem; color: #888; line-height: 1.6; }
+  .exp-card code { color: #60a5fa; font-size: 0.8em; }
+</style>
+
+<script is:inline>
+(function() {
+  // Simple SHA-1 (for demo - uses SubtleCrypto)
+  async function sha1(str) {
+    const data = new TextEncoder().encode(str);
+    const hash = await crypto.subtle.digest('SHA-1', data);
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Fake deterministic hash for objects without async
+  function fakeHash(content) {
+    let h = 0;
+    for (let i = 0; i < content.length; i++) {
+      h = ((h << 5) - h + content.charCodeAt(i)) | 0;
+    }
+    const hex = Math.abs(h).toString(16).padStart(8, '0');
+    return (hex + hex + hex + hex + hex).slice(0, 40);
+  }
+
+  // Hash demo
+  const hashInput = document.getElementById('hashInput');
+  const hashValue = document.getElementById('hashValue');
+  const hashRaw = document.getElementById('hashRaw');
+
+  async function updateHash() {
+    const content = hashInput.value;
+    const header = `blob ${new TextEncoder().encode(content).length}\0${content}`;
+    const hash = await sha1(header);
+    hashValue.textContent = hash;
+    hashRaw.textContent = `Header: "blob ${new TextEncoder().encode(content).length}\\0" + content (${content.length} chars)`;
+  }
+  hashInput.addEventListener('input', updateHash);
+  updateHash();
+
+  // Object type tabs
+  const OBJ_TYPES = {
+    blob: {
+      desc: 'A blob stores the raw content of a file. No filename, no permissions — just bytes. Two files with identical content share the same blob object.',
+      raw: `<span class="obj-key">blob</span> 13\\0<span class="obj-val">Hello, World!</span>
+
+<span style="color:#888">Stored as: .git/objects/94/3b5e5...</span>
+<span style="color:#888">The hash is computed over the full header + content.</span>
+<span style="color:#888">Blobs are content-only — the filename is stored in the tree.</span>`
+    },
+    tree: {
+      desc: 'A tree maps filenames to blobs and other trees. It represents one level of directory hierarchy. Each entry has a mode, type, hash, and name.',
+      raw: `<span class="obj-key">tree</span> 128\\0
+<span class="obj-val">100644</span> blob <span class="obj-hash">943b5e5...</span>  README.md
+<span class="obj-val">100644</span> blob <span class="obj-hash">a1b2c3d...</span>  main.py
+<span class="obj-val">040000</span> tree <span class="obj-hash">e4f5a6b...</span>  src/
+<span class="obj-val">100755</span> blob <span class="obj-hash">f7g8h9i...</span>  run.sh
+
+<span style="color:#888">Modes: 100644 (normal file), 100755 (executable),</span>
+<span style="color:#888">       040000 (directory/tree), 120000 (symlink)</span>`
+    },
+    commit: {
+      desc: 'A commit points to a tree (project snapshot) and includes parents, author, committer, timestamp, and message. It\'s the fundamental unit of history.',
+      raw: `<span class="obj-key">commit</span> 256\\0
+<span class="obj-key">tree</span> <span class="obj-hash">d8329fc1cc938780ffdd9f94e0d364e0ea74f579</span>
+<span class="obj-key">parent</span> <span class="obj-hash">cac0cab538b970a37ea1e769cbbde608743bc96d</span>
+<span class="obj-key">author</span> <span class="obj-val">Alice &lt;alice@example.com&gt; 1711234567 -0700</span>
+<span class="obj-key">committer</span> <span class="obj-val">Alice &lt;alice@example.com&gt; 1711234567 -0700</span>
+
+<span class="obj-val">feat: add user authentication
+
+Implements JWT-based auth with refresh tokens.
+Closes #42.</span>`
+    },
+    tag: {
+      desc: 'An annotated tag is a full object pointing to a commit with metadata. Lightweight tags are just refs (not objects). Annotated tags are recommended for releases.',
+      raw: `<span class="obj-key">tag</span> 180\\0
+<span class="obj-key">object</span> <span class="obj-hash">a1b2c3d4e5f6789012345678901234567890abcd</span>
+<span class="obj-key">type</span> <span class="obj-val">commit</span>
+<span class="obj-key">tag</span> <span class="obj-val">v1.0.0</span>
+<span class="obj-key">tagger</span> <span class="obj-val">Bob &lt;bob@example.com&gt; 1711234567 -0700</span>
+
+<span class="obj-val">Release version 1.0.0
+
+First stable release with complete API.</span>`
+    },
+  };
+
+  document.querySelectorAll('.obj-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.obj-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const type = tab.dataset.type;
+      const data = OBJ_TYPES[type];
+      document.getElementById('objTypeContent').innerHTML = `
+        <div class="obj-desc">${data.desc}</div>
+        <div class="obj-raw">${data.raw}</div>`;
+    });
+  });
+  // Show blob by default
+  document.querySelector('.obj-tab[data-type="blob"]').click();
+
+  // Commit graph
+  let commits = [];
+  let branches = { main: null };
+  let currentBranch = 'main';
+  let HEAD = null;
+  let allObjects = [];
+  let selectedObj = null;
+  let nextCommitNum = 1;
+
+  const MESSAGES = ['Initial commit', 'Add README', 'Fix typo', 'Add tests', 'Refactor core', 'Update deps', 'Fix bug #42', 'Add CI', 'Perf improvement', 'Add docs'];
+
+  function addCommit(message, parents) {
+    const hash = fakeHash(message + nextCommitNum + Date.now());
+    const treeHash = fakeHash('tree' + hash);
+    const commit = {
+      hash, type: 'commit', message: message || MESSAGES[nextCommitNum % MESSAGES.length],
+      parents: parents || (HEAD ? [HEAD.hash] : []),
+      tree: treeHash,
+      branch: currentBranch,
+      num: nextCommitNum++,
+    };
+    commits.push(commit);
+    branches[currentBranch] = commit;
+    HEAD = commit;
+
+    // Add objects
+    allObjects.push({ hash: commit.hash, type: 'commit', content: commit });
+    allObjects.push({ hash: treeHash, type: 'tree', content: { entries: ['README.md', 'src/'] } });
+    allObjects.push({ hash: fakeHash('blob' + hash), type: 'blob', content: { data: `Content at commit ${commit.num}` } });
+
+    return commit;
+  }
+
+  function renderGraph() {
+    const el = document.getElementById('graphCanvas');
+    if (commits.length === 0) {
+      el.innerHTML = '<div style="color:#555;text-align:center;padding:40px;">Click "+ Commit" to start building the graph</div>';
+      return;
+    }
+
+    // Group by branch rows
+    const branchNames = Object.keys(branches);
+    const branchRow = {};
+    branchNames.forEach((b, i) => branchRow[b] = i);
+
+    let html = '<div class="commit-graph">';
+    commits.forEach((c, i) => {
+      const isMerge = c.parents.length > 1;
+      const isInitial = c.parents.length === 0;
+      const cls = isMerge ? 'merge' : (isInitial ? 'initial' : 'normal');
+      const sel = selectedObj === c.hash ? ' selected' : '';
+      const branchTags = [];
+      Object.keys(branches).forEach(b => {
+        if (branches[b] && branches[b].hash === c.hash) {
+          const isCur = b === currentBranch;
+          branchTags.push(`<div class="commit-branch-tag ${isCur ? 'tag-head' : 'tag-branch'}">${isCur ? 'HEAD → ' : ''}${b}</div>`);
+        }
+      });
+
+      html += `<div class="commit-column">
+        ${branchTags.join('')}
+        <div class="commit-node ${cls}${sel}" onclick="window.__selectObj('${c.hash}')" title="${c.hash}">
+          ${c.hash.slice(0, 7)}
+        </div>
+        <div class="commit-msg">${c.message}</div>
+      </div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+
+    // Branch labels
+    const labelsEl = document.getElementById('branchLabels');
+    labelsEl.innerHTML = Object.keys(branches).map(b => {
+      const isCur = b === currentBranch;
+      return `<span class="branch-label" style="background:${isCur ? 'rgba(239,68,68,0.2);color:#f87171' : 'rgba(245,158,11,0.15);color:#fbbf24'}">${isCur ? '● ' : ''}${b}</span>`;
+    }).join('');
+  }
+
+  function renderObjectStore() {
+    const el = document.getElementById('objectStore');
+    el.innerHTML = allObjects.map(o => {
+      const sel = selectedObj === o.hash ? ' selected' : '';
+      return `<div class="obj-entry ${o.type}${sel}" onclick="window.__selectObj('${o.hash}')">${o.type}: ${o.hash.slice(0, 10)}...</div>`;
+    }).join('');
+  }
+
+  function renderObjectDetail() {
+    const el = document.getElementById('objectDetail');
+    if (!selectedObj) {
+      el.innerHTML = '<div style="color:#555;text-align:center;padding:30px;">Click an object to inspect it</div>';
+      return;
+    }
+    const obj = allObjects.find(o => o.hash === selectedObj);
+    if (!obj) return;
+
+    if (obj.type === 'commit') {
+      const c = obj.content;
+      el.innerHTML = `<span style="color:#60a5fa">commit ${c.hash}</span>
+
+<span style="color:#888">tree</span>    <span style="color:#f59e0b">${c.tree}</span>
+${c.parents.map(p => `<span style="color:#888">parent</span>  <span style="color:#f59e0b">${p}</span>`).join('\n')}
+<span style="color:#888">author</span>  <span style="color:#4ade80">Dev &lt;dev@example.com&gt; ${Date.now()}</span>
+
+    <span style="color:#fff">${c.message}</span>`;
+    } else if (obj.type === 'tree') {
+      el.innerHTML = `<span style="color:#60a5fa">tree ${obj.hash}</span>
+
+<span style="color:#4ade80">100644</span> blob <span style="color:#f59e0b">${fakeHash('readme')}</span>  README.md
+<span style="color:#4ade80">040000</span> tree <span style="color:#f59e0b">${fakeHash('src')}</span>  src/`;
+    } else {
+      el.innerHTML = `<span style="color:#60a5fa">blob ${obj.hash}</span>
+
+<span style="color:#4ade80">${obj.content.data}</span>`;
+    }
+  }
+
+  function renderTreeViz() {
+    const el = document.getElementById('treeViz');
+    if (commits.length === 0) {
+      el.innerHTML = '<div style="color:#555;text-align:center;padding:30px;">Make a commit to see the object graph</div>';
+      return;
+    }
+    const latest = commits[commits.length - 1];
+    el.innerHTML = `
+      <div class="tree-level">
+        <div class="tree-node">
+          <div class="tree-node-header"><span class="tree-node-type type-commit">COMMIT</span></div>
+          <div class="tree-node-hash">${latest.hash.slice(0, 12)}...</div>
+          <div class="tree-node-entries">${latest.message}</div>
+        </div>
+        <div class="tree-arrow">→</div>
+        <div class="tree-node">
+          <div class="tree-node-header"><span class="tree-node-type type-tree">TREE</span></div>
+          <div class="tree-node-hash">${latest.tree.slice(0, 12)}...</div>
+          <div class="tree-node-entries">root directory</div>
+        </div>
+        <div class="tree-arrow">→</div>
+        <div class="tree-node">
+          <div class="tree-node-header"><span class="tree-node-type type-blob">BLOB</span></div>
+          <div class="tree-node-hash">${fakeHash('blob' + latest.hash).slice(0, 12)}...</div>
+          <div class="tree-node-entries">README.md</div>
+        </div>
+      </div>
+      <div class="tree-level" style="margin-left:180px;">
+        <div class="tree-arrow" style="transform:rotate(90deg);margin-top:-10px;">→</div>
+      </div>
+      <div class="tree-level" style="margin-left:160px;">
+        <div class="tree-node">
+          <div class="tree-node-header"><span class="tree-node-type type-tree">TREE</span></div>
+          <div class="tree-node-hash">${fakeHash('src').slice(0, 12)}...</div>
+          <div class="tree-node-entries">src/</div>
+        </div>
+        <div class="tree-arrow">→</div>
+        <div class="tree-node">
+          <div class="tree-node-header"><span class="tree-node-type type-blob">BLOB</span></div>
+          <div class="tree-node-hash">${fakeHash('main.py').slice(0, 12)}...</div>
+          <div class="tree-node-entries">main.py</div>
+        </div>
+      </div>`;
+  }
+
+  window.__selectObj = function(hash) {
+    selectedObj = hash;
+    renderGraph();
+    renderObjectStore();
+    renderObjectDetail();
+  };
+
+  function renderAll() {
+    renderGraph();
+    renderObjectStore();
+    renderObjectDetail();
+    renderTreeViz();
+    // Update branch select
+    const sel = document.getElementById('branchSelect');
+    const curVal = sel.value;
+    sel.innerHTML = Object.keys(branches).map(b => `<option value="${b}" ${b === currentBranch ? 'selected' : ''}>${b}</option>`).join('');
+  }
+
+  document.getElementById('btnAddCommit').addEventListener('click', () => {
+    const msg = document.getElementById('commitMsg').value || undefined;
+    addCommit(msg);
+    document.getElementById('commitMsg').value = '';
+    renderAll();
+  });
+
+  document.getElementById('btnBranch').addEventListener('click', () => {
+    const name = prompt('Branch name:', `feature-${Object.keys(branches).length}`);
+    if (!name) return;
+    branches[name] = HEAD;
+    currentBranch = name;
+    renderAll();
+  });
+
+  document.getElementById('btnMerge').addEventListener('click', () => {
+    const otherBranches = Object.keys(branches).filter(b => b !== currentBranch && branches[b]);
+    if (otherBranches.length === 0) { alert('No other branches to merge'); return; }
+    const other = otherBranches.length === 1 ? otherBranches[0] : prompt(`Merge which branch?\n${otherBranches.join(', ')}`, otherBranches[0]);
+    if (!other || !branches[other]) return;
+    const mergeParents = [HEAD.hash, branches[other].hash];
+    addCommit(`Merge ${other} into ${currentBranch}`, mergeParents);
+    renderAll();
+  });
+
+  document.getElementById('btnResetGraph').addEventListener('click', () => {
+    commits = []; branches = { main: null }; currentBranch = 'main'; HEAD = null; allObjects = []; selectedObj = null; nextCommitNum = 1;
+    renderAll();
+  });
+
+  document.getElementById('branchSelect').addEventListener('change', (e) => {
+    currentBranch = e.target.value;
+    HEAD = branches[currentBranch];
+    renderAll();
+  });
+
+  renderAll();
+})();
+</script>

@@ -1,0 +1,549 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="SQLite B-tree & Page Structure" 
+  description="Interactive visualization of SQLite's page-based storage, B-tree structure, page splits, and overflow pages"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "SQLite", href: "/sqlite/" }, { label: "B-tree & Pages", href: "/sqlite/btree-pages/" }]}
+>
+  <section class="section-header">
+    <h1>🌳 B-tree & Page Structure</h1>
+    <p>
+      SQLite stores all data in a single file divided into fixed-size <strong>pages</strong>. Each table is a B-tree 
+      where internal pages hold keys and child pointers, and leaf pages hold the actual row data. Understanding this 
+      structure is key to understanding SQLite's performance characteristics.
+    </p>
+  </section>
+
+  <div class="controls-bar">
+    <div class="control-group">
+      <label>Page Size</label>
+      <select id="pageSizeSelect">
+        <option value="1024">1,024 bytes</option>
+        <option value="4096" selected>4,096 bytes</option>
+        <option value="8192">8,192 bytes</option>
+        <option value="16384">16,384 bytes</option>
+        <option value="32768">32,768 bytes</option>
+        <option value="65536">65,536 bytes</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Action</label>
+      <div class="btn-group">
+        <button id="btnInsert" class="btn btn-primary">Insert Row</button>
+        <button id="btnInsert10" class="btn btn-secondary">Insert 10</button>
+        <button id="btnReset" class="btn btn-danger">Reset</button>
+      </div>
+    </div>
+    <div class="control-group">
+      <label>Insert Key</label>
+      <input type="number" id="insertKey" value="" placeholder="auto" style="width:80px">
+    </div>
+    <div class="control-group">
+      <label>Record Size</label>
+      <select id="recordSize">
+        <option value="small">Small (~50B)</option>
+        <option value="medium" selected>Medium (~200B)</option>
+        <option value="large">Large (~2KB)</option>
+        <option value="overflow">Overflow (~8KB)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="viz-container">
+    <div class="panel btree-panel">
+      <h2>B-tree Structure</h2>
+      <div class="btree-info" id="btreeInfo">Pages: 1 | Depth: 1 | Records: 0</div>
+      <div class="btree-canvas" id="btreeCanvas"></div>
+    </div>
+    <div class="panel page-panel">
+      <h2>Page Inspector</h2>
+      <div class="page-inspector" id="pageInspector">
+        <div class="inspector-placeholder">Click a page in the B-tree to inspect its layout</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel explanation-panel">
+    <h2>How It Works</h2>
+    <div class="explanation-grid">
+      <div class="exp-card">
+        <h3>📄 Pages</h3>
+        <p>Every SQLite database is divided into equal-sized pages (default 4096 bytes). Page 1 is special — it contains the 100-byte database header. Each page has an 8-12 byte page header, a cell pointer array, unallocated space, and cell content growing from the end.</p>
+      </div>
+      <div class="exp-card">
+        <h3>🌲 B-tree Nodes</h3>
+        <p><strong>Internal pages</strong> store keys and child page pointers. They guide searches. <strong>Leaf pages</strong> store the actual row data (payload). Table B-trees use rowid as the key; index B-trees store index column values.</p>
+      </div>
+      <div class="exp-card">
+        <h3>✂️ Page Splits</h3>
+        <p>When a leaf page is full and a new record must be inserted, SQLite splits it: allocates a new page, moves roughly half the cells to it, and adds a new key/pointer to the parent. If the parent overflows, it splits too — propagating up.</p>
+      </div>
+      <div class="exp-card">
+        <h3>📦 Overflow Pages</h3>
+        <p>If a record is too large to fit in a single page, SQLite stores the beginning on the B-tree page and the rest on a linked list of overflow pages. Each overflow page holds up to (page_size - 4) bytes of payload.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="logPanel">
+    <h2>Operation Log</h2>
+    <div class="log-entries" id="logEntries"></div>
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 24px; }
+  .section-header h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .section-header p { font-size: 1.05rem; color: #999; max-width: 750px; line-height: 1.7; }
+
+  .controls-bar {
+    display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;
+  }
+  .control-group label { display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
+  .control-group select, .control-group input {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; color: #fff; padding: 8px 12px; font-size: 0.9rem; font-family: inherit;
+  }
+  .btn-group { display: flex; gap: 8px; }
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 8px; font-size: 0.85rem;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;
+  }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; transform: translateY(-1px); }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #ccc; }
+  .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+  .btn-danger { background: rgba(239,68,68,0.2); color: #ef4444; }
+  .btn-danger:hover { background: rgba(239,68,68,0.3); }
+
+  .viz-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .viz-container { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 20px; margin-bottom: 20px;
+  }
+  .panel h2 { font-size: 1.1rem; color: #fff; margin-bottom: 16px; }
+
+  .btree-info { font-size: 0.85rem; color: #888; margin-bottom: 12px; font-family: 'SF Mono', 'Fira Code', monospace; }
+
+  .btree-canvas { min-height: 300px; overflow-x: auto; position: relative; }
+
+  .btree-level { display: flex; justify-content: center; gap: 12px; margin-bottom: 24px; position: relative; }
+
+  .btree-page {
+    background: rgba(59,130,246,0.15); border: 2px solid rgba(59,130,246,0.4);
+    border-radius: 10px; padding: 8px 10px; min-width: 80px; cursor: pointer;
+    transition: all 0.3s; text-align: center; position: relative;
+  }
+  .btree-page:hover { border-color: #3b82f6; background: rgba(59,130,246,0.25); transform: translateY(-2px); }
+  .btree-page.selected { border-color: #f59e0b; background: rgba(245,158,11,0.15); box-shadow: 0 0 20px rgba(245,158,11,0.2); }
+  .btree-page.leaf { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.1); }
+  .btree-page.leaf:hover { border-color: #22c55e; background: rgba(34,197,94,0.2); }
+  .btree-page.overflow-page { border-color: rgba(168,85,247,0.4); background: rgba(168,85,247,0.1); }
+  .btree-page.splitting { animation: splitPulse 0.6s ease-out; }
+  @keyframes splitPulse { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.6); } 100% { box-shadow: 0 0 30px 10px rgba(245,158,11,0); } }
+  .btree-page.new-page { animation: fadeSlideIn 0.4s ease-out; }
+  @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .page-label { font-size: 0.7rem; color: #888; margin-bottom: 4px; }
+  .page-keys { font-size: 0.8rem; color: #fff; font-family: 'SF Mono', monospace; word-break: break-all; }
+  .page-type { font-size: 0.65rem; color: #666; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .page-fill-bar { height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .page-fill-bar-inner { height: 100%; border-radius: 2px; transition: width 0.3s; }
+
+  .page-inspector { min-height: 280px; }
+  .inspector-placeholder { color: #555; text-align: center; padding: 60px 20px; font-size: 0.95rem; }
+
+  .inspector-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .inspector-title { font-size: 1rem; font-weight: 600; color: #fff; }
+  .inspector-badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+  .badge-internal { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .badge-leaf { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .badge-overflow { background: rgba(168,85,247,0.2); color: #c084fc; }
+
+  .hex-grid {
+    display: grid; grid-template-columns: repeat(16, 1fr); gap: 1px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.65rem;
+    margin-bottom: 16px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 8px; overflow-x: auto;
+  }
+  .hex-cell { padding: 2px 3px; text-align: center; border-radius: 2px; transition: background 0.15s; }
+  .hex-header { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .hex-cell-ptr { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .hex-free { background: rgba(255,255,255,0.02); color: #444; }
+  .hex-cell-content { background: rgba(34,197,94,0.15); color: #4ade80; }
+  .hex-overflow { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+  .page-layout-bar {
+    height: 32px; border-radius: 6px; overflow: hidden; display: flex; margin-bottom: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .layout-segment { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 600; transition: width 0.3s; overflow: hidden; white-space: nowrap; }
+  .seg-header { background: rgba(245,158,11,0.3); color: #fbbf24; }
+  .seg-ptrs { background: rgba(59,130,246,0.3); color: #60a5fa; }
+  .seg-free { background: rgba(255,255,255,0.05); color: #555; }
+  .seg-cells { background: rgba(34,197,94,0.2); color: #4ade80; }
+
+  .cell-list { max-height: 200px; overflow-y: auto; }
+  .cell-item { display: flex; justify-content: space-between; padding: 4px 8px; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .cell-key { color: #60a5fa; font-family: monospace; }
+  .cell-size { color: #888; font-family: monospace; }
+
+  .explanation-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .exp-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+  .exp-card h3 { font-size: 0.95rem; color: #fff; margin-bottom: 8px; }
+  .exp-card p { font-size: 0.85rem; color: #888; line-height: 1.6; }
+
+  .log-entries { max-height: 200px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.8rem; }
+  .log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: #888; }
+  .log-entry .log-action { color: #22c55e; }
+  .log-entry .log-split { color: #f59e0b; }
+  .log-entry .log-overflow { color: #a855f7; }
+
+  .edge-line {
+    position: absolute; background: rgba(255,255,255,0.15); height: 2px;
+    transform-origin: left center; pointer-events: none;
+  }
+
+  .btree-edges { position: relative; height: 30px; margin-bottom: 4px; }
+  .btree-edges svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
+  .btree-edges line { stroke: rgba(255,255,255,0.2); stroke-width: 1.5; }
+</style>
+
+<script is:inline>
+(function() {
+  const MAX_KEYS_PER_PAGE = { 1024: 8, 4096: 30, 8192: 60, 16384: 120, 32768: 250, 65536: 500 };
+  const RECORD_SIZES = { small: 50, medium: 200, large: 2000, overflow: 8000 };
+
+  let pageSize = 4096;
+  let nextPageId = 1;
+  let nextAutoKey = 1;
+  let tree = null;
+  let selectedPageId = null;
+  let overflowPages = [];
+  let logs = [];
+
+  function maxKeys() {
+    const rs = RECORD_SIZES[document.getElementById('recordSize').value];
+    const usable = pageSize - 12;
+    let mk = Math.floor(usable / (rs + 6));
+    if (mk < 3) mk = 3;
+    return Math.min(mk, MAX_KEYS_PER_PAGE[pageSize] || 30);
+  }
+
+  function needsOverflow() {
+    const rs = RECORD_SIZES[document.getElementById('recordSize').value];
+    return rs > (pageSize - 35);
+  }
+
+  function createLeaf() {
+    return { id: nextPageId++, type: 'leaf', keys: [], children: null, parent: null, overflow: [] };
+  }
+
+  function createInternal(keys, children) {
+    const node = { id: nextPageId++, type: 'internal', keys: keys, children: children, parent: null, overflow: [] };
+    children.forEach(c => c.parent = node);
+    return node;
+  }
+
+  function addLog(msg, cls) {
+    logs.unshift({ msg, cls });
+    if (logs.length > 50) logs.pop();
+    renderLog();
+  }
+
+  function renderLog() {
+    const el = document.getElementById('logEntries');
+    el.innerHTML = logs.map(l => `<div class="log-entry"><span class="${l.cls || ''}">${l.msg}</span></div>`).join('');
+  }
+
+  function findLeaf(node, key) {
+    if (node.type === 'leaf') return node;
+    for (let i = 0; i < node.keys.length; i++) {
+      if (key < node.keys[i]) return findLeaf(node.children[i], key);
+    }
+    return findLeaf(node.children[node.children.length - 1], key);
+  }
+
+  function insertKey(key) {
+    if (!tree) { tree = createLeaf(); addLog('Created root page 1 (leaf)', 'log-action'); }
+    const leaf = findLeaf(tree, key);
+    const idx = leaf.keys.findIndex(k => k >= key);
+    if (idx >= 0 && leaf.keys[idx] === key) { addLog(`Key ${key} already exists, skipped`, ''); return; }
+    if (idx < 0) leaf.keys.push(key); else leaf.keys.splice(idx, 0, key);
+
+    if (needsOverflow()) {
+      const ov = { id: nextPageId++, type: 'overflow', parentKey: key };
+      overflowPages.push(ov);
+      leaf.overflow.push(ov.id);
+      addLog(`Key ${key} inserted → overflow page ${ov.id}`, 'log-overflow');
+    } else {
+      addLog(`Inserted key ${key} into page ${leaf.id}`, 'log-action');
+    }
+
+    if (leaf.keys.length > maxKeys()) splitLeaf(leaf);
+  }
+
+  function splitLeaf(leaf) {
+    const mid = Math.ceil(leaf.keys.length / 2);
+    const rightKeys = leaf.keys.splice(mid);
+    const newLeaf = createLeaf();
+    newLeaf.keys = rightKeys;
+    addLog(`Split page ${leaf.id} → new page ${newLeaf.id} (keys ${rightKeys[0]}..${rightKeys[rightKeys.length-1]})`, 'log-split');
+
+    const promoteKey = rightKeys[0];
+    if (!leaf.parent) {
+      tree = createInternal([promoteKey], [leaf, newLeaf]);
+      addLog(`New root page ${tree.id} with key ${promoteKey}`, 'log-split');
+    } else {
+      insertIntoInternal(leaf.parent, promoteKey, newLeaf);
+    }
+  }
+
+  function insertIntoInternal(node, key, rightChild) {
+    const idx = node.keys.findIndex(k => k > key);
+    if (idx < 0) {
+      node.keys.push(key);
+      node.children.push(rightChild);
+    } else {
+      node.keys.splice(idx, 0, key);
+      node.children.splice(idx + 1, 0, rightChild);
+    }
+    rightChild.parent = node;
+
+    if (node.keys.length > maxKeys()) {
+      const mid = Math.floor(node.keys.length / 2);
+      const promoteKey = node.keys[mid];
+      const rightKeys = node.keys.splice(mid + 1);
+      node.keys.splice(mid, 1);
+      const rightChildren = node.children.splice(mid + 1);
+      const newInternal = createInternal(rightKeys, rightChildren);
+      addLog(`Split internal page ${node.id} → page ${newInternal.id}, promoted key ${promoteKey}`, 'log-split');
+
+      if (!node.parent) {
+        tree = createInternal([promoteKey], [node, newInternal]);
+        addLog(`New root page ${tree.id}`, 'log-split');
+      } else {
+        insertIntoInternal(node.parent, promoteKey, newInternal);
+      }
+    }
+  }
+
+  function collectLevels(node) {
+    const levels = [];
+    let current = [node];
+    while (current.length) {
+      levels.push(current);
+      const next = [];
+      current.forEach(n => { if (n.children) next.push(...n.children); });
+      current = next;
+    }
+    return levels;
+  }
+
+  function countAll(node) {
+    if (!node) return { pages: 0, records: 0 };
+    if (node.type === 'leaf') return { pages: 1, records: node.keys.length };
+    let p = 1, r = 0;
+    node.children.forEach(c => { const s = countAll(c); p += s.pages; r += s.records; });
+    return { pages: p, records: r };
+  }
+
+  function fillPercent(node) {
+    return Math.min(100, Math.round((node.keys.length / maxKeys()) * 100));
+  }
+
+  function fillColor(pct) {
+    if (pct > 85) return '#ef4444';
+    if (pct > 60) return '#f59e0b';
+    return '#22c55e';
+  }
+
+  function render() {
+    if (!tree) {
+      document.getElementById('btreeCanvas').innerHTML = '<div style="text-align:center;color:#555;padding:60px 20px;">Click "Insert Row" to start building the B-tree</div>';
+      document.getElementById('btreeInfo').textContent = 'Pages: 0 | Depth: 0 | Records: 0';
+      return;
+    }
+
+    const levels = collectLevels(tree);
+    const stats = countAll(tree);
+    const totalPages = stats.pages + overflowPages.length;
+    document.getElementById('btreeInfo').textContent = `Pages: ${totalPages} | Depth: ${levels.length} | Records: ${stats.records} | Max keys/page: ${maxKeys()} | Page size: ${pageSize}B`;
+
+    let html = '';
+    levels.forEach((level, li) => {
+      html += `<div class="btree-level" data-level="${li}">`;
+      level.forEach(node => {
+        const fp = fillPercent(node);
+        const sel = node.id === selectedPageId ? ' selected' : '';
+        const typeClass = node.type === 'leaf' ? ' leaf' : '';
+        const keysStr = node.keys.length > 6 ? node.keys.slice(0, 3).join(',') + '...' + node.keys.slice(-2).join(',') : node.keys.join(', ');
+        html += `<div class="btree-page${typeClass}${sel}" data-page-id="${node.id}" onclick="window.__selectPage(${node.id})">
+          <div class="page-label">Page ${node.id}</div>
+          <div class="page-keys">${keysStr || '(empty)'}</div>
+          <div class="page-type">${node.type} · ${node.keys.length} keys</div>
+          <div class="page-fill-bar"><div class="page-fill-bar-inner" style="width:${fp}%;background:${fillColor(fp)}"></div></div>
+        </div>`;
+      });
+      html += '</div>';
+    });
+
+    if (overflowPages.length > 0) {
+      html += '<div class="btree-level">';
+      overflowPages.forEach(ov => {
+        const sel = ov.id === selectedPageId ? ' selected' : '';
+        html += `<div class="btree-page overflow-page${sel}" data-page-id="${ov.id}" onclick="window.__selectPage(${ov.id})">
+          <div class="page-label">Page ${ov.id}</div>
+          <div class="page-keys">overflow</div>
+          <div class="page-type">overflow · key ${ov.parentKey}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+
+    document.getElementById('btreeCanvas').innerHTML = html;
+  }
+
+  function findNode(node, id) {
+    if (!node) return null;
+    if (node.id === id) return node;
+    if (node.children) {
+      for (const c of node.children) {
+        const r = findNode(c, id);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
+  function renderInspector(pageId) {
+    selectedPageId = pageId;
+    const el = document.getElementById('pageInspector');
+
+    const ov = overflowPages.find(o => o.id === pageId);
+    if (ov) {
+      el.innerHTML = `
+        <div class="inspector-header">
+          <span class="inspector-title">Page ${ov.id}</span>
+          <span class="inspector-badge badge-overflow">OVERFLOW</span>
+        </div>
+        <p style="color:#888;font-size:0.85rem;margin-bottom:12px;">This overflow page holds the continuation of a large record (key ${ov.parentKey}) that didn't fit in a single B-tree page.</p>
+        <div class="page-layout-bar">
+          <div class="layout-segment" style="width:1%;background:rgba(168,85,247,0.3);color:#c084fc;">HDR</div>
+          <div class="layout-segment" style="width:99%;background:rgba(168,85,247,0.15);color:#c084fc;">Overflow Payload (${pageSize - 4} bytes)</div>
+        </div>
+        ${renderHexGrid(pageId, 'overflow')}`;
+      render();
+      return;
+    }
+
+    const node = findNode(tree, pageId);
+    if (!node) return;
+
+    const isLeaf = node.type === 'leaf';
+    const badgeClass = isLeaf ? 'badge-leaf' : 'badge-internal';
+    const badgeText = isLeaf ? 'LEAF' : 'INTERNAL';
+    const fp = fillPercent(node);
+    const hdrSize = isLeaf ? 8 : 12;
+    const ptrSize = node.keys.length * 2;
+    const cellSize = Math.round((fp / 100) * (pageSize - hdrSize - ptrSize));
+    const freeSize = pageSize - hdrSize - ptrSize - cellSize;
+    const hdrPct = Math.max(2, Math.round(hdrSize / pageSize * 100));
+    const ptrPct = Math.max(2, Math.round(ptrSize / pageSize * 100));
+    const cellPct = Math.round(cellSize / pageSize * 100);
+    const freePct = 100 - hdrPct - ptrPct - cellPct;
+
+    let cellListHtml = '<div class="cell-list">';
+    const rs = RECORD_SIZES[document.getElementById('recordSize').value];
+    node.keys.forEach((k, i) => {
+      const hasOv = node.overflow && node.overflow.length > 0 && needsOverflow();
+      cellListHtml += `<div class="cell-item"><span class="cell-key">Key: ${k}</span><span class="cell-size">${rs}B${hasOv ? ' + overflow' : ''}</span></div>`;
+    });
+    cellListHtml += '</div>';
+
+    el.innerHTML = `
+      <div class="inspector-header">
+        <span class="inspector-title">Page ${node.id}</span>
+        <span class="inspector-badge ${badgeClass}">${badgeText}</span>
+      </div>
+      <div style="color:#888;font-size:0.85rem;margin-bottom:12px;">
+        ${node.keys.length} cells | ${fp}% full | ${freeSize} bytes free
+        ${!isLeaf ? ` | ${node.children.length} child pointers` : ''}
+      </div>
+      <div class="page-layout-bar">
+        <div class="layout-segment seg-header" style="width:${hdrPct}%">Header</div>
+        <div class="layout-segment seg-ptrs" style="width:${ptrPct}%">Ptrs</div>
+        <div class="layout-segment seg-free" style="width:${freePct}%">Free</div>
+        <div class="layout-segment seg-cells" style="width:${cellPct}%">Cells</div>
+      </div>
+      ${renderHexGrid(pageId, node.type)}
+      <h3 style="font-size:0.9rem;color:#fff;margin:12px 0 8px;">Cell Contents</h3>
+      ${cellListHtml}`;
+    render();
+  }
+
+  function renderHexGrid(pageId, type) {
+    const rows = 8;
+    const cols = 16;
+    let html = '<div class="hex-grid">';
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const offset = r * cols + c;
+        let cls = 'hex-free';
+        if (type === 'overflow') {
+          cls = offset < 4 ? 'hex-header' : 'hex-overflow';
+        } else if (offset < (type === 'leaf' ? 8 : 12)) {
+          cls = 'hex-header';
+        } else if (offset < (type === 'leaf' ? 8 : 12) + 16) {
+          cls = 'hex-cell-ptr';
+        } else if (offset > cols * rows - 40) {
+          cls = 'hex-cell-content';
+        }
+        const val = ((pageId * 37 + offset * 13) & 0xFF).toString(16).padStart(2, '0');
+        html += `<div class="hex-cell ${cls}">${val}</div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  window.__selectPage = function(id) { renderInspector(id); };
+
+  document.getElementById('btnInsert').addEventListener('click', () => {
+    const inp = document.getElementById('insertKey');
+    const key = inp.value ? parseInt(inp.value) : nextAutoKey++;
+    if (inp.value) inp.value = '';
+    else nextAutoKey = key + 1;
+    insertKey(key);
+    render();
+  });
+
+  document.getElementById('btnInsert10').addEventListener('click', () => {
+    for (let i = 0; i < 10; i++) {
+      insertKey(nextAutoKey++);
+    }
+    render();
+  });
+
+  document.getElementById('btnReset').addEventListener('click', () => {
+    tree = null; nextPageId = 1; nextAutoKey = 1; overflowPages = []; logs = []; selectedPageId = null;
+    document.getElementById('pageInspector').innerHTML = '<div class="inspector-placeholder">Click a page in the B-tree to inspect its layout</div>';
+    document.getElementById('logEntries').innerHTML = '';
+    render();
+  });
+
+  document.getElementById('pageSizeSelect').addEventListener('change', (e) => {
+    pageSize = parseInt(e.target.value);
+    addLog(`Page size changed to ${pageSize} bytes`, '');
+    // Check if any existing pages now need splitting
+    render();
+  });
+
+  render();
+})();
+</script>
