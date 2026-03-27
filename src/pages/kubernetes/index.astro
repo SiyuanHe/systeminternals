@@ -3,12 +3,12 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 
 const topics = [
   { title: "Pod Scheduling", description: "Filtering, scoring, binding — how the scheduler places pods on nodes", href: "/kubernetes/scheduling/", status: "live" },
-  { title: "Networking & Services", description: "kube-proxy, iptables, IPVS, and ClusterIP/NodePort/LoadBalancer", href: "#", status: "coming" },
+  { title: "Networking & Services", description: "kube-proxy, iptables, IPVS, and ClusterIP/NodePort/LoadBalancer", href: "/kubernetes/networking/", status: "live" },
   { title: "etcd & Control Plane", description: "How the API server, scheduler, and controllers coordinate via etcd", href: "#", status: "coming" },
   { title: "Container Runtime", description: "From Pod spec to running containers: CRI, containerd, and cgroups", href: "#", status: "coming" },
-  { title: "RBAC & Admission Control", description: "Authentication, authorization, and mutating/validating webhooks", href: "#", status: "coming" },
+  { title: "RBAC & Admission Control", description: "Authentication, authorization, and mutating/validating webhooks", href: "/kubernetes/rbac/", status: "live" },
   { title: "Persistent Volumes", description: "CSI drivers, dynamic provisioning, and storage classes", href: "#", status: "coming" },
-  { title: "HPA & VPA", description: "Horizontal and vertical pod autoscaling: metrics, algorithms, and pitfalls", href: "#", status: "coming" },
+  { title: "HPA & VPA Autoscaling", description: "Horizontal and vertical pod autoscaling: metrics, algorithms, and pitfalls", href: "/kubernetes/autoscaling/", status: "live" },
   { title: "Resource Management", description: "Requests, limits, QoS classes, and OOM killing", href: "#", status: "coming" },
 ];
 ---

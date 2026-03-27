@@ -1,0 +1,708 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a URL Shortener — Interactive Visualization"
+  description="Understand URL shortener design: Base62 encoding, hash collisions, read/write paths, capacity planning. Interactive step-by-step demo."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "URL Shortener", href: "/system-design/url-shortener/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔗 Design a URL Shortener</h1>
+      <p class="subtitle">Base62 encoding, collision handling, and capacity planning — interactive exploration</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A URL shortener maps long URLs to short keys (e.g., <code>https://short.url/a1B2c3</code>).
+          The core challenges: <strong>generating unique short keys</strong>, <strong>handling collisions</strong>,
+          <strong>optimizing read-heavy traffic</strong>, and <strong>planning for scale</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Interactive Demo: Shorten a URL -->
+    <section class="controls-section">
+      <h2>🧪 Interactive Demo: Shorten a URL</h2>
+      <div class="demo-input-row">
+        <input type="text" id="urlInput" placeholder="Enter a long URL (e.g., https://example.com/very/long/path?query=123)" value="https://example.com/articles/system-design-interview-guide?ref=nav&utm_source=google">
+        <button id="shortenBtn" class="action-btn primary-btn">🔗 Shorten</button>
+      </div>
+      <div id="stepVisualization" class="step-viz hidden">
+        <div class="step" id="step1">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h4>Hash the URL</h4>
+            <div class="step-detail" id="step1Detail"></div>
+          </div>
+        </div>
+        <div class="step" id="step2">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h4>Take first 43 bits</h4>
+            <div class="step-detail" id="step2Detail"></div>
+          </div>
+        </div>
+        <div class="step" id="step3">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h4>Convert to Base62</h4>
+            <div class="step-detail" id="step3Detail"></div>
+          </div>
+        </div>
+        <div class="step" id="step4">
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <h4>Check for collision</h4>
+            <div class="step-detail" id="step4Detail"></div>
+          </div>
+        </div>
+        <div class="step" id="step5">
+          <div class="step-number">5</div>
+          <div class="step-content">
+            <h4>Store mapping</h4>
+            <div class="step-detail" id="step5Detail"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Base62 Encoding -->
+    <section class="controls-section">
+      <h2>🔢 Base62 Encoding Visualization</h2>
+      <p class="section-desc">Base62 uses <code>0-9, a-z, A-Z</code> (62 characters). A 7-character key can represent 62⁷ ≈ 3.5 trillion unique URLs.</p>
+      <div class="base62-demo">
+        <div class="base62-input-row">
+          <label>Decimal ID:</label>
+          <input type="number" id="decimalInput" value="123456789" min="0" max="999999999999">
+          <button id="encodeBtn" class="action-btn primary-btn-secondary">Encode →</button>
+        </div>
+        <div class="base62-result" id="base62Result">
+          <div class="conversion-steps" id="conversionSteps"></div>
+        </div>
+        <div class="charset-display">
+          <div class="charset-row">
+            <span class="charset-label">0-9:</span>
+            <span class="charset-chars" id="charsetDigits"></span>
+          </div>
+          <div class="charset-row">
+            <span class="charset-label">a-z:</span>
+            <span class="charset-chars" id="charsetLower"></span>
+          </div>
+          <div class="charset-row">
+            <span class="charset-label">A-Z:</span>
+            <span class="charset-chars" id="charsetUpper"></span>
+          </div>
+        </div>
+        <div class="key-length-table">
+          <h4>Key Length vs Capacity</h4>
+          <table>
+            <thead><tr><th>Length</th><th>Unique Keys</th><th>Enough for</th></tr></thead>
+            <tbody>
+              <tr><td>6</td><td>56.8 billion</td><td>~5 years at 300 URLs/sec</td></tr>
+              <tr><td>7</td><td>3.52 trillion</td><td>~350 years at 300 URLs/sec</td></tr>
+              <tr><td>8</td><td>218 trillion</td><td>~22,000 years</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Read vs Write Path -->
+    <section class="controls-section">
+      <h2>📖 Read vs Write Path</h2>
+      <p class="section-desc">URL shorteners are extremely read-heavy. A typical ratio is 100:1 reads to writes.</p>
+      <div class="paths-container">
+        <div class="path-panel">
+          <h3>✍️ Write Path (Create Short URL)</h3>
+          <div class="path-diagram" id="writePath">
+            <div class="path-node client">Client</div>
+            <div class="path-arrow">→</div>
+            <div class="path-node lb">Load Balancer</div>
+            <div class="path-arrow">→</div>
+            <div class="path-node app">App Server</div>
+            <div class="path-arrow">→</div>
+            <div class="path-node db">DB (Write)</div>
+          </div>
+          <div class="path-steps">
+            <ol>
+              <li>Client sends POST with long URL</li>
+              <li>Generate short key (hash or counter)</li>
+              <li>Check for collision in DB</li>
+              <li>Store mapping, return short URL</li>
+            </ol>
+          </div>
+        </div>
+        <div class="path-panel">
+          <h3>📖 Read Path (Redirect)</h3>
+          <div class="path-diagram" id="readPath">
+            <div class="path-node client">Client</div>
+            <div class="path-arrow">→</div>
+            <div class="path-node lb">Load Balancer</div>
+            <div class="path-arrow">→</div>
+            <div class="path-node cache highlight">Cache</div>
+            <div class="path-arrow cache-hit">⚡ hit</div>
+            <div class="path-node redirect">301/302</div>
+          </div>
+          <div class="path-steps">
+            <ol>
+              <li>Client GETs <code>/a1B2c3</code></li>
+              <li>Check cache (Redis/Memcached) first</li>
+              <li>Cache miss → query DB → populate cache</li>
+              <li>Return 301 (permanent) or 302 (temporary) redirect</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="path-toggle">
+        <button id="simWriteBtn" class="action-btn primary-btn-secondary">▶️ Simulate Write</button>
+        <button id="simReadBtn" class="action-btn primary-btn">▶️ Simulate Read</button>
+        <span class="path-status" id="pathStatus"></span>
+      </div>
+    </section>
+
+    <!-- Collision Handling -->
+    <section class="controls-section">
+      <h2>💥 Hash Collision Handling</h2>
+      <p class="section-desc">When two URLs produce the same short key, we need a strategy.</p>
+      <div class="collision-demo">
+        <div class="collision-strategies">
+          <div class="strategy-card active" data-strategy="append">
+            <h4>Append & Rehash</h4>
+            <p>Append a counter to the URL and hash again until no collision</p>
+            <div class="strategy-viz" id="appendViz">
+              <div class="collision-step">hash("url") → <code>a1B2c3</code> ❌ taken</div>
+              <div class="collision-step">hash("url" + "1") → <code>x7Y8z9</code> ✅ free</div>
+            </div>
+          </div>
+          <div class="strategy-card" data-strategy="counter">
+            <h4>Pre-generated IDs</h4>
+            <p>Use a distributed counter (Twitter Snowflake / UUID) — no collisions by design</p>
+            <div class="strategy-viz" id="counterViz">
+              <div class="collision-step">Counter service → <code>847293</code></div>
+              <div class="collision-step">Base62(847293) → <code>3k9P</code> ✅ guaranteed unique</div>
+            </div>
+          </div>
+          <div class="strategy-card" data-strategy="bloom">
+            <h4>Bloom Filter Check</h4>
+            <p>Use a bloom filter for fast "definitely not taken" checks before DB lookup</p>
+            <div class="strategy-viz" id="bloomViz">
+              <div class="collision-step">Bloom filter: "a1B2c3" → probably taken → check DB</div>
+              <div class="collision-step">Bloom filter: "x7Y8z9" → definitely not taken ✅</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Capacity Planning Calculator -->
+    <section class="controls-section">
+      <h2>📐 Capacity Planning Calculator</h2>
+      <div class="calc-grid">
+        <div class="calc-input-group">
+          <div class="calc-row">
+            <label>New URLs per day:</label>
+            <input type="number" id="urlsPerDay" value="100000000" min="1000">
+          </div>
+          <div class="calc-row">
+            <label>Read:Write ratio:</label>
+            <input type="number" id="readWriteRatio" value="100" min="1" max="1000">
+          </div>
+          <div class="calc-row">
+            <label>Avg URL length (bytes):</label>
+            <input type="number" id="avgUrlLen" value="200" min="50" max="2000">
+          </div>
+          <div class="calc-row">
+            <label>Retention (years):</label>
+            <input type="number" id="retention" value="5" min="1" max="20">
+          </div>
+          <button id="calcBtn" class="action-btn primary-btn">📊 Calculate</button>
+        </div>
+        <div class="calc-results" id="calcResults">
+          <div class="calc-result-card">
+            <div class="calc-label">Write QPS</div>
+            <div class="calc-value" id="writeQps">—</div>
+          </div>
+          <div class="calc-result-card">
+            <div class="calc-label">Read QPS</div>
+            <div class="calc-value" id="readQps">—</div>
+          </div>
+          <div class="calc-result-card">
+            <div class="calc-label">Total URLs (over retention)</div>
+            <div class="calc-value" id="totalUrls">—</div>
+          </div>
+          <div class="calc-result-card">
+            <div class="calc-label">Storage Needed</div>
+            <div class="calc-value" id="storageNeeded">—</div>
+          </div>
+          <div class="calc-result-card">
+            <div class="calc-label">DB Shards (1TB each)</div>
+            <div class="calc-value" id="dbShards">—</div>
+          </div>
+          <div class="calc-result-card">
+            <div class="calc-label">Cache Size (20% hot)</div>
+            <div class="calc-value" id="cacheSize">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Diagram -->
+    <section class="controls-section">
+      <h2>🏗️ System Architecture</h2>
+      <div class="arch-diagram">
+        <div class="arch-layer">
+          <div class="arch-label">Clients</div>
+          <div class="arch-nodes">
+            <div class="arch-node">Browser</div>
+            <div class="arch-node">Mobile</div>
+            <div class="arch-node">API</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Edge</div>
+          <div class="arch-nodes">
+            <div class="arch-node highlight">CDN / Load Balancer</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Application</div>
+          <div class="arch-nodes">
+            <div class="arch-node">URL Service ×N</div>
+            <div class="arch-node">Analytics Service</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Cache</div>
+          <div class="arch-nodes">
+            <div class="arch-node highlight">Redis Cluster</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Storage</div>
+          <div class="arch-nodes">
+            <div class="arch-node">DB Shard 1</div>
+            <div class="arch-node">DB Shard 2</div>
+            <div class="arch-node">DB Shard N</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Decisions -->
+    <section class="controls-section">
+      <h2>🎯 Key Design Decisions</h2>
+      <div class="decisions-grid">
+        <div class="decision-card">
+          <h4>301 vs 302 Redirect?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>301 Permanent:</strong> Browser caches → reduces server load. But you lose analytics on repeat visits.</div>
+            <div class="option con"><strong>302 Temporary:</strong> Every click hits your server → accurate analytics. More load but full visibility.</div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>Hash vs Counter for Key Generation?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>Hash (MD5/SHA256):</strong> No coordination needed. But requires collision handling. Same URL always gets same key (dedup-friendly).</div>
+            <div class="option con"><strong>Counter (Snowflake):</strong> Guaranteed unique, no collisions. But needs distributed counter service. Different key per request for same URL.</div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>SQL vs NoSQL?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>NoSQL (DynamoDB):</strong> Simple key-value lookup, easy horizontal scaling, high throughput.</div>
+            <div class="option con"><strong>SQL (MySQL):</strong> ACID compliance, easier to reason about. Needs sharding at scale.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1000px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 32px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+
+  .overview-section { margin-bottom: 32px; }
+  .overview-card {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 12px;
+    padding: 20px 24px;
+    color: #ccc;
+    line-height: 1.7;
+  }
+  .overview-card code {
+    background: rgba(255,255,255,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  .controls-section {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .controls-section h2 { font-size: 1.4rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 16px; line-height: 1.6; }
+  .section-desc code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+
+  /* Demo input */
+  .demo-input-row {
+    display: flex; gap: 12px; margin-bottom: 20px;
+  }
+  .demo-input-row input {
+    flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 0.95rem;
+  }
+
+  /* Steps */
+  .step-viz { display: flex; flex-direction: column; gap: 12px; }
+  .step-viz.hidden { display: none; }
+  .step {
+    display: flex; gap: 16px; align-items: flex-start;
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 16px;
+    opacity: 0.3; transition: all 0.5s;
+  }
+  .step.active { opacity: 1; border-left: 3px solid #60a5fa; }
+  .step.done { opacity: 0.7; border-left: 3px solid #22c55e; }
+  .step-number {
+    width: 32px; height: 32px; border-radius: 50%; background: rgba(96,165,250,0.2);
+    display: flex; align-items: center; justify-content: center; color: #60a5fa;
+    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+  }
+  .step.done .step-number { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .step-content h4 { color: #fff; margin-bottom: 4px; font-size: 0.95rem; }
+  .step-detail { color: #aaa; font-size: 0.85rem; font-family: 'SF Mono', monospace; word-break: break-all; }
+
+  /* Buttons */
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+    font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
+  }
+  .primary-btn { background: #3b82f6; color: #fff; }
+  .primary-btn:hover { background: #2563eb; }
+  .primary-btn-secondary { background: rgba(96,165,250,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+  .primary-btn-secondary:hover { background: rgba(96,165,250,0.25); }
+
+  /* Base62 */
+  .base62-demo { margin-top: 12px; }
+  .base62-input-row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .base62-input-row label { color: #aaa; font-weight: 600; }
+  .base62-input-row input {
+    width: 180px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 1rem;
+  }
+  .base62-result { margin-bottom: 20px; }
+  .conversion-steps {
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 16px;
+    font-family: 'SF Mono', monospace; font-size: 0.85rem; color: #aaa;
+    min-height: 60px;
+  }
+  .conversion-steps .step-line { margin-bottom: 6px; }
+  .conversion-steps .result-line { color: #22c55e; font-weight: 700; font-size: 1.1rem; margin-top: 8px; }
+
+  .charset-display { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .charset-row { display: flex; align-items: center; gap: 8px; }
+  .charset-label { color: #888; font-weight: 600; width: 36px; }
+  .charset-chars { display: flex; flex-wrap: wrap; gap: 3px; }
+  .charset-char {
+    width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.05); border-radius: 4px; font-family: 'SF Mono', monospace;
+    font-size: 0.75rem; color: #aaa; transition: all 0.2s;
+  }
+  .charset-char.highlight { background: rgba(96,165,250,0.3); color: #60a5fa; }
+
+  .key-length-table { margin-top: 16px; }
+  .key-length-table h4 { color: #ccc; margin-bottom: 8px; }
+  .key-length-table table { width: 100%; border-collapse: collapse; }
+  .key-length-table th { text-align: left; color: #888; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 0.85rem; }
+  .key-length-table td { padding: 8px; color: #ccc; font-size: 0.9rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+  /* Read/Write paths */
+  .paths-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
+  @media (max-width: 700px) { .paths-container { grid-template-columns: 1fr; } }
+  .path-panel {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .path-panel h3 { color: #fff; font-size: 1.05rem; margin-bottom: 12px; }
+  .path-diagram {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 16px; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;
+  }
+  .path-node {
+    padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+    background: rgba(255,255,255,0.08); color: #ccc;
+    transition: all 0.3s;
+  }
+  .path-node.highlight { background: rgba(96,165,250,0.2); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+  .path-node.active-node { background: rgba(34,197,94,0.2); color: #22c55e; transform: scale(1.05); }
+  .path-arrow { color: #555; font-size: 1.2rem; }
+  .path-arrow.cache-hit { color: #22c55e; }
+  .path-steps ol { padding-left: 20px; color: #aaa; font-size: 0.85rem; line-height: 1.8; }
+  .path-steps code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+  .path-toggle { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .path-status { color: #888; font-size: 0.9rem; }
+
+  /* Collision strategies */
+  .collision-strategies { display: flex; flex-direction: column; gap: 16px; }
+  .strategy-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 20px; cursor: pointer; transition: all 0.3s;
+  }
+  .strategy-card.active { border-color: rgba(96,165,250,0.4); background: rgba(96,165,250,0.05); }
+  .strategy-card h4 { color: #fff; margin-bottom: 6px; }
+  .strategy-card > p { color: #888; font-size: 0.9rem; margin-bottom: 10px; }
+  .strategy-viz { font-family: 'SF Mono', monospace; font-size: 0.8rem; }
+  .collision-step { color: #aaa; padding: 4px 0; }
+  .collision-step code { background: rgba(96,165,250,0.15); color: #60a5fa; padding: 2px 6px; border-radius: 4px; }
+
+  /* Calculator */
+  .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 700px) { .calc-grid { grid-template-columns: 1fr; } }
+  .calc-input-group { display: flex; flex-direction: column; gap: 12px; }
+  .calc-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .calc-row label { color: #aaa; font-size: 0.9rem; white-space: nowrap; }
+  .calc-row input {
+    width: 150px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 0.95rem; text-align: right;
+  }
+  .calc-results { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .calc-result-card {
+    background: rgba(255,255,255,0.04); border-radius: 10px; padding: 16px; text-align: center;
+  }
+  .calc-label { color: #888; font-size: 0.8rem; margin-bottom: 6px; }
+  .calc-value { color: #60a5fa; font-size: 1.3rem; font-weight: 700; font-family: 'SF Mono', monospace; }
+
+  /* Architecture */
+  .arch-diagram { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px; }
+  .arch-layer { text-align: center; width: 100%; }
+  .arch-label { color: #666; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .arch-nodes { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .arch-node {
+    padding: 10px 20px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #ccc; font-size: 0.85rem; font-weight: 500;
+  }
+  .arch-node.highlight { background: rgba(96,165,250,0.15); border-color: rgba(96,165,250,0.3); color: #60a5fa; }
+  .arch-arrow { color: #444; font-size: 1.5rem; }
+
+  /* Decisions */
+  .decisions-grid { display: flex; flex-direction: column; gap: 16px; }
+  .decision-card {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .decision-card h4 { color: #fff; margin-bottom: 12px; }
+  .decision-options { display: flex; flex-direction: column; gap: 8px; }
+  .option { padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; line-height: 1.5; color: #ccc; }
+  .option.pro { background: rgba(34,197,94,0.08); border-left: 3px solid rgba(34,197,94,0.4); }
+  .option.con { background: rgba(96,165,250,0.08); border-left: 3px solid rgba(96,165,250,0.4); }
+</style>
+
+<script>
+  // Base62 charset
+  const CHARSET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  function toBase62(num) {
+    if (num === 0) return '0';
+    const steps = [];
+    let result = '';
+    let n = num;
+    while (n > 0) {
+      const rem = n % 62;
+      steps.push({ n, rem, char: CHARSET[rem] });
+      result = CHARSET[rem] + result;
+      n = Math.floor(n / 62);
+    }
+    return { result, steps };
+  }
+
+  // Simple hash (FNV-1a-like for demo)
+  function simpleHash(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  function formatNumber(n) {
+    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toString();
+  }
+
+  function formatBytes(bytes) {
+    if (bytes >= 1e15) return (bytes / 1e15).toFixed(1) + ' PB';
+    if (bytes >= 1e12) return (bytes / 1e12).toFixed(1) + ' TB';
+    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+    if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+    return (bytes / 1e3).toFixed(1) + ' KB';
+  }
+
+  // Populate charset display
+  function initCharset() {
+    ['charsetDigits', 'charsetLower', 'charsetUpper'].forEach((id, groupIdx) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const ranges = [
+        CHARSET.slice(0, 10),
+        CHARSET.slice(10, 36),
+        CHARSET.slice(36, 62)
+      ];
+      el.innerHTML = ranges[groupIdx].split('').map(c =>
+        `<span class="charset-char" data-char="${c}">${c}</span>`
+      ).join('');
+    });
+  }
+
+  function highlightChars(chars) {
+    document.querySelectorAll('.charset-char').forEach(el => {
+      el.classList.toggle('highlight', chars.includes(el.dataset.char));
+    });
+  }
+
+  // Base62 encode button
+  document.getElementById('encodeBtn')?.addEventListener('click', () => {
+    const val = parseInt(document.getElementById('decimalInput').value) || 0;
+    const { result, steps } = toBase62(val);
+    const stepsEl = document.getElementById('conversionSteps');
+    if (!stepsEl) return;
+
+    let html = '';
+    steps.reverse().forEach((s, i) => {
+      html += `<div class="step-line">${s.n} ÷ 62 = ${Math.floor(s.n / 62)} remainder <strong style="color:#60a5fa">${s.rem}</strong> → '${s.char}'</div>`;
+    });
+    html += `<div class="result-line">Base62: ${result}</div>`;
+    stepsEl.innerHTML = html;
+    highlightChars(result.split(''));
+  });
+
+  // Shorten URL demo
+  const storedUrls = new Map();
+
+  document.getElementById('shortenBtn')?.addEventListener('click', async () => {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) return;
+
+    const viz = document.getElementById('stepVisualization');
+    viz.classList.remove('hidden');
+    const steps = viz.querySelectorAll('.step');
+    steps.forEach(s => { s.classList.remove('active', 'done'); });
+
+    const hash = simpleHash(url);
+    const hashHex = hash.toString(16).padStart(8, '0');
+    const bits43 = hash & 0x7FFFFFFFFFF;
+    const { result: shortKey } = toBase62(bits43);
+
+    // Step 1
+    await animateStep(0, `SHA-256("${url.slice(0, 40)}...") → <code>0x${hashHex}...</code>`);
+    // Step 2
+    await animateStep(1, `0x${hashHex} → take 43 bits → <code>${bits43}</code>`);
+    // Step 3
+    await animateStep(2, `Base62(${bits43}) → <code style="color:#22c55e;font-size:1.1em">${shortKey}</code>`);
+    // Step 4
+    const collision = storedUrls.has(shortKey) && storedUrls.get(shortKey) !== url;
+    if (collision) {
+      await animateStep(3, `❌ Collision! <code>${shortKey}</code> already maps to different URL. Rehashing...`);
+    } else {
+      await animateStep(3, `✅ No collision. <code>${shortKey}</code> is available.`);
+    }
+    // Step 5
+    storedUrls.set(shortKey, url);
+    await animateStep(4, `Stored: <code>short.url/${shortKey}</code> → ${url.slice(0, 50)}...`);
+
+    highlightChars(shortKey.split(''));
+  });
+
+  async function animateStep(index, html) {
+    const viz = document.getElementById('stepVisualization');
+    const steps = viz.querySelectorAll('.step');
+    // Mark previous as done
+    for (let i = 0; i < index; i++) {
+      steps[i].classList.remove('active');
+      steps[i].classList.add('done');
+    }
+    steps[index].classList.add('active');
+    steps[index].querySelector('.step-detail').innerHTML = html;
+    await new Promise(r => setTimeout(r, 600));
+  }
+
+  // Path simulation
+  document.getElementById('simWriteBtn')?.addEventListener('click', () => {
+    animatePath('writePath', ['client', 'lb', 'app', 'db']);
+    document.getElementById('pathStatus').textContent = 'Writing: Client → LB → App → DB...';
+  });
+  document.getElementById('simReadBtn')?.addEventListener('click', () => {
+    animatePath('readPath', ['client', 'lb', 'cache highlight', 'redirect']);
+    document.getElementById('pathStatus').textContent = 'Reading: Client → LB → Cache ⚡ → 301 Redirect';
+  });
+
+  async function animatePath(containerId, nodeClasses) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const nodes = container.querySelectorAll('.path-node');
+    nodes.forEach(n => n.classList.remove('active-node'));
+    for (const node of nodes) {
+      node.classList.add('active-node');
+      await new Promise(r => setTimeout(r, 500));
+      node.classList.remove('active-node');
+    }
+  }
+
+  // Capacity calculator
+  document.getElementById('calcBtn')?.addEventListener('click', () => {
+    const urlsPerDay = parseInt(document.getElementById('urlsPerDay').value) || 100000000;
+    const ratio = parseInt(document.getElementById('readWriteRatio').value) || 100;
+    const avgLen = parseInt(document.getElementById('avgUrlLen').value) || 200;
+    const years = parseInt(document.getElementById('retention').value) || 5;
+
+    const writeQps = Math.round(urlsPerDay / 86400);
+    const readQps = writeQps * ratio;
+    const totalUrls = urlsPerDay * 365 * years;
+    // Each record: shortKey(7) + longUrl(avgLen) + metadata(50) bytes
+    const bytesPerRecord = 7 + avgLen + 50;
+    const storage = totalUrls * bytesPerRecord;
+    const shards = Math.ceil(storage / 1e12);
+    const cacheBytes = totalUrls * 0.2 * bytesPerRecord;
+
+    document.getElementById('writeQps').textContent = formatNumber(writeQps);
+    document.getElementById('readQps').textContent = formatNumber(readQps);
+    document.getElementById('totalUrls').textContent = formatNumber(totalUrls);
+    document.getElementById('storageNeeded').textContent = formatBytes(storage);
+    document.getElementById('dbShards').textContent = shards.toString();
+    document.getElementById('cacheSize').textContent = formatBytes(cacheBytes);
+  });
+
+  // Collision strategy toggle
+  document.querySelectorAll('.strategy-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.strategy-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+    });
+  });
+
+  // Init
+  initCharset();
+  document.getElementById('encodeBtn')?.click();
+  document.getElementById('calcBtn')?.click();
+</script>

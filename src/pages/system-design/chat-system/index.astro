@@ -1,0 +1,876 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a Chat System — Interactive Visualization"
+  description="Understand chat system design: WebSocket lifecycle, fan-out strategies, online presence, message ordering & delivery guarantees. Interactive multi-user simulation."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Chat System", href: "/system-design/chat-system/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>💬 Design a Chat System</h1>
+      <p class="subtitle">WebSocket lifecycle, fan-out strategies, presence, and delivery guarantees — interactive exploration</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A chat system lets users exchange messages in real time. The core challenges:
+          <strong>maintaining persistent connections</strong> (WebSocket),
+          <strong>efficiently distributing messages</strong> (fan-out),
+          <strong>tracking who's online</strong> (presence), and
+          <strong>guaranteeing message ordering & delivery</strong> even when things fail.
+        </p>
+      </div>
+    </section>
+
+    <!-- WebSocket Connection Lifecycle -->
+    <section class="controls-section">
+      <h2>🔌 WebSocket Connection Lifecycle</h2>
+      <p class="section-desc">HTTP is request-response. Chat needs bidirectional, persistent connections. WebSocket upgrades an HTTP connection to full-duplex.</p>
+      <div class="ws-lifecycle">
+        <div class="ws-timeline" id="wsTimeline">
+          <div class="ws-phase" data-phase="handshake">
+            <div class="ws-phase-header">
+              <span class="ws-phase-num">1</span>
+              <span class="ws-phase-title">HTTP Upgrade Handshake</span>
+            </div>
+            <div class="ws-phase-detail">
+              <div class="ws-msg client-msg">
+                <span class="ws-label">Client →</span>
+                <code>GET /chat HTTP/1.1<br>Upgrade: websocket<br>Connection: Upgrade<br>Sec-WebSocket-Key: dGhlIHNhbX...</code>
+              </div>
+              <div class="ws-msg server-msg">
+                <span class="ws-label">← Server</span>
+                <code>HTTP/1.1 101 Switching Protocols<br>Upgrade: websocket<br>Sec-WebSocket-Accept: s3pPLM...</code>
+              </div>
+            </div>
+          </div>
+          <div class="ws-phase" data-phase="open">
+            <div class="ws-phase-header">
+              <span class="ws-phase-num">2</span>
+              <span class="ws-phase-title">Connection Open — Bidirectional</span>
+            </div>
+            <div class="ws-phase-detail">
+              <div class="ws-msg client-msg"><span class="ws-label">Client →</span> <code set:html={'{"type":"msg","to":"bob","text":"Hello!"}'} /></div>
+              <div class="ws-msg server-msg"><span class="ws-label">← Server</span> <code set:html={'{"type":"ack","msgId":"m-1234","ts":1711500000}'} /></div>
+              <div class="ws-msg server-msg"><span class="ws-label">← Server</span> <code set:html={'{"type":"msg","from":"bob","text":"Hey!"}'} /></div>
+            </div>
+          </div>
+          <div class="ws-phase" data-phase="heartbeat">
+            <div class="ws-phase-header">
+              <span class="ws-phase-num">3</span>
+              <span class="ws-phase-title">Keep-Alive (Ping/Pong)</span>
+            </div>
+            <div class="ws-phase-detail">
+              <div class="ws-msg server-msg"><span class="ws-label">← Server</span> <code>PING frame</code></div>
+              <div class="ws-msg client-msg"><span class="ws-label">Client →</span> <code>PONG frame</code></div>
+              <p class="ws-note">Detects dead connections. Typically every 30–60s. No PONG? Close and clean up.</p>
+            </div>
+          </div>
+          <div class="ws-phase" data-phase="close">
+            <div class="ws-phase-header">
+              <span class="ws-phase-num">4</span>
+              <span class="ws-phase-title">Connection Close</span>
+            </div>
+            <div class="ws-phase-detail">
+              <div class="ws-msg client-msg"><span class="ws-label">Client →</span> <code>CLOSE frame (code: 1000, reason: "bye")</code></div>
+              <div class="ws-msg server-msg"><span class="ws-label">← Server</span> <code>CLOSE frame (ack)</code></div>
+              <p class="ws-note">Graceful shutdown. Server removes user from connection registry, updates presence.</p>
+            </div>
+          </div>
+        </div>
+        <button id="wsPlayBtn" class="action-btn primary-btn">▶️ Animate Lifecycle</button>
+      </div>
+    </section>
+
+    <!-- Fan-out: Write vs Read -->
+    <section class="controls-section">
+      <h2>📡 Fan-Out on Write vs Fan-Out on Read</h2>
+      <p class="section-desc">When a user sends a message to a group, how do recipients get it? Two fundamental strategies.</p>
+      <div class="fanout-container">
+        <div class="fanout-panel">
+          <h3>✍️ Fan-Out on Write (Push)</h3>
+          <p class="fanout-desc">When a message arrives, <strong>immediately write it to every recipient's inbox</strong>.</p>
+          <div class="fanout-diagram" id="fanoutWriteDiagram">
+            <div class="fo-sender">
+              <div class="fo-node sender">Alice</div>
+              <div class="fo-label">sends msg</div>
+            </div>
+            <div class="fo-arrow">→</div>
+            <div class="fo-node server">Chat Server</div>
+            <div class="fo-fanout-arrows">
+              <div class="fo-branch">→ <span class="fo-node inbox">Bob's Inbox</span></div>
+              <div class="fo-branch">→ <span class="fo-node inbox">Carol's Inbox</span></div>
+              <div class="fo-branch">→ <span class="fo-node inbox">Dave's Inbox</span></div>
+            </div>
+          </div>
+          <div class="fo-pros-cons">
+            <div class="option pro">✅ Read is fast — just fetch your inbox</div>
+            <div class="option pro">✅ Great for small groups</div>
+            <div class="option con">❌ Celebrity problem: 1M followers = 1M writes</div>
+            <div class="option con">❌ Wasted writes for inactive users</div>
+          </div>
+        </div>
+        <div class="fanout-panel">
+          <h3>📖 Fan-Out on Read (Pull)</h3>
+          <p class="fanout-desc">Store the message once. <strong>Recipients fetch from source when they open the chat</strong>.</p>
+          <div class="fanout-diagram" id="fanoutReadDiagram">
+            <div class="fo-sender">
+              <div class="fo-node sender">Alice</div>
+              <div class="fo-label">sends msg</div>
+            </div>
+            <div class="fo-arrow">→</div>
+            <div class="fo-node server">Message Store</div>
+            <div class="fo-fanout-arrows">
+              <div class="fo-branch">← <span class="fo-node inbox">Bob reads</span></div>
+              <div class="fo-branch">← <span class="fo-node inbox">Carol reads</span></div>
+              <div class="fo-branch"><span class="fo-node inbox dim">Dave (offline)</span></div>
+            </div>
+          </div>
+          <div class="fo-pros-cons">
+            <div class="option pro">✅ Write is fast — store once</div>
+            <div class="option pro">✅ Scales for large groups/celebrities</div>
+            <div class="option con">❌ Reads are slower (query + merge)</div>
+            <div class="option con">❌ Harder to sort across conversations</div>
+          </div>
+        </div>
+      </div>
+      <div class="fanout-hybrid">
+        <h4>🔀 Hybrid Approach (WhatsApp/Discord style)</h4>
+        <p>Use <strong>fan-out on write for small groups</strong> (≤200 members) and <strong>fan-out on read for large channels</strong>. Best of both worlds.</p>
+      </div>
+    </section>
+
+    <!-- Online Presence & Heartbeat -->
+    <section class="controls-section">
+      <h2>🟢 Online Presence & Heartbeat</h2>
+      <p class="section-desc">How does the system know who's online? A presence service tracks connection state via heartbeats.</p>
+      <div class="presence-demo">
+        <div class="presence-users" id="presenceUsers">
+          <div class="presence-user" data-user="alice">
+            <div class="presence-dot online"></div>
+            <span class="presence-name">Alice</span>
+            <span class="presence-status">Online</span>
+            <div class="heartbeat-bar"><div class="heartbeat-fill" style="width:100%"></div></div>
+          </div>
+          <div class="presence-user" data-user="bob">
+            <div class="presence-dot online"></div>
+            <span class="presence-name">Bob</span>
+            <span class="presence-status">Online</span>
+            <div class="heartbeat-bar"><div class="heartbeat-fill" style="width:80%"></div></div>
+          </div>
+          <div class="presence-user" data-user="carol">
+            <div class="presence-dot idle"></div>
+            <span class="presence-name">Carol</span>
+            <span class="presence-status">Idle</span>
+            <div class="heartbeat-bar"><div class="heartbeat-fill" style="width:40%"></div></div>
+          </div>
+          <div class="presence-user" data-user="dave">
+            <div class="presence-dot offline"></div>
+            <span class="presence-name">Dave</span>
+            <span class="presence-status">Offline</span>
+            <div class="heartbeat-bar"><div class="heartbeat-fill" style="width:0%"></div></div>
+          </div>
+        </div>
+        <div class="presence-flow">
+          <h4>How It Works</h4>
+          <ol>
+            <li>Client sends heartbeat every <strong>5 seconds</strong> via WebSocket</li>
+            <li>Server updates <code>last_active</code> timestamp in Redis: <code>SETEX presence:alice 30 "online"</code></li>
+            <li>No heartbeat for 30s → status changes to <strong>Idle</strong></li>
+            <li>No heartbeat for 60s → status changes to <strong>Offline</strong></li>
+            <li>Friends subscribe to presence changes via pub/sub channel</li>
+          </ol>
+          <div class="presence-note">
+            <strong>Optimization:</strong> Don't broadcast presence changes to all friends immediately.
+            Batch updates and only push to users who have the friend list <em>visible</em>.
+          </div>
+        </div>
+      </div>
+      <button id="presencePlayBtn" class="action-btn primary-btn-secondary">▶️ Simulate Heartbeats</button>
+    </section>
+
+    <!-- Message Ordering & Delivery -->
+    <section class="controls-section">
+      <h2>📦 Message Ordering & Delivery Guarantees</h2>
+      <p class="section-desc">In a distributed system, messages can arrive out of order. How do we ensure correctness?</p>
+      <div class="ordering-grid">
+        <div class="ordering-card">
+          <h4>⏱️ Ordering Strategy</h4>
+          <div class="ordering-detail">
+            <div class="ordering-item">
+              <strong>Per-conversation sequence IDs</strong>
+              <p>Each conversation has a monotonically increasing counter. Message <code>seq=5</code> always comes after <code>seq=4</code>.</p>
+            </div>
+            <div class="ordering-item">
+              <strong>Why not timestamps?</strong>
+              <p>Clock skew between servers can cause <code>msg_A(t=100)</code> to appear before <code>msg_B(t=99)</code> even though B was sent first.</p>
+            </div>
+            <div class="ordering-item">
+              <strong>Snowflake-style IDs</strong>
+              <p>Combine timestamp + machine ID + sequence counter. Globally unique, roughly time-ordered, no coordination needed.</p>
+            </div>
+          </div>
+        </div>
+        <div class="ordering-card">
+          <h4>✅ Delivery Guarantees</h4>
+          <div class="ordering-detail">
+            <div class="ordering-item">
+              <strong>At-least-once delivery</strong>
+              <p>Server retries until client ACKs. Client deduplicates by <code>msgId</code>.</p>
+            </div>
+            <div class="ordering-item">
+              <strong>Read receipts flow</strong>
+              <p><code>Sent ✓</code> → server persisted. <code>Delivered ✓✓</code> → recipient's device received. <code>Read 👁️</code> → recipient opened chat.</p>
+            </div>
+            <div class="ordering-item">
+              <strong>Offline delivery</strong>
+              <p>Messages queued in persistent store. On reconnect, client sends <code>last_seq</code> → server replays missed messages.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ordering-viz" id="orderingViz">
+        <h4>Message Flow Timeline</h4>
+        <div class="timeline-container">
+          <div class="timeline-col">
+            <div class="timeline-header">Alice</div>
+            <div class="timeline-line" id="aliceTimeline"></div>
+          </div>
+          <div class="timeline-col">
+            <div class="timeline-header">Server</div>
+            <div class="timeline-line" id="serverTimeline"></div>
+          </div>
+          <div class="timeline-col">
+            <div class="timeline-header">Bob</div>
+            <div class="timeline-line" id="bobTimeline"></div>
+          </div>
+        </div>
+        <button id="orderingPlayBtn" class="action-btn primary-btn-secondary">▶️ Animate Message Flow</button>
+      </div>
+    </section>
+
+    <!-- Interactive Simulation -->
+    <section class="controls-section">
+      <h2>🧪 Interactive Chat Simulation</h2>
+      <p class="section-desc">Watch messages flow through the system: Sender → Chat Server → Message Queue → Recipients.</p>
+      <div class="sim-controls">
+        <div class="sim-control-row">
+          <label>Users: <strong id="userCountLabel">4</strong></label>
+          <input type="range" id="userCount" min="2" max="8" value="4">
+        </div>
+        <div class="sim-control-row">
+          <label>Message rate: <strong id="msgRateLabel">1/s</strong></label>
+          <input type="range" id="msgRate" min="1" max="5" value="1">
+        </div>
+        <div class="sim-control-row">
+          <label>Fan-out:</label>
+          <select id="fanoutMode">
+            <option value="write">Fan-out on Write</option>
+            <option value="read">Fan-out on Read</option>
+          </select>
+        </div>
+        <div class="sim-buttons">
+          <button id="simStartBtn" class="action-btn primary-btn">▶️ Start</button>
+          <button id="simStopBtn" class="action-btn primary-btn-secondary" disabled>⏹ Stop</button>
+          <button id="simClearBtn" class="action-btn primary-btn-secondary">🗑️ Clear</button>
+        </div>
+      </div>
+      <div class="sim-arena" id="simArena">
+        <div class="sim-layer sim-users-layer" id="simUsersLeft">
+          <div class="sim-layer-label">Senders</div>
+        </div>
+        <div class="sim-layer sim-server-layer">
+          <div class="sim-layer-label">Chat Server</div>
+          <div class="sim-server-box" id="simServer">
+            <div class="sim-server-icon">⚡</div>
+            <div class="sim-server-stats">
+              <span>Msgs: <strong id="simMsgCount">0</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="sim-layer sim-queue-layer">
+          <div class="sim-layer-label">Message Queue</div>
+          <div class="sim-queue-box" id="simQueue">
+            <div class="sim-queue-items" id="simQueueItems"></div>
+          </div>
+        </div>
+        <div class="sim-layer sim-users-layer" id="simUsersRight">
+          <div class="sim-layer-label">Recipients</div>
+        </div>
+      </div>
+      <div class="sim-log-container">
+        <h4>📜 Event Log</h4>
+        <div class="sim-log" id="simLog"></div>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="controls-section">
+      <h2>🏗️ System Architecture</h2>
+      <div class="arch-diagram">
+        <div class="arch-layer">
+          <div class="arch-label">Clients</div>
+          <div class="arch-nodes">
+            <div class="arch-node">Mobile App</div>
+            <div class="arch-node">Web Client</div>
+            <div class="arch-node">Desktop</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↕ WebSocket</div>
+        <div class="arch-layer">
+          <div class="arch-label">Gateway</div>
+          <div class="arch-nodes">
+            <div class="arch-node highlight">WS Gateway ×N</div>
+            <div class="arch-node">API Gateway (REST)</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Services</div>
+          <div class="arch-nodes">
+            <div class="arch-node">Chat Service</div>
+            <div class="arch-node highlight">Presence Service</div>
+            <div class="arch-node">Push Notification</div>
+            <div class="arch-node">Group Service</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Message Bus</div>
+          <div class="arch-nodes">
+            <div class="arch-node highlight">Kafka / Message Queue</div>
+          </div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-label">Storage</div>
+          <div class="arch-nodes">
+            <div class="arch-node">Message DB (Cassandra)</div>
+            <div class="arch-node">User DB (MySQL)</div>
+            <div class="arch-node highlight">Redis (Presence + Cache)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Decisions -->
+    <section class="controls-section">
+      <h2>🎯 Key Design Decisions</h2>
+      <div class="decisions-grid">
+        <div class="decision-card">
+          <h4>WebSocket vs Long Polling vs SSE?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>WebSocket:</strong> Full-duplex, lowest latency. Best for chat. Requires sticky sessions or connection registry.</div>
+            <div class="option con"><strong>Long Polling:</strong> Simpler to implement. Higher latency, more overhead. OK as fallback.</div>
+            <div class="option con"><strong>SSE:</strong> Server→client only. Would need separate channel for sending. Not ideal for chat.</div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>Message Storage: SQL vs NoSQL?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>NoSQL (Cassandra/HBase):</strong> Write-optimized, easy horizontal scaling, wide-column model perfect for time-series messages.</div>
+            <div class="option con"><strong>SQL (MySQL/Postgres):</strong> Familiar, strong consistency. Needs sharding at scale. Works for smaller systems.</div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>1:1 Chat vs Group Chat?</h4>
+          <div class="decision-options">
+            <div class="option pro"><strong>1:1:</strong> Simple routing. Sender → server → recipient. Messages keyed by conversation pair.</div>
+            <div class="option con"><strong>Group:</strong> Needs member list lookup, fan-out strategy, more complex ordering. Separate "channel" abstraction.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1000px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 32px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 1.1rem; }
+
+  .overview-section { margin-bottom: 32px; }
+  .overview-card {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 12px;
+    padding: 20px 24px;
+    color: #ccc;
+    line-height: 1.7;
+  }
+  .overview-card code {
+    background: rgba(255,255,255,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  .controls-section {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .controls-section h2 { font-size: 1.4rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 16px; line-height: 1.6; }
+  .section-desc code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+    font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
+  }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: #3b82f6; color: #fff; }
+  .primary-btn:hover:not(:disabled) { background: #2563eb; }
+  .primary-btn-secondary { background: rgba(96,165,250,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+  .primary-btn-secondary:hover:not(:disabled) { background: rgba(96,165,250,0.25); }
+
+  /* WebSocket Lifecycle */
+  .ws-lifecycle { margin-top: 12px; }
+  .ws-timeline { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+  .ws-phase {
+    background: rgba(255,255,255,0.03); border-radius: 10px; padding: 16px;
+    border-left: 3px solid rgba(255,255,255,0.1); opacity: 0.4; transition: all 0.5s;
+  }
+  .ws-phase.active { opacity: 1; border-left-color: #3b82f6; }
+  .ws-phase.done { opacity: 0.7; border-left-color: #22c55e; }
+  .ws-phase-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .ws-phase-num {
+    width: 28px; height: 28px; border-radius: 50%; background: rgba(96,165,250,0.2);
+    display: flex; align-items: center; justify-content: center; color: #60a5fa;
+    font-weight: 700; font-size: 0.85rem; flex-shrink: 0;
+  }
+  .ws-phase.done .ws-phase-num { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .ws-phase-title { color: #fff; font-weight: 600; font-size: 0.95rem; }
+  .ws-phase-detail { padding-left: 40px; }
+  .ws-msg { margin-bottom: 8px; }
+  .ws-msg code { display: block; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px 12px; font-size: 0.8rem; color: #aaa; line-height: 1.5; }
+  .ws-label { font-weight: 600; font-size: 0.8rem; margin-bottom: 4px; display: block; }
+  .client-msg .ws-label { color: #60a5fa; }
+  .server-msg .ws-label { color: #22c55e; }
+  .ws-note { color: #666; font-size: 0.8rem; font-style: italic; margin-top: 6px; }
+
+  /* Fan-out */
+  .fanout-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
+  @media (max-width: 700px) { .fanout-container { grid-template-columns: 1fr; } }
+  .fanout-panel {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .fanout-panel h3 { color: #fff; font-size: 1.05rem; margin-bottom: 8px; }
+  .fanout-desc { color: #888; font-size: 0.85rem; margin-bottom: 14px; line-height: 1.5; }
+  .fanout-diagram {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 14px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 14px;
+  }
+  .fo-sender { text-align: center; }
+  .fo-label { font-size: 0.7rem; color: #666; margin-top: 2px; }
+  .fo-node { padding: 5px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; background: rgba(255,255,255,0.08); color: #ccc; }
+  .fo-node.sender { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .fo-node.server { background: rgba(234,179,8,0.2); color: #eab308; }
+  .fo-node.inbox { background: rgba(34,197,94,0.15); color: #22c55e; }
+  .fo-node.dim { opacity: 0.4; }
+  .fo-arrow { color: #555; font-size: 1.1rem; }
+  .fo-fanout-arrows { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #555; }
+  .fo-branch { display: flex; align-items: center; gap: 6px; }
+  .fo-pros-cons { display: flex; flex-direction: column; gap: 6px; }
+  .option { padding: 8px 12px; border-radius: 6px; font-size: 0.82rem; line-height: 1.4; color: #ccc; }
+  .option.pro { background: rgba(34,197,94,0.08); border-left: 3px solid rgba(34,197,94,0.4); }
+  .option.con { background: rgba(239,68,68,0.08); border-left: 3px solid rgba(239,68,68,0.3); }
+  .fanout-hybrid {
+    background: rgba(234,179,8,0.08); border: 1px solid rgba(234,179,8,0.2);
+    border-radius: 10px; padding: 16px;
+  }
+  .fanout-hybrid h4 { color: #eab308; margin-bottom: 6px; }
+  .fanout-hybrid p { color: #aaa; font-size: 0.88rem; line-height: 1.5; }
+
+  /* Presence */
+  .presence-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 16px; }
+  @media (max-width: 700px) { .presence-demo { grid-template-columns: 1fr; } }
+  .presence-users { display: flex; flex-direction: column; gap: 12px; }
+  .presence-user {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: rgba(255,255,255,0.03); border-radius: 8px;
+  }
+  .presence-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .presence-dot.online { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+  .presence-dot.idle { background: #eab308; box-shadow: 0 0 6px rgba(234,179,8,0.4); }
+  .presence-dot.offline { background: #555; }
+  .presence-name { color: #fff; font-weight: 600; font-size: 0.9rem; width: 50px; }
+  .presence-status { color: #888; font-size: 0.8rem; width: 50px; }
+  .heartbeat-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+  .heartbeat-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #3b82f6); border-radius: 3px; transition: width 0.5s; }
+  .presence-flow h4 { color: #fff; margin-bottom: 8px; }
+  .presence-flow ol { padding-left: 20px; color: #aaa; font-size: 0.85rem; line-height: 1.9; }
+  .presence-flow code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+  .presence-note {
+    margin-top: 10px; padding: 10px 14px; background: rgba(96,165,250,0.08);
+    border-radius: 8px; font-size: 0.82rem; color: #aaa; line-height: 1.5;
+  }
+
+  /* Ordering & Delivery */
+  .ordering-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  @media (max-width: 700px) { .ordering-grid { grid-template-columns: 1fr; } }
+  .ordering-card {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .ordering-card h4 { color: #fff; margin-bottom: 12px; }
+  .ordering-detail { display: flex; flex-direction: column; gap: 12px; }
+  .ordering-item strong { color: #60a5fa; font-size: 0.88rem; }
+  .ordering-item p { color: #aaa; font-size: 0.82rem; line-height: 1.5; margin-top: 2px; }
+  .ordering-item code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+
+  .ordering-viz { margin-top: 8px; }
+  .ordering-viz h4 { color: #ccc; margin-bottom: 12px; }
+  .timeline-container { display: flex; gap: 0; margin-bottom: 12px; }
+  .timeline-col { flex: 1; text-align: center; }
+  .timeline-header { color: #60a5fa; font-weight: 700; font-size: 0.85rem; margin-bottom: 8px; }
+  .timeline-line {
+    min-height: 160px; border-left: 2px dashed rgba(255,255,255,0.1);
+    margin: 0 auto; width: 2px; position: relative;
+  }
+  .timeline-event {
+    position: absolute; left: 8px; padding: 4px 10px; border-radius: 6px;
+    font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+    opacity: 0; transition: opacity 0.4s;
+  }
+  .timeline-event.show { opacity: 1; }
+  .timeline-event.sent { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .timeline-event.ack { background: rgba(34,197,94,0.2); color: #22c55e; }
+  .timeline-event.recv { background: rgba(168,85,247,0.2); color: #a855f7; }
+  .timeline-event.delivered { background: rgba(234,179,8,0.2); color: #eab308; }
+
+  /* Simulation */
+  .sim-controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 20px;
+    padding: 16px; background: rgba(0,0,0,0.2); border-radius: 10px;
+  }
+  .sim-control-row { display: flex; align-items: center; gap: 8px; }
+  .sim-control-row label { color: #aaa; font-size: 0.85rem; white-space: nowrap; }
+  .sim-control-row input[type="range"] { width: 100px; accent-color: #3b82f6; }
+  .sim-control-row select {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 0.85rem;
+  }
+  .sim-buttons { display: flex; gap: 8px; }
+
+  .sim-arena {
+    display: grid; grid-template-columns: 1fr auto auto 1fr; gap: 16px;
+    align-items: start; margin-bottom: 20px; min-height: 200px;
+  }
+  @media (max-width: 700px) { .sim-arena { grid-template-columns: 1fr; } }
+  .sim-layer { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .sim-layer-label { color: #666; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .sim-user-node {
+    padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 600;
+    background: rgba(96,165,250,0.12); color: #60a5fa; border: 1px solid rgba(96,165,250,0.2);
+    transition: all 0.3s; position: relative;
+  }
+  .sim-user-node.sending { background: rgba(34,197,94,0.2); color: #22c55e; border-color: rgba(34,197,94,0.4); transform: scale(1.05); }
+  .sim-user-node.receiving { background: rgba(168,85,247,0.2); color: #a855f7; border-color: rgba(168,85,247,0.4); transform: scale(1.05); }
+  .sim-server-box {
+    padding: 16px 24px; border-radius: 12px; text-align: center;
+    background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.25);
+  }
+  .sim-server-icon { font-size: 1.8rem; margin-bottom: 4px; }
+  .sim-server-stats { color: #aaa; font-size: 0.8rem; }
+  .sim-server-stats strong { color: #eab308; }
+  .sim-queue-box {
+    padding: 12px 16px; border-radius: 10px; min-width: 80px; min-height: 60px;
+    background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.2);
+  }
+  .sim-queue-items { display: flex; flex-direction: column; gap: 4px; }
+  .sim-queue-item {
+    padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;
+    background: rgba(168,85,247,0.2); color: #a855f7;
+    animation: queuePop 0.3s ease-out;
+  }
+  @keyframes queuePop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  .sim-log-container h4 { color: #ccc; margin-bottom: 8px; }
+  .sim-log {
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; max-height: 180px;
+    overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #888; line-height: 1.6;
+  }
+  .sim-log .log-entry { margin-bottom: 2px; }
+  .log-time { color: #555; }
+  .log-sender { color: #60a5fa; }
+  .log-server { color: #eab308; }
+  .log-queue { color: #a855f7; }
+  .log-recipient { color: #22c55e; }
+
+  /* Architecture */
+  .arch-diagram { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px; }
+  .arch-layer { text-align: center; width: 100%; }
+  .arch-label { color: #666; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .arch-nodes { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .arch-node {
+    padding: 10px 20px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #ccc; font-size: 0.85rem; font-weight: 500;
+  }
+  .arch-node.highlight { background: rgba(96,165,250,0.15); border-color: rgba(96,165,250,0.3); color: #60a5fa; }
+  .arch-arrow { color: #444; font-size: 1.2rem; text-align: center; }
+
+  /* Decisions */
+  .decisions-grid { display: flex; flex-direction: column; gap: 16px; }
+  .decision-card {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .decision-card h4 { color: #fff; margin-bottom: 12px; }
+  .decision-options { display: flex; flex-direction: column; gap: 8px; }
+</style>
+
+<script is:inline>
+  const USERS = ['Alice','Bob','Carol','Dave','Eve','Frank','Grace','Hank'];
+  const COLORS = ['#60a5fa','#22c55e','#a855f7','#eab308','#f97316','#ec4899','#14b8a6','#ef4444'];
+
+  // === WebSocket Lifecycle Animation ===
+  document.getElementById('wsPlayBtn')?.addEventListener('click', async () => {
+    const phases = document.querySelectorAll('.ws-phase');
+    phases.forEach(p => p.classList.remove('active', 'done'));
+    for (let i = 0; i < phases.length; i++) {
+      for (let j = 0; j < i; j++) { phases[j].classList.remove('active'); phases[j].classList.add('done'); }
+      phases[i].classList.add('active');
+      await sleep(1200);
+    }
+    phases[phases.length - 1].classList.remove('active');
+    phases[phases.length - 1].classList.add('done');
+  });
+
+  // === Presence Heartbeat Simulation ===
+  let presenceInterval = null;
+  document.getElementById('presencePlayBtn')?.addEventListener('click', () => {
+    const btn = document.getElementById('presencePlayBtn');
+    if (presenceInterval) {
+      clearInterval(presenceInterval);
+      presenceInterval = null;
+      btn.textContent = '▶️ Simulate Heartbeats';
+      return;
+    }
+    btn.textContent = '⏹ Stop';
+    const users = document.querySelectorAll('.presence-user');
+    const heartbeats = { alice: 100, bob: 80, carol: 40, dave: 0 };
+
+    presenceInterval = setInterval(() => {
+      users.forEach(u => {
+        const name = u.dataset.user;
+        // Random heartbeat decay/recovery
+        if (name === 'dave') {
+          heartbeats[name] = Math.min(heartbeats[name] + (Math.random() > 0.7 ? 30 : 0), 100);
+        } else {
+          heartbeats[name] += (Math.random() > 0.3 ? 5 : -15);
+        }
+        heartbeats[name] = Math.max(0, Math.min(100, heartbeats[name]));
+
+        const fill = u.querySelector('.heartbeat-fill');
+        const dot = u.querySelector('.presence-dot');
+        const status = u.querySelector('.presence-status');
+        fill.style.width = heartbeats[name] + '%';
+
+        if (heartbeats[name] > 60) {
+          dot.className = 'presence-dot online';
+          status.textContent = 'Online';
+        } else if (heartbeats[name] > 20) {
+          dot.className = 'presence-dot idle';
+          status.textContent = 'Idle';
+        } else {
+          dot.className = 'presence-dot offline';
+          status.textContent = 'Offline';
+        }
+      });
+    }, 800);
+  });
+
+  // === Message Ordering Timeline ===
+  document.getElementById('orderingPlayBtn')?.addEventListener('click', async () => {
+    const events = [
+      { col: 'alice', top: 0, text: 'send "Hi"', cls: 'sent' },
+      { col: 'server', top: 25, text: 'recv, seq=1', cls: 'ack' },
+      { col: 'alice', top: 35, text: 'ACK ✓', cls: 'ack' },
+      { col: 'server', top: 50, text: 'queue → Bob', cls: 'ack' },
+      { col: 'bob', top: 65, text: 'recv "Hi"', cls: 'recv' },
+      { col: 'bob', top: 80, text: 'ACK ✓✓', cls: 'delivered' },
+      { col: 'server', top: 95, text: 'delivered ✓✓', cls: 'delivered' },
+      { col: 'alice', top: 110, text: 'delivered ✓✓', cls: 'delivered' },
+    ];
+
+    // Clear previous
+    ['aliceTimeline','serverTimeline','bobTimeline'].forEach(id => {
+      document.getElementById(id).innerHTML = '';
+    });
+
+    const colMap = { alice: 'aliceTimeline', server: 'serverTimeline', bob: 'bobTimeline' };
+
+    for (const ev of events) {
+      const el = document.createElement('div');
+      el.className = `timeline-event ${ev.cls}`;
+      el.style.top = ev.top + 'px';
+      el.textContent = ev.text;
+      document.getElementById(colMap[ev.col]).appendChild(el);
+      await sleep(400);
+      el.classList.add('show');
+    }
+  });
+
+  // === Interactive Chat Simulation ===
+  let simRunning = false;
+  let simTimer = null;
+  let msgCounter = 0;
+
+  const userCountSlider = document.getElementById('userCount');
+  const msgRateSlider = document.getElementById('msgRate');
+  const userCountLabel = document.getElementById('userCountLabel');
+  const msgRateLabel = document.getElementById('msgRateLabel');
+
+  userCountSlider?.addEventListener('input', () => {
+    userCountLabel.textContent = userCountSlider.value;
+    if (!simRunning) renderSimUsers();
+  });
+  msgRateSlider?.addEventListener('input', () => {
+    msgRateLabel.textContent = msgRateSlider.value + '/s';
+  });
+
+  function renderSimUsers() {
+    const count = parseInt(userCountSlider?.value || '4');
+    const leftEl = document.getElementById('simUsersLeft');
+    const rightEl = document.getElementById('simUsersRight');
+    leftEl.innerHTML = '<div class="sim-layer-label">Senders</div>';
+    rightEl.innerHTML = '<div class="sim-layer-label">Recipients</div>';
+
+    for (let i = 0; i < count; i++) {
+      const nodeL = document.createElement('div');
+      nodeL.className = 'sim-user-node';
+      nodeL.id = `sim-sender-${i}`;
+      nodeL.textContent = USERS[i];
+      nodeL.style.borderColor = COLORS[i] + '40';
+      nodeL.style.color = COLORS[i];
+      leftEl.appendChild(nodeL);
+
+      const nodeR = document.createElement('div');
+      nodeR.className = 'sim-user-node';
+      nodeR.id = `sim-recv-${i}`;
+      nodeR.textContent = USERS[i];
+      nodeR.style.borderColor = COLORS[i] + '40';
+      nodeR.style.color = COLORS[i];
+      rightEl.appendChild(nodeR);
+    }
+  }
+
+  document.getElementById('simStartBtn')?.addEventListener('click', () => {
+    if (simRunning) return;
+    simRunning = true;
+    document.getElementById('simStartBtn').disabled = true;
+    document.getElementById('simStopBtn').disabled = false;
+    renderSimUsers();
+    runSimulation();
+  });
+
+  document.getElementById('simStopBtn')?.addEventListener('click', () => {
+    simRunning = false;
+    clearTimeout(simTimer);
+    document.getElementById('simStartBtn').disabled = false;
+    document.getElementById('simStopBtn').disabled = true;
+  });
+
+  document.getElementById('simClearBtn')?.addEventListener('click', () => {
+    msgCounter = 0;
+    document.getElementById('simMsgCount').textContent = '0';
+    document.getElementById('simLog').innerHTML = '';
+    document.getElementById('simQueueItems').innerHTML = '';
+    renderSimUsers();
+  });
+
+  async function runSimulation() {
+    if (!simRunning) return;
+    const count = parseInt(userCountSlider?.value || '4');
+    const rate = parseInt(msgRateSlider?.value || '1');
+    const fanout = document.getElementById('fanoutMode')?.value || 'write';
+
+    const senderIdx = Math.floor(Math.random() * count);
+    const senderName = USERS[senderIdx];
+    msgCounter++;
+    const msgId = `m-${msgCounter}`;
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // 1. Sender highlights
+    flash(`sim-sender-${senderIdx}`, 'sending');
+    addLog(`<span class="log-time">[${now}]</span> <span class="log-sender">${senderName}</span> sends ${msgId}`);
+    await sleep(300);
+
+    // 2. Server receives
+    document.getElementById('simMsgCount').textContent = msgCounter;
+    addLog(`<span class="log-time">[${now}]</span> <span class="log-server">Server</span> receives ${msgId} from ${senderName}`);
+    await sleep(200);
+
+    // 3. Queue
+    const queueEl = document.getElementById('simQueueItems');
+    const qItem = document.createElement('div');
+    qItem.className = 'sim-queue-item';
+    qItem.textContent = msgId;
+    queueEl.appendChild(qItem);
+    addLog(`<span class="log-time">[${now}]</span> <span class="log-queue">Queue</span> enqueues ${msgId}`);
+    await sleep(300);
+
+    // 4. Deliver to recipients
+    if (fanout === 'write') {
+      // Fan-out on write: push to all recipients
+      for (let i = 0; i < count; i++) {
+        if (i === senderIdx) continue;
+        flash(`sim-recv-${i}`, 'receiving');
+        addLog(`<span class="log-time">[${now}]</span> <span class="log-recipient">${USERS[i]}</span> receives ${msgId}`);
+        await sleep(100);
+      }
+    } else {
+      // Fan-out on read: only online users pull
+      const onlineCount = Math.max(1, Math.floor(count * 0.6));
+      const indices = Array.from({ length: count }, (_, i) => i).filter(i => i !== senderIdx);
+      indices.sort(() => Math.random() - 0.5);
+      const pulling = indices.slice(0, onlineCount);
+      for (const i of pulling) {
+        flash(`sim-recv-${i}`, 'receiving');
+        addLog(`<span class="log-time">[${now}]</span> <span class="log-recipient">${USERS[i]}</span> pulls ${msgId}`);
+        await sleep(150);
+      }
+    }
+
+    // Remove from queue
+    setTimeout(() => { if (qItem.parentNode) qItem.remove(); }, 500);
+
+    const delay = 1000 / rate;
+    simTimer = setTimeout(() => runSimulation(), delay);
+  }
+
+  function flash(id, cls) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 500);
+  }
+
+  function addLog(html) {
+    const log = document.getElementById('simLog');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerHTML = html;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+    // Keep max 50 entries
+    while (log.children.length > 50) log.removeChild(log.firstChild);
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // Init
+  renderSimUsers();
+</script>

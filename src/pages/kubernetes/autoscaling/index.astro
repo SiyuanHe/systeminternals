@@ -1,0 +1,724 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kubernetes HPA & VPA Autoscaling" 
+  description="Interactive visualization of Horizontal and Vertical Pod Autoscaling — algorithms, metrics, cooldowns, and scaling policies"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Autoscaling", href: "/kubernetes/autoscaling/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚖️ Kubernetes Autoscaling</h1>
+      <p class="subtitle">HPA &amp; VPA — Scaling Pods Horizontally and Vertically</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Kubernetes offers two complementary autoscaling mechanisms:
+          <strong>HPA</strong> (Horizontal Pod Autoscaler) adds or removes Pod replicas based on metrics,
+          while <strong>VPA</strong> (Vertical Pod Autoscaler) adjusts CPU/memory requests on individual Pods.
+          The HPA runs a control loop every 15 seconds, computing:
+        </p>
+        <div class="formula-box">
+          desiredReplicas = ⌈ currentReplicas × (currentMetric / targetMetric) ⌉
+        </div>
+        <p>
+          Scaling decisions include <strong>cooldown periods</strong> (stabilization windows) to prevent flapping,
+          and <strong>scaling policies</strong> that limit how fast replicas change.
+        </p>
+      </div>
+    </section>
+
+    <!-- HPA Simulator -->
+    <section class="sim-section">
+      <h2>📊 HPA Simulator</h2>
+      <p class="section-desc">Adjust the load and watch the HPA scale pods up and down in real time.</p>
+      
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>CPU Target: <strong id="targetLabel">50</strong>%</label>
+          <input type="range" id="targetSlider" min="10" max="90" value="50" step="5">
+        </div>
+        <div class="control-group">
+          <label>Current CPU Load: <strong id="loadLabel">30</strong>%</label>
+          <input type="range" id="loadSlider" min="0" max="100" value="30" step="5">
+        </div>
+        <div class="control-group">
+          <label>Min Replicas: <strong id="minLabel">1</strong></label>
+          <input type="range" id="minSlider" min="1" max="5" value="1">
+        </div>
+        <div class="control-group">
+          <label>Max Replicas: <strong id="maxLabel">10</strong></label>
+          <input type="range" id="maxSlider" min="3" max="20" value="10">
+        </div>
+        <div class="control-group">
+          <button id="simBtn" class="action-btn primary-btn">▶️ Start Simulation</button>
+          <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          <button id="spikeBtn" class="action-btn spike-btn">📈 Traffic Spike</button>
+        </div>
+      </div>
+
+      <!-- HPA Calculation Display -->
+      <div class="calc-display">
+        <h3>🧮 HPA Calculation</h3>
+        <div class="calc-row">
+          <span class="calc-label">Current Replicas:</span>
+          <span class="calc-value" id="calcCurrent">2</span>
+        </div>
+        <div class="calc-row">
+          <span class="calc-label">Current Avg CPU:</span>
+          <span class="calc-value" id="calcCpu">30%</span>
+        </div>
+        <div class="calc-row">
+          <span class="calc-label">Target CPU:</span>
+          <span class="calc-value" id="calcTarget">50%</span>
+        </div>
+        <div class="calc-row formula">
+          <span class="calc-label">Desired:</span>
+          <span class="calc-value" id="calcDesired">⌈ 2 × (30 / 50) ⌉ = 2</span>
+        </div>
+        <div class="calc-row">
+          <span class="calc-label">Decision:</span>
+          <span class="calc-value" id="calcDecision">✅ No change needed</span>
+        </div>
+      </div>
+
+      <!-- Pod Visualization -->
+      <div class="pods-area">
+        <h3>🟢 Running Pods</h3>
+        <div class="pods-grid" id="podsGrid"></div>
+        <div class="pods-stats">
+          <span>Replicas: <strong id="replicaCount">2</strong></span>
+          <span>Avg CPU: <strong id="avgCpu">30%</strong></span>
+          <span class="cooldown-indicator" id="cooldownInd" style="display:none">⏳ Cooldown</span>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-area">
+        <h3>📈 Scaling Timeline</h3>
+        <canvas id="timelineCanvas" width="800" height="200"></canvas>
+      </div>
+    </section>
+
+    <!-- VPA Section -->
+    <section class="sim-section">
+      <h2>📐 Vertical Pod Autoscaler (VPA)</h2>
+      <p class="section-desc">VPA adjusts resource requests per-pod instead of scaling replica count.</p>
+      
+      <div class="vpa-modes">
+        <div class="vpa-mode-card">
+          <h4>🔍 Recommend</h4>
+          <p>VPA observes actual usage and suggests new CPU/memory requests. No automatic changes.</p>
+        </div>
+        <div class="vpa-mode-card active-mode">
+          <h4>🔄 Auto</h4>
+          <p>VPA evicts pods and recreates them with updated requests. Causes brief downtime per pod.</p>
+        </div>
+        <div class="vpa-mode-card">
+          <h4>🆕 In-Place (K8s 1.33+)</h4>
+          <p>Resize CPU/memory without restarting the pod. Requires InPlacePodVerticalScaling feature gate.</p>
+        </div>
+      </div>
+
+      <div class="vpa-demo">
+        <h4>VPA Recommendation Engine</h4>
+        <div class="vpa-controls">
+          <div class="control-group">
+            <label>Actual CPU Usage: <strong id="vpaCpuLabel">120</strong>m</label>
+            <input type="range" id="vpaCpuSlider" min="10" max="1000" value="120" step="10">
+          </div>
+          <div class="control-group">
+            <label>Current CPU Request: <strong id="vpaCpuReqLabel">250</strong>m</label>
+            <input type="range" id="vpaCpuReqSlider" min="50" max="1000" value="250" step="50">
+          </div>
+          <div class="control-group">
+            <label>Actual Memory: <strong id="vpaMemLabel">180</strong>Mi</label>
+            <input type="range" id="vpaMemSlider" min="32" max="2048" value="180" step="32">
+          </div>
+          <div class="control-group">
+            <label>Current Memory Request: <strong id="vpaMemReqLabel">512</strong>Mi</label>
+            <input type="range" id="vpaMemReqSlider" min="64" max="2048" value="512" step="64">
+          </div>
+        </div>
+        <div class="vpa-recommendation" id="vpaRec">
+          <div class="rec-item">
+            <span class="rec-label">CPU Recommendation:</span>
+            <span class="rec-value" id="recCpu">150m</span>
+            <span class="rec-saving green" id="recCpuSave">↓ Save 100m</span>
+          </div>
+          <div class="rec-item">
+            <span class="rec-label">Memory Recommendation:</span>
+            <span class="rec-value" id="recMem">230Mi</span>
+            <span class="rec-saving green" id="recMemSave">↓ Save 282Mi</span>
+          </div>
+          <div class="rec-item">
+            <span class="rec-label">Efficiency:</span>
+            <span class="rec-value" id="recEff">48% → 78%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HPA vs VPA -->
+    <section class="sim-section">
+      <h2>⚔️ HPA vs VPA — When to Use Which</h2>
+      <div class="comparison-grid">
+        <div class="compare-card">
+          <h4>HPA — Scale Out</h4>
+          <ul>
+            <li>Stateless workloads (web servers, APIs)</li>
+            <li>Traffic varies dramatically</li>
+            <li>Need zero-downtime scaling</li>
+            <li>Can distribute load across replicas</li>
+          </ul>
+        </div>
+        <div class="compare-card">
+          <h4>VPA — Scale Up</h4>
+          <ul>
+            <li>Stateful workloads (databases, caches)</li>
+            <li>Right-sizing over/under-provisioned pods</li>
+            <li>Single-replica services</li>
+            <li>Memory-bound workloads</li>
+          </ul>
+        </div>
+        <div class="compare-card warn-card">
+          <h4>⚠️ Don't Combine on Same Metric</h4>
+          <p>Never use HPA and VPA on the <em>same</em> CPU/memory metric — they'll fight each other.
+          Use HPA on custom metrics + VPA on CPU/memory, or use one at a time.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="sim-section">
+      <h2>🔑 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept-card">
+          <h4>Stabilization Window</h4>
+          <p>HPA remembers recommendations from the past N minutes and picks the safest.
+          Default: 5 min for scale-down, 0 for scale-up. Prevents flapping during metric oscillation.</p>
+        </div>
+        <div class="concept-card">
+          <h4>Scaling Policies</h4>
+          <p>Limit scale velocity: "max 4 pods per 60s" or "max 10% per 60s". 
+          Separate policies for scale-up vs scale-down give fine-grained control.</p>
+        </div>
+        <div class="concept-card">
+          <h4>Custom Metrics</h4>
+          <p>HPA can scale on any metric via the metrics API: requests/sec, queue depth, 
+          Kafka consumer lag. Use Prometheus Adapter or KEDA for external metrics.</p>
+        </div>
+        <div class="concept-card">
+          <h4>Tolerance Band</h4>
+          <p>HPA has a 10% tolerance by default. If desired ratio is within 0.9–1.1, no scaling occurs.
+          This prevents constant 1-pod adjustments on minor fluctuations.</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+  .viz-header { text-align: center; margin-bottom: 2rem; }
+  .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+  .subtitle { color: #94a3b8; font-size: 1.1rem; }
+
+  .overview-section { margin-bottom: 2rem; }
+  .overview-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.5rem;
+    line-height: 1.7;
+  }
+  .formula-box {
+    background: #0f172a;
+    border: 2px solid #6366f1;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    font-size: 1.15rem;
+    font-family: 'Courier New', monospace;
+    color: #a5b4fc;
+    margin: 1rem 0;
+  }
+
+  .sim-section {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .sim-section h2 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+  .section-desc { color: #94a3b8; margin-bottom: 1.5rem; }
+
+  .controls-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+  .control-group label { font-size: 0.9rem; color: #cbd5e1; }
+  .control-group input[type="range"] {
+    width: 100%;
+    accent-color: #6366f1;
+  }
+  .action-btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .primary-btn { background: #6366f1; color: white; }
+  .primary-btn:hover { background: #818cf8; }
+  .reset-btn { background: #334155; color: #cbd5e1; }
+  .reset-btn:hover { background: #475569; }
+  .spike-btn { background: #f59e0b; color: #1e293b; }
+  .spike-btn:hover { background: #fbbf24; }
+
+  .calc-display {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .calc-display h3 { margin-bottom: 0.8rem; font-size: 1.1rem; }
+  .calc-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #1e293b;
+  }
+  .calc-row.formula {
+    background: #1e1b4b;
+    border-radius: 6px;
+    padding: 0.6rem;
+    margin: 0.3rem 0;
+  }
+  .calc-label { color: #94a3b8; }
+  .calc-value { font-weight: 600; font-family: monospace; }
+
+  .pods-area {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .pods-area h3 { margin-bottom: 0.8rem; font-size: 1.1rem; }
+  .pods-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 60px;
+    margin-bottom: 0.8rem;
+  }
+  .pod-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: white;
+    transition: all 0.4s ease;
+    position: relative;
+  }
+  .pod-icon.healthy { background: #22c55e; }
+  .pod-icon.stressed { background: #f59e0b; }
+  .pod-icon.critical { background: #ef4444; }
+  .pod-icon.spawning {
+    background: #6366f1;
+    animation: podSpawn 0.5s ease;
+  }
+  .pod-icon.terminating {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  @keyframes podSpawn {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .pod-cpu-bar {
+    position: absolute;
+    bottom: 2px;
+    left: 4px;
+    right: 4px;
+    height: 4px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .pod-cpu-fill {
+    height: 100%;
+    background: white;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+  .pods-stats {
+    display: flex;
+    gap: 1.5rem;
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+  .cooldown-indicator { color: #f59e0b; font-weight: 600; }
+  .green { color: #22c55e; }
+
+  .timeline-area {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+  }
+  .timeline-area h3 { margin-bottom: 0.8rem; font-size: 1.1rem; }
+  .timeline-area canvas { width: 100%; height: 200px; }
+
+  /* VPA */
+  .vpa-modes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .vpa-mode-card {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  .vpa-mode-card.active-mode { border-color: #6366f1; }
+  .vpa-mode-card h4 { margin-bottom: 0.5rem; }
+  .vpa-mode-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+
+  .vpa-demo { margin-top: 1.5rem; }
+  .vpa-demo h4 { margin-bottom: 1rem; }
+  .vpa-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .vpa-recommendation {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+  }
+  .rec-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #1e293b;
+  }
+  .rec-item:last-child { border-bottom: none; }
+  .rec-label { color: #94a3b8; min-width: 180px; }
+  .rec-value { font-weight: 600; font-family: monospace; }
+  .rec-saving { font-size: 0.85rem; }
+
+  /* Comparison */
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+  .compare-card {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+  }
+  .compare-card h4 { margin-bottom: 0.8rem; }
+  .compare-card ul { padding-left: 1.2rem; color: #94a3b8; line-height: 1.8; }
+  .warn-card { border-color: #f59e0b; }
+  .warn-card p { color: #94a3b8; line-height: 1.6; }
+
+  /* Concepts */
+  .concepts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+  .concept-card {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.2rem;
+  }
+  .concept-card h4 { margin-bottom: 0.5rem; color: #a5b4fc; }
+  .concept-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.6; }
+
+  @media (max-width: 640px) {
+    .controls-grid { grid-template-columns: 1fr; }
+    .vpa-controls { grid-template-columns: 1fr; }
+    .comparison-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // === HPA Simulator ===
+  const state = {
+    replicas: 2,
+    targetCpu: 50,
+    currentLoad: 30,
+    minReplicas: 1,
+    maxReplicas: 10,
+    running: false,
+    interval: null,
+    cooldown: 0,
+    history: [],
+    tick: 0,
+  };
+
+  // DOM refs
+  const $ = (id) => document.getElementById(id);
+  const targetSlider = $('targetSlider');
+  const loadSlider = $('loadSlider');
+  const minSlider = $('minSlider');
+  const maxSlider = $('maxSlider');
+  const simBtn = $('simBtn');
+  const resetBtn = $('resetBtn');
+  const spikeBtn = $('spikeBtn');
+  const podsGrid = $('podsGrid');
+  const canvas = $('timelineCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Slider bindings
+  targetSlider.oninput = () => { state.targetCpu = +targetSlider.value; $('targetLabel').textContent = targetSlider.value; updateCalc(); };
+  loadSlider.oninput = () => { state.currentLoad = +loadSlider.value; $('loadLabel').textContent = loadSlider.value; updateCalc(); };
+  minSlider.oninput = () => { state.minReplicas = +minSlider.value; $('minLabel').textContent = minSlider.value; };
+  maxSlider.oninput = () => { state.maxReplicas = +maxSlider.value; $('maxLabel').textContent = maxSlider.value; };
+
+  simBtn.onclick = () => {
+    if (state.running) {
+      clearInterval(state.interval);
+      state.running = false;
+      simBtn.textContent = '▶️ Start Simulation';
+    } else {
+      state.running = true;
+      simBtn.textContent = '⏸️ Pause';
+      state.interval = setInterval(tick, 1000);
+    }
+  };
+
+  resetBtn.onclick = () => {
+    clearInterval(state.interval);
+    state.running = false;
+    state.replicas = 2;
+    state.cooldown = 0;
+    state.history = [];
+    state.tick = 0;
+    simBtn.textContent = '▶️ Start Simulation';
+    loadSlider.value = 30;
+    state.currentLoad = 30;
+    $('loadLabel').textContent = '30';
+    updateCalc();
+    renderPods();
+    drawTimeline();
+  };
+
+  spikeBtn.onclick = () => {
+    state.currentLoad = 95;
+    loadSlider.value = 95;
+    $('loadLabel').textContent = '95';
+    updateCalc();
+  };
+
+  function tick() {
+    state.tick++;
+    // Add some noise to load
+    const noise = (Math.random() - 0.5) * 10;
+    const effectiveLoad = Math.max(0, Math.min(100, state.currentLoad + noise));
+    
+    // Per-pod CPU = total load spread across replicas
+    const perPodCpu = effectiveLoad / state.replicas * (state.replicas / 2);
+    const avgCpu = Math.min(100, perPodCpu);
+    
+    // HPA formula
+    const ratio = avgCpu / state.targetCpu;
+    let desired = Math.ceil(state.replicas * ratio);
+    desired = Math.max(state.minReplicas, Math.min(state.maxReplicas, desired));
+    
+    // Tolerance band (10%)
+    if (ratio > 0.9 && ratio < 1.1) desired = state.replicas;
+    
+    // Cooldown
+    if (state.cooldown > 0) {
+      state.cooldown--;
+      $('cooldownInd').style.display = 'inline';
+    } else {
+      $('cooldownInd').style.display = 'none';
+      if (desired !== state.replicas) {
+        state.replicas = desired;
+        state.cooldown = desired > state.replicas ? 0 : 5; // 5s cooldown for scale-down
+      }
+    }
+    
+    state.history.push({ tick: state.tick, replicas: state.replicas, cpu: avgCpu, load: effectiveLoad });
+    if (state.history.length > 60) state.history.shift();
+    
+    updateCalc();
+    renderPods();
+    drawTimeline();
+  }
+
+  function updateCalc() {
+    const perPodCpu = state.currentLoad / state.replicas * (state.replicas / 2);
+    const avgCpu = Math.min(100, perPodCpu).toFixed(0);
+    const ratio = avgCpu / state.targetCpu;
+    const desired = Math.max(state.minReplicas, Math.min(state.maxReplicas, Math.ceil(state.replicas * ratio)));
+    
+    $('calcCurrent').textContent = state.replicas;
+    $('calcCpu').textContent = avgCpu + '%';
+    $('calcTarget').textContent = state.targetCpu + '%';
+    $('calcDesired').textContent = `⌈ ${state.replicas} × (${avgCpu} / ${state.targetCpu}) ⌉ = ${desired}`;
+    $('replicaCount').textContent = state.replicas;
+    $('avgCpu').textContent = avgCpu + '%';
+    
+    if (desired > state.replicas) {
+      $('calcDecision').textContent = `⬆️ Scale up to ${desired}`;
+      $('calcDecision').style.color = '#22c55e';
+    } else if (desired < state.replicas) {
+      $('calcDecision').textContent = `⬇️ Scale down to ${desired}`;
+      $('calcDecision').style.color = '#f59e0b';
+    } else {
+      $('calcDecision').textContent = '✅ No change needed';
+      $('calcDecision').style.color = '#94a3b8';
+    }
+  }
+
+  function renderPods() {
+    const perPodCpu = Math.min(100, state.currentLoad / state.replicas * (state.replicas / 2));
+    podsGrid.innerHTML = '';
+    for (let i = 0; i < state.replicas; i++) {
+      const cpu = Math.min(100, perPodCpu + (Math.random() - 0.5) * 20);
+      const cls = cpu > 80 ? 'critical' : cpu > 50 ? 'stressed' : 'healthy';
+      const pod = document.createElement('div');
+      pod.className = `pod-icon ${cls}`;
+      pod.innerHTML = `P${i}<div class="pod-cpu-bar"><div class="pod-cpu-fill" style="width:${cpu}%"></div></div>`;
+      podsGrid.appendChild(pod);
+    }
+  }
+
+  function drawTimeline() {
+    const w = canvas.width = canvas.offsetWidth * 2;
+    const h = canvas.height = 400;
+    ctx.clearRect(0, 0, w, h);
+    
+    if (state.history.length < 2) return;
+    
+    const pad = 40;
+    const plotW = w - pad * 2;
+    const plotH = h - pad * 2;
+    
+    // Grid
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad + (plotH / 4) * i;
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke();
+    }
+    
+    // Draw replicas line
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const maxR = state.maxReplicas;
+    state.history.forEach((d, i) => {
+      const x = pad + (i / (state.history.length - 1)) * plotW;
+      const y = pad + plotH - (d.replicas / maxR) * plotH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    
+    // Draw CPU line
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    state.history.forEach((d, i) => {
+      const x = pad + (i / (state.history.length - 1)) * plotW;
+      const y = pad + plotH - (d.cpu / 100) * plotH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Legend
+    ctx.font = '24px sans-serif';
+    ctx.fillStyle = '#6366f1';
+    ctx.fillText('━ Replicas', pad, h - 8);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillText('╌ Avg CPU %', pad + 160, h - 8);
+  }
+
+  // === VPA Demo ===
+  const vpaCpuSlider = $('vpaCpuSlider');
+  const vpaCpuReqSlider = $('vpaCpuReqSlider');
+  const vpaMemSlider = $('vpaMemSlider');
+  const vpaMemReqSlider = $('vpaMemReqSlider');
+
+  function updateVpa() {
+    const actualCpu = +vpaCpuSlider.value;
+    const reqCpu = +vpaCpuReqSlider.value;
+    const actualMem = +vpaMemSlider.value;
+    const reqMem = +vpaMemReqSlider.value;
+
+    $('vpaCpuLabel').textContent = actualCpu;
+    $('vpaCpuReqLabel').textContent = reqCpu;
+    $('vpaMemLabel').textContent = actualMem;
+    $('vpaMemReqLabel').textContent = reqMem;
+
+    // VPA recommends ~25% headroom above actual
+    const recCpu = Math.round(actualCpu * 1.25 / 10) * 10;
+    const recMem = Math.round(actualMem * 1.25 / 32) * 32;
+
+    $('recCpu').textContent = recCpu + 'm';
+    $('recMem').textContent = recMem + 'Mi';
+
+    const cpuDiff = reqCpu - recCpu;
+    const memDiff = reqMem - recMem;
+
+    $('recCpuSave').textContent = cpuDiff > 0 ? `↓ Save ${cpuDiff}m` : cpuDiff < 0 ? `↑ Need ${-cpuDiff}m more` : '✅ Right-sized';
+    $('recCpuSave').style.color = cpuDiff > 0 ? '#22c55e' : cpuDiff < 0 ? '#ef4444' : '#94a3b8';
+    
+    $('recMemSave').textContent = memDiff > 0 ? `↓ Save ${memDiff}Mi` : memDiff < 0 ? `↑ Need ${-memDiff}Mi more` : '✅ Right-sized';
+    $('recMemSave').style.color = memDiff > 0 ? '#22c55e' : memDiff < 0 ? '#ef4444' : '#94a3b8';
+
+    const effBefore = Math.round((actualCpu / reqCpu * 100 + actualMem / reqMem * 100) / 2);
+    const effAfter = Math.round((actualCpu / recCpu * 100 + actualMem / recMem * 100) / 2);
+    $('recEff').textContent = `${effBefore}% → ${Math.min(100, effAfter)}%`;
+  }
+
+  vpaCpuSlider.oninput = updateVpa;
+  vpaCpuReqSlider.oninput = updateVpa;
+  vpaMemSlider.oninput = updateVpa;
+  vpaMemReqSlider.oninput = updateVpa;
+
+  // Init
+  updateCalc();
+  renderPods();
+  drawTimeline();
+  updateVpa();
+</script>
