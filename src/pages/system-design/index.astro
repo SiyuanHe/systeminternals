@@ -1,0 +1,58 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const problems = [
+  { title: "Rate Limiter", description: "Token bucket, sliding window, fixed window — interactive comparison with live request simulation", href: "/system-design/rate-limiter/", status: "live", emoji: "🚦" },
+  { title: "URL Shortener", description: "Hash functions, base62 encoding, collision resolution, and capacity planning calculator", href: "/system-design/url-shortener/", status: "coming-soon", emoji: "🔗" },
+  { title: "Chat System", description: "WebSocket connections, message queues, fan-out strategies, presence detection", href: "/system-design/chat-system/", status: "coming-soon", emoji: "💬" },
+  { title: "Distributed Cache", description: "Consistent hashing, cache eviction policies (LRU/LFU), write-through vs write-back", href: "/system-design/distributed-cache/", status: "coming-soon", emoji: "⚡" },
+  { title: "News Feed", description: "Fan-out on write vs read, ranking algorithms, pagination strategies", href: "/system-design/news-feed/", status: "coming-soon", emoji: "📰" },
+  { title: "Notification System", description: "Priority queues, delivery guarantees, rate limiting, multi-channel routing", href: "/system-design/notification-system/", status: "coming-soon", emoji: "🔔" },
+  { title: "Key-Value Store", description: "LSM trees, SSTables, Bloom filters, compaction — build your own from scratch", href: "/system-design/key-value-store/", status: "coming-soon", emoji: "🗄️" },
+  { title: "Search Autocomplete", description: "Trie data structure, prefix matching, ranking by frequency, real-time updates", href: "/system-design/autocomplete/", status: "coming-soon", emoji: "🔍" },
+];
+---
+
+<BaseLayout 
+  title="System Design Interview — Interactive Problems"
+  description="Master system design interviews with interactive visualizations. Rate limiter, URL shortener, distributed cache, and more — understand the internals, not just the buzzwords."
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "System Design", href: "/system-design/" }]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🏗️ System Design Interview</h1>
+      <p class="subtitle">Interactive problems — don't just memorize, <em>understand</em></p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Each problem includes an <strong>interactive visualization</strong> that lets you experiment with the core data structures, algorithms, and tradeoffs.
+          Drag sliders. Click buttons. Break things. That's how you learn.
+        </p>
+      </div>
+    </section>
+
+    <section class="topics-grid">
+      {problems.map(p => (
+        <a href={p.status === 'live' ? p.href : undefined} class={`topic-card ${p.status === 'coming-soon' ? 'coming-soon' : ''}`}>
+          <span class="topic-emoji">{p.emoji}</span>
+          <h3>{p.title}</h3>
+          <p>{p.description}</p>
+          {p.status === 'coming-soon' && <span class="badge">Coming Soon</span>}
+        </a>
+      ))}
+    </section>
+  </div>
+
+  <style>{`
+    .topics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+    .topic-card { display: block; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.5rem; text-decoration: none; color: inherit; transition: all 0.2s; }
+    .topic-card:hover:not(.coming-soon) { border-color: #667eea; transform: translateY(-2px); box-shadow: 0 4px 20px rgba(102,126,234,0.2); }
+    .topic-card.coming-soon { opacity: 0.5; cursor: default; }
+    .topic-emoji { font-size: 2rem; }
+    .topic-card h3 { margin: 0.75rem 0 0.5rem; color: #e2e8f0; }
+    .topic-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; margin: 0; }
+    .badge { display: inline-block; background: #334155; color: #94a3b8; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; margin-top: 0.75rem; }
+  `}</style>
+</BaseLayout>

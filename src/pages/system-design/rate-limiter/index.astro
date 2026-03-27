@@ -1,0 +1,567 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a Rate Limiter — Interactive Visualization"
+  description="Understand rate limiting algorithms: token bucket, sliding window log, sliding window counter, fixed window. Interactive simulation with live metrics."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Rate Limiter", href: "/system-design/rate-limiter/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🚦 Design a Rate Limiter</h1>
+      <p class="subtitle">Compare algorithms side-by-side — token bucket, sliding window, fixed window</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A rate limiter controls how many requests a client can make in a time window.
+          Different algorithms have different tradeoffs: <strong>burst tolerance</strong>, <strong>memory usage</strong>, 
+          <strong>accuracy</strong>, and <strong>distributed friendliness</strong>. Try them below.
+        </p>
+      </div>
+    </section>
+
+    <!-- Controls -->
+    <section class="controls-section">
+      <h2>⚙️ Configuration</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Rate Limit: <strong id="rateLimitLabel">10</strong> req/sec</label>
+          <input type="range" id="rateLimitSlider" min="1" max="50" value="10">
+        </div>
+        <div class="control-group">
+          <label>Burst Capacity: <strong id="burstLabel">15</strong> tokens</label>
+          <input type="range" id="burstSlider" min="1" max="50" value="15">
+        </div>
+        <div class="control-group">
+          <label>Traffic Pattern:</label>
+          <div class="pattern-buttons">
+            <button class="pattern-btn active" data-pattern="steady">📊 Steady</button>
+            <button class="pattern-btn" data-pattern="burst">💥 Burst</button>
+            <button class="pattern-btn" data-pattern="spike">📈 Spike</button>
+            <button class="pattern-btn" data-pattern="random">🎲 Random</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <button id="startBtn" class="action-btn primary-btn">▶️ Start Simulation</button>
+          <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          <button id="sendBurstBtn" class="action-btn primary-btn-secondary">💥 Send 30 Requests</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Algorithm Panels -->
+    <section class="algorithms-section">
+      <h2>📊 Algorithm Comparison</h2>
+      <div class="algo-grid">
+        <!-- Token Bucket -->
+        <div class="algo-panel" id="tokenBucketPanel">
+          <h3>🪣 Token Bucket</h3>
+          <div class="algo-viz">
+            <div class="bucket-container">
+              <div class="bucket">
+                <div class="water" id="tbWater"></div>
+                <div class="bucket-label" id="tbTokens">15</div>
+              </div>
+              <div class="refill-indicator">
+                <span class="refill-drop">💧</span>
+                <span id="tbRefillRate">10/s</span>
+              </div>
+            </div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Allowed</span><span class="stat-v green" id="tbAllowed">0</span></div>
+            <div class="stat"><span class="stat-l">Rejected</span><span class="stat-v red" id="tbRejected">0</span></div>
+            <div class="stat"><span class="stat-l">Tokens</span><span class="stat-v" id="tbTokenCount">15</span></div>
+          </div>
+          <div class="algo-log" id="tbLog"></div>
+        </div>
+
+        <!-- Fixed Window -->
+        <div class="algo-panel" id="fixedWindowPanel">
+          <h3>🪟 Fixed Window</h3>
+          <div class="algo-viz">
+            <div class="window-container">
+              <div class="window-bar">
+                <div class="window-fill" id="fwFill"></div>
+                <div class="window-limit-line" id="fwLimitLine"></div>
+              </div>
+              <div class="window-timer" id="fwTimer">1.0s</div>
+            </div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Allowed</span><span class="stat-v green" id="fwAllowed">0</span></div>
+            <div class="stat"><span class="stat-l">Rejected</span><span class="stat-v red" id="fwRejected">0</span></div>
+            <div class="stat"><span class="stat-l">Window Count</span><span class="stat-v" id="fwCount">0</span></div>
+          </div>
+          <div class="algo-log" id="fwLog"></div>
+        </div>
+
+        <!-- Sliding Window Log -->
+        <div class="algo-panel" id="slidingLogPanel">
+          <h3>📜 Sliding Window Log</h3>
+          <div class="algo-viz">
+            <div class="timeline-container">
+              <canvas id="swlCanvas" width="320" height="80"></canvas>
+            </div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Allowed</span><span class="stat-v green" id="swlAllowed">0</span></div>
+            <div class="stat"><span class="stat-l">Rejected</span><span class="stat-v red" id="swlRejected">0</span></div>
+            <div class="stat"><span class="stat-l">Log Size</span><span class="stat-v" id="swlLogSize">0</span></div>
+          </div>
+          <div class="algo-log" id="swlLog"></div>
+        </div>
+
+        <!-- Sliding Window Counter -->
+        <div class="algo-panel" id="slidingCounterPanel">
+          <h3>🔢 Sliding Window Counter</h3>
+          <div class="algo-viz">
+            <div class="sliding-counter-viz">
+              <div class="sc-windows">
+                <div class="sc-window prev">
+                  <div class="sc-fill" id="scPrevFill"></div>
+                  <span class="sc-label">Prev</span>
+                  <span class="sc-count" id="scPrevCount">0</span>
+                </div>
+                <div class="sc-window curr">
+                  <div class="sc-fill" id="scCurrFill"></div>
+                  <span class="sc-label">Curr</span>
+                  <span class="sc-count" id="scCurrCount">0</span>
+                </div>
+              </div>
+              <div class="sc-formula" id="scFormula">weighted = 0 × 0.0 + 0 = 0</div>
+            </div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Allowed</span><span class="stat-v green" id="scAllowed">0</span></div>
+            <div class="stat"><span class="stat-l">Rejected</span><span class="stat-v red" id="scRejected">0</span></div>
+            <div class="stat"><span class="stat-l">Weighted</span><span class="stat-v" id="scWeighted">0</span></div>
+          </div>
+          <div class="algo-log" id="scLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Request Timeline -->
+    <section class="timeline-section">
+      <h2>📈 Request Timeline</h2>
+      <canvas id="timelineCanvas" width="900" height="200"></canvas>
+    </section>
+
+    <!-- Comparison Table -->
+    <section class="comparison-section">
+      <h2>📋 Algorithm Comparison</h2>
+      <div class="comparison-table">
+        <div class="comp-row header">
+          <div class="comp-cell">Algorithm</div>
+          <div class="comp-cell">Memory</div>
+          <div class="comp-cell">Burst Handling</div>
+          <div class="comp-cell">Accuracy</div>
+          <div class="comp-cell">Distributed</div>
+          <div class="comp-cell">Use Case</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Token Bucket</strong></div>
+          <div class="comp-cell">O(1)</div>
+          <div class="comp-cell">✅ Allows bursts up to capacity</div>
+          <div class="comp-cell">⚠️ Approximate</div>
+          <div class="comp-cell">✅ Easy (Redis INCR)</div>
+          <div class="comp-cell">API rate limiting, network QoS</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Fixed Window</strong></div>
+          <div class="comp-cell">O(1)</div>
+          <div class="comp-cell">❌ 2x burst at boundary</div>
+          <div class="comp-cell">⚠️ Boundary problem</div>
+          <div class="comp-cell">✅ Simple counter</div>
+          <div class="comp-cell">Simple quotas, non-critical</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Sliding Window Log</strong></div>
+          <div class="comp-cell">O(n) per user</div>
+          <div class="comp-cell">✅ Precise</div>
+          <div class="comp-cell">✅ Exact</div>
+          <div class="comp-cell">⚠️ Expensive (sorted set)</div>
+          <div class="comp-cell">High-accuracy, low-volume APIs</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Sliding Window Counter</strong></div>
+          <div class="comp-cell">O(1)</div>
+          <div class="comp-cell">✅ Good approximation</div>
+          <div class="comp-cell">⚠️ ~97% accurate</div>
+          <div class="comp-cell">✅ Two counters</div>
+          <div class="comp-cell">Best balance of all tradeoffs</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interview Tips -->
+    <section class="tips-section">
+      <h2>💡 Interview Tips</h2>
+      <div class="tips-grid">
+        <div class="tip-card">
+          <h4>Start with requirements</h4>
+          <p>Client-side or server-side? Single server or distributed? What's the rate (per second, minute, hour)? What happens on limit — 429 response, queue, or degrade?</p>
+        </div>
+        <div class="tip-card">
+          <h4>Distributed rate limiting</h4>
+          <p>Use Redis with Lua scripts for atomic check-and-increment. Token bucket + Redis is the most common production pattern (Stripe, Cloudflare, GitHub).</p>
+        </div>
+        <div class="tip-card">
+          <h4>Race conditions</h4>
+          <p>Two requests checking simultaneously can both pass. Solutions: Redis Lua scripts (atomic), or use a "set-if-not-exists" + TTL pattern.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Multi-tier limiting</h4>
+          <p>Real systems layer: per-IP (DDoS), per-user (API quota), per-endpoint (expensive ops). Each tier can use a different algorithm.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>{`
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; background: #1a1a2e; padding: 1.5rem; border-radius: 12px; border: 1px solid #2a2a4a; }
+    .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .control-group label { color: #94a3b8; font-size: 0.9rem; }
+    .control-group label strong { color: #667eea; }
+    input[type="range"] { width: 100%; accent-color: #667eea; }
+    .pattern-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .pattern-btn { background: #0f0f23; border: 1px solid #2a2a4a; color: #94a3b8; padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+    .pattern-btn.active { border-color: #667eea; color: #e2e8f0; background: rgba(102,126,234,0.15); }
+    .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .primary-btn { background: #667eea; color: white; }
+    .primary-btn-secondary { background: #e74c3c; color: white; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+    @media (max-width: 800px) { .algo-grid { grid-template-columns: 1fr; } .controls-grid { grid-template-columns: 1fr; } }
+    .algo-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .algo-panel h3 { margin: 0 0 1rem; color: #e2e8f0; font-size: 1.1rem; }
+    .algo-viz { min-height: 100px; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; }
+    .algo-stats { display: flex; gap: 1rem; margin-bottom: 0.75rem; }
+    .stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+    .stat-l { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+    .stat-v { font-size: 1.3rem; font-weight: 700; color: #e2e8f0; }
+    .stat-v.green { color: #22c55e; }
+    .stat-v.red { color: #ef4444; }
+    .algo-log { max-height: 80px; overflow-y: auto; font-size: 0.75rem; color: #64748b; font-family: monospace; padding: 0.5rem; background: #0f0f23; border-radius: 6px; }
+
+    /* Token Bucket */
+    .bucket-container { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .bucket { width: 80px; height: 100px; border: 3px solid #667eea; border-top: none; border-radius: 0 0 12px 12px; position: relative; overflow: hidden; }
+    .water { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, #667eea, #764ba2); transition: height 0.3s; height: 100%; }
+    .bucket-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; color: white; font-size: 1.2rem; z-index: 1; }
+    .refill-indicator { font-size: 0.8rem; color: #94a3b8; }
+    .refill-drop { animation: drop 1s infinite; display: inline-block; }
+    @keyframes drop { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+    /* Fixed Window */
+    .window-container { width: 100%; max-width: 280px; }
+    .window-bar { height: 40px; background: #0f0f23; border-radius: 8px; position: relative; overflow: hidden; border: 1px solid #2a2a4a; }
+    .window-fill { height: 100%; background: #22c55e; transition: width 0.15s; width: 0; }
+    .window-fill.over { background: #ef4444; }
+    .window-limit-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #667eea; left: 100%; }
+    .window-timer { text-align: center; margin-top: 0.5rem; color: #94a3b8; font-family: monospace; }
+
+    /* Sliding Window Counter */
+    .sliding-counter-viz { width: 100%; max-width: 280px; }
+    .sc-windows { display: flex; gap: 4px; height: 60px; }
+    .sc-window { flex: 1; background: #0f0f23; border-radius: 8px; position: relative; overflow: hidden; border: 1px solid #2a2a4a; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .sc-fill { position: absolute; bottom: 0; left: 0; right: 0; background: #667eea33; transition: height 0.2s; }
+    .sc-label { font-size: 0.7rem; color: #64748b; z-index: 1; }
+    .sc-count { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; z-index: 1; }
+    .sc-formula { font-size: 0.75rem; color: #94a3b8; font-family: monospace; margin-top: 0.5rem; text-align: center; }
+
+    /* Timeline Canvas */
+    .timeline-section canvas { width: 100%; height: 200px; background: #1a1a2e; border-radius: 12px; border: 1px solid #2a2a4a; }
+
+    /* Comparison Table */
+    .comparison-table { overflow-x: auto; }
+    .comp-row { display: grid; grid-template-columns: 1.2fr 0.7fr 1.2fr 0.8fr 1fr 1.3fr; gap: 1px; background: #2a2a4a; }
+    .comp-row.header { background: #667eea33; }
+    .comp-row.header .comp-cell { color: #e2e8f0; font-weight: 600; }
+    .comp-cell { background: #1a1a2e; padding: 0.75rem; font-size: 0.85rem; color: #94a3b8; }
+
+    /* Tips */
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1.25rem; }
+    .tip-card h4 { margin: 0 0 0.5rem; color: #667eea; }
+    .tip-card p { margin: 0; color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+  `}</style>
+
+  <script type="module">{`
+    // === State ===
+    let rateLimit = 10;
+    let burstCapacity = 15;
+    let pattern = 'steady';
+    let running = false;
+    let simInterval = null;
+    let simTime = 0;
+
+    // Algorithm states
+    const tb = { tokens: 15, allowed: 0, rejected: 0, lastRefill: 0 };
+    const fw = { count: 0, windowStart: 0, allowed: 0, rejected: 0 };
+    const swl = { log: [], allowed: 0, rejected: 0 };
+    const sc = { prevCount: 0, currCount: 0, windowStart: 0, allowed: 0, rejected: 0 };
+
+    const timelineData = { allowed: [], rejected: [] };
+
+    // === DOM ===
+    const $ = id => document.getElementById(id);
+
+    // Controls
+    $('rateLimitSlider').addEventListener('input', e => {
+      rateLimit = +e.target.value;
+      $('rateLimitLabel').textContent = rateLimit;
+      $('tbRefillRate').textContent = rateLimit + '/s';
+    });
+    $('burstSlider').addEventListener('input', e => {
+      burstCapacity = +e.target.value;
+      $('burstLabel').textContent = burstCapacity;
+    });
+
+    document.querySelectorAll('.pattern-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.pattern-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        pattern = btn.dataset.pattern;
+      });
+    });
+
+    $('startBtn').addEventListener('click', () => {
+      if (running) { stopSim(); $('startBtn').textContent = '▶️ Start Simulation'; }
+      else { startSim(); $('startBtn').textContent = '⏸️ Pause'; }
+    });
+    $('resetBtn').addEventListener('click', resetAll);
+    $('sendBurstBtn').addEventListener('click', () => { for (let i = 0; i < 30; i++) setTimeout(() => processRequest(), i * 15); });
+
+    function resetAll() {
+      stopSim();
+      simTime = 0;
+      Object.assign(tb, { tokens: burstCapacity, allowed: 0, rejected: 0, lastRefill: 0 });
+      Object.assign(fw, { count: 0, windowStart: 0, allowed: 0, rejected: 0 });
+      Object.assign(swl, { log: [], allowed: 0, rejected: 0 });
+      Object.assign(sc, { prevCount: 0, currCount: 0, windowStart: 0, allowed: 0, rejected: 0 });
+      timelineData.allowed = [];
+      timelineData.rejected = [];
+      updateAllUI();
+      clearCanvas();
+      document.querySelectorAll('.algo-log').forEach(el => el.textContent = '');
+      $('startBtn').textContent = '▶️ Start Simulation';
+    }
+
+    function startSim() {
+      running = true;
+      simInterval = setInterval(() => {
+        simTime += 50;
+        // Refill token bucket
+        const elapsed = 50 / 1000;
+        tb.tokens = Math.min(burstCapacity, tb.tokens + rateLimit * elapsed);
+
+        // Generate requests based on pattern
+        const rps = getPatternRPS();
+        const reqThisTick = Math.random() < (rps * 50 / 1000) ? 1 : 0;
+        if (reqThisTick) processRequest();
+
+        // Update fixed window timer
+        const windowElapsed = (simTime - fw.windowStart) / 1000;
+        if (windowElapsed >= 1) {
+          sc.prevCount = sc.currCount;
+          sc.currCount = 0;
+          fw.count = 0;
+          fw.windowStart = simTime;
+        }
+        $('fwTimer').textContent = (1 - windowElapsed).toFixed(1) + 's';
+
+        updateAllUI();
+        drawTimeline();
+      }, 50);
+    }
+
+    function stopSim() { running = false; clearInterval(simInterval); }
+
+    function getPatternRPS() {
+      const t = simTime / 1000;
+      switch (pattern) {
+        case 'steady': return rateLimit;
+        case 'burst': return Math.sin(t) > 0.5 ? rateLimit * 4 : rateLimit * 0.5;
+        case 'spike': return (t % 5 < 0.5) ? rateLimit * 8 : rateLimit * 0.3;
+        case 'random': return Math.random() * rateLimit * 3;
+        default: return rateLimit;
+      }
+    }
+
+    function processRequest() {
+      const now = simTime;
+      // Token Bucket
+      if (tb.tokens >= 1) { tb.tokens--; tb.allowed++; addLog('tbLog', '✅ allowed (tokens: ' + tb.tokens.toFixed(1) + ')'); }
+      else { tb.rejected++; addLog('tbLog', '❌ rejected (no tokens)'); }
+
+      // Fixed Window
+      const windowElapsed = (now - fw.windowStart) / 1000;
+      if (windowElapsed >= 1) { fw.count = 0; fw.windowStart = now; }
+      if (fw.count < rateLimit) { fw.count++; fw.allowed++; addLog('fwLog', '✅ allowed (' + fw.count + '/' + rateLimit + ')'); }
+      else { fw.rejected++; addLog('fwLog', '❌ rejected (window full)'); }
+
+      // Sliding Window Log
+      const windowMs = 1000;
+      swl.log = swl.log.filter(t => t > now - windowMs);
+      if (swl.log.length < rateLimit) { swl.log.push(now); swl.allowed++; addLog('swlLog', '✅ allowed (log: ' + swl.log.length + ')'); }
+      else { swl.rejected++; addLog('swlLog', '❌ rejected (log full: ' + swl.log.length + ')'); }
+
+      // Sliding Window Counter
+      const scWindowElapsed = (now - sc.windowStart) / 1000;
+      if (scWindowElapsed >= 1) { sc.prevCount = sc.currCount; sc.currCount = 0; sc.windowStart = now; }
+      const weight = 1 - ((now - sc.windowStart) / 1000);
+      const weighted = sc.prevCount * weight + sc.currCount;
+      if (weighted < rateLimit) { sc.currCount++; sc.allowed++; addLog('scLog', '✅ allowed (weighted: ' + weighted.toFixed(1) + ')'); }
+      else { sc.rejected++; addLog('scLog', '❌ rejected (weighted: ' + weighted.toFixed(1) + ')'); }
+
+      // Timeline
+      const sec = Math.floor(now / 1000);
+      if (!timelineData.allowed[sec]) { timelineData.allowed[sec] = 0; timelineData.rejected[sec] = 0; }
+      if (tb.tokens >= 0) timelineData.allowed[sec]++;
+      else timelineData.rejected[sec]++;
+    }
+
+    function addLog(id, msg) {
+      const el = $(id);
+      el.textContent = msg + '\\n' + el.textContent.split('\\n').slice(0, 20).join('\\n');
+    }
+
+    function updateAllUI() {
+      // Token Bucket
+      const tbPct = (tb.tokens / burstCapacity) * 100;
+      $('tbWater').style.height = tbPct + '%';
+      $('tbTokens').textContent = Math.floor(tb.tokens);
+      $('tbTokenCount').textContent = tb.tokens.toFixed(1);
+      $('tbAllowed').textContent = tb.allowed;
+      $('tbRejected').textContent = tb.rejected;
+
+      // Fixed Window
+      const fwPct = (fw.count / rateLimit) * 100;
+      $('fwFill').style.width = Math.min(100, fwPct) + '%';
+      $('fwFill').className = 'window-fill' + (fw.count >= rateLimit ? ' over' : '');
+      $('fwLimitLine').style.left = '100%';
+      $('fwCount').textContent = fw.count;
+      $('fwAllowed').textContent = fw.allowed;
+      $('fwRejected').textContent = fw.rejected;
+
+      // Sliding Window Log
+      $('swlLogSize').textContent = swl.log.length;
+      $('swlAllowed').textContent = swl.allowed;
+      $('swlRejected').textContent = swl.rejected;
+      drawSWLCanvas();
+
+      // Sliding Window Counter
+      const scWeight = 1 - ((simTime - sc.windowStart) / 1000);
+      const weighted = sc.prevCount * Math.max(0, scWeight) + sc.currCount;
+      $('scPrevCount').textContent = sc.prevCount;
+      $('scCurrCount').textContent = sc.currCount;
+      $('scPrevFill').style.height = Math.min(100, (sc.prevCount / rateLimit) * 100) + '%';
+      $('scCurrFill').style.height = Math.min(100, (sc.currCount / rateLimit) * 100) + '%';
+      $('scFormula').textContent = sc.prevCount + ' × ' + Math.max(0, scWeight).toFixed(2) + ' + ' + sc.currCount + ' = ' + weighted.toFixed(1);
+      $('scWeighted').textContent = weighted.toFixed(1);
+      $('scAllowed').textContent = sc.allowed;
+      $('scRejected').textContent = sc.rejected;
+    }
+
+    function drawSWLCanvas() {
+      const canvas = $('swlCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0f0f23';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const now = simTime;
+      const windowMs = 1000;
+      swl.log.forEach(t => {
+        const x = ((t - (now - windowMs)) / windowMs) * canvas.width;
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(x - 1, 10, 3, canvas.height - 20);
+      });
+
+      // Limit line
+      ctx.strokeStyle = '#667eea44';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, 5);
+      ctx.lineTo(canvas.width, 5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px monospace';
+      ctx.fillText(swl.log.length + '/' + rateLimit + ' in window', 5, canvas.height - 5);
+    }
+
+    function drawTimeline() {
+      const canvas = $('timelineCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, W, H);
+
+      const maxSec = Math.max(10, Math.floor(simTime / 1000) + 1);
+      const startSec = Math.max(0, maxSec - 30);
+      const barW = W / Math.min(30, maxSec - startSec);
+      let maxVal = rateLimit * 2;
+
+      for (let s = startSec; s < maxSec; s++) {
+        const a = timelineData.allowed[s] || 0;
+        const r = timelineData.rejected[s] || 0;
+        maxVal = Math.max(maxVal, a + r);
+      }
+
+      // Draw rate limit line
+      ctx.strokeStyle = '#667eea66';
+      ctx.setLineDash([6, 4]);
+      const limitY = H - (rateLimit / maxVal) * (H - 30) - 15;
+      ctx.beginPath(); ctx.moveTo(0, limitY); ctx.lineTo(W, limitY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#667eea';
+      ctx.font = '10px monospace';
+      ctx.fillText('limit: ' + rateLimit + '/s', 5, limitY - 4);
+
+      for (let s = startSec; s < maxSec; s++) {
+        const i = s - startSec;
+        const a = timelineData.allowed[s] || 0;
+        const r = timelineData.rejected[s] || 0;
+        const x = i * barW + 2;
+        const bw = barW - 4;
+
+        const aH = (a / maxVal) * (H - 30);
+        const rH = (r / maxVal) * (H - 30);
+
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(x, H - 15 - aH, bw, aH);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(x, H - 15 - aH - rH, bw, rH);
+      }
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px monospace';
+      ctx.fillText('time (seconds) →', W - 120, H - 2);
+    }
+
+    function clearCanvas() {
+      [$('timelineCanvas'), $('swlCanvas')].forEach(c => {
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, c.width, c.height);
+      });
+    }
+
+    // Init
+    updateAllUI();
+  `}</script>
+</BaseLayout>
