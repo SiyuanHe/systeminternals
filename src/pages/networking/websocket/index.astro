@@ -1,0 +1,832 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="WebSocket Internals — Interactive Visualization"
+  description="Explore WebSocket upgrade handshake, frame format, ping/pong heartbeat, close handshake, multiplexing, and backpressure with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Networking", href: "/networking/" },
+    { label: "WebSocket", href: "/networking/websocket/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔌 WebSocket Internals</h1>
+      <p class="subtitle">Full-duplex communication over a single TCP connection</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          WebSocket (RFC 6455) provides <strong>full-duplex, bidirectional</strong> communication between a client and server
+          over a single TCP connection. Unlike HTTP's request-response model, WebSocket allows either side to send messages
+          at any time after an initial HTTP upgrade handshake. The protocol uses a lightweight frame format with opcodes for
+          text, binary, ping/pong, and close frames. WebSocket is the foundation of real-time web applications — chat,
+          live dashboards, collaborative editing, gaming, and financial data streaming.
+        </p>
+      </div>
+    </section>
+
+    <!-- Upgrade Handshake -->
+    <section class="sim-section">
+      <h2>🤝 Upgrade Handshake</h2>
+      <p class="section-desc">WebSocket begins as an HTTP/1.1 request with an Upgrade header. The server responds with 101 Switching Protocols. Watch the Sec-WebSocket-Key/Accept exchange that prevents cross-protocol attacks.</p>
+      <div class="sim-controls">
+        <button id="startUpgrade" class="action-btn primary-btn">▶️ Start Handshake</button>
+        <button id="resetUpgrade" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="handshake-viz">
+        <div class="hs-col">
+          <div class="hs-node" id="hs-client">
+            <div class="hs-icon">🌐</div>
+            <div class="hs-label">Browser</div>
+            <div class="hs-state" id="hs-client-state">HTTP</div>
+          </div>
+        </div>
+        <div class="hs-messages" id="hs-messages">
+          <div class="hs-timeline-line"></div>
+        </div>
+        <div class="hs-col">
+          <div class="hs-node" id="hs-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Server</div>
+            <div class="hs-state" id="hs-server-state">LISTENING</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="handshake-details" id="handshakeDetails">
+        <div class="hd-panel" id="hdRequest">
+          <div class="hd-title">📤 Client Request</div>
+          <pre id="hdRequestText">Click "Start Handshake" to see the HTTP upgrade request...</pre>
+        </div>
+        <div class="hd-panel" id="hdResponse">
+          <div class="hd-title">📥 Server Response</div>
+          <pre id="hdResponseText">Waiting for handshake...</pre>
+        </div>
+      </div>
+      <div class="hs-log" id="hsLog">The client sends a standard HTTP GET with Upgrade: websocket and a random base64 key.</div>
+    </section>
+
+    <!-- Frame Format -->
+    <section class="sim-section">
+      <h2>📦 Frame Format</h2>
+      <p class="section-desc">Every WebSocket message is wrapped in frames. Explore the binary structure — FIN bit, opcode, mask flag, payload length encoding, masking key, and payload data.</p>
+      <div class="sim-controls">
+        <button id="frameText" class="action-btn primary-btn">📝 Text Frame</button>
+        <button id="frameBinary" class="action-btn primary-btn-secondary">🔢 Binary Frame</button>
+        <button id="frameLarge" class="action-btn primary-btn-secondary">📦 Large Frame (64KB)</button>
+        <button id="frameFragment" class="action-btn warn-btn">🧩 Fragmented</button>
+        <button id="resetFrame" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="frame-viz" id="frameViz">
+        <div class="frame-row frame-header-row">
+          <div class="frame-cell fin" id="fFin" data-label="FIN">1</div>
+          <div class="frame-cell rsv" data-label="RSV1">0</div>
+          <div class="frame-cell rsv" data-label="RSV2">0</div>
+          <div class="frame-cell rsv" data-label="RSV3">0</div>
+          <div class="frame-cell opcode" id="fOpcode" data-label="Opcode (4 bits)">0001</div>
+          <div class="frame-cell mask-bit" id="fMask" data-label="MASK">1</div>
+          <div class="frame-cell payload-len" id="fPayLen" data-label="Payload Len (7 bits)">0000101</div>
+        </div>
+        <div class="frame-row" id="fExtLen" style="display:none">
+          <div class="frame-cell ext-len" id="fExtLenVal" data-label="Extended Payload Length">—</div>
+        </div>
+        <div class="frame-row">
+          <div class="frame-cell masking-key" id="fMaskKey" data-label="Masking Key (4 bytes)">a1 b2 c3 d4</div>
+        </div>
+        <div class="frame-row">
+          <div class="frame-cell payload" id="fPayload" data-label="Payload Data">48 65 6c 6c 6f</div>
+        </div>
+      </div>
+      <div class="frame-desc" id="frameDesc">
+        <strong>Text frame:</strong> FIN=1 (complete message), Opcode=0x1 (text), MASK=1 (client→server always masked), Payload="Hello" (5 bytes). The masking key XORs each payload byte to prevent cache poisoning attacks by intermediaries.
+      </div>
+    </section>
+
+    <!-- Ping/Pong Heartbeat -->
+    <section class="sim-section">
+      <h2>💓 Ping/Pong Heartbeat</h2>
+      <p class="section-desc">Either side can send Ping frames (opcode 0x9). The other must reply with a Pong (opcode 0xA) echoing the same payload. This keeps connections alive through proxies and detects dead peers.</p>
+      <div class="sim-controls">
+        <button id="sendPing" class="action-btn primary-btn">📡 Send Ping</button>
+        <button id="sendServerPing" class="action-btn primary-btn-secondary">🖥️ Server Ping</button>
+        <button id="startHeartbeat" class="action-btn primary-btn-secondary">💓 Auto Heartbeat</button>
+        <button id="killConnection" class="action-btn warn-btn">💀 Kill Server</button>
+        <button id="resetPing" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="ping-viz">
+        <div class="ping-col">
+          <div class="ping-node" id="ping-client">
+            <div class="hs-icon">🌐</div>
+            <div class="hs-label">Client</div>
+          </div>
+        </div>
+        <div class="ping-timeline" id="pingTimeline"></div>
+        <div class="ping-col">
+          <div class="ping-node" id="ping-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Server</div>
+          </div>
+        </div>
+      </div>
+      <div class="ping-stats">
+        <div class="ps-stat">Pings sent: <strong id="pingSent">0</strong></div>
+        <div class="ps-stat">Pongs received: <strong id="pongRecv">0</strong></div>
+        <div class="ps-stat">Avg latency: <strong id="pingLatency">—</strong></div>
+        <div class="ps-stat">Status: <strong id="pingStatus">Connected</strong></div>
+      </div>
+      <div class="ping-log" id="pingLog">Send a ping to check connection health.</div>
+    </section>
+
+    <!-- Close Handshake -->
+    <section class="sim-section">
+      <h2>🚪 Close Handshake</h2>
+      <p class="section-desc">WebSocket uses a clean close handshake: one side sends a Close frame (opcode 0x8) with a status code, the other echoes it, then both close the TCP connection.</p>
+      <div class="sim-controls">
+        <button id="closeNormal" class="action-btn primary-btn">🚪 Normal Close (1000)</button>
+        <button id="closeGoingAway" class="action-btn primary-btn-secondary">✈️ Going Away (1001)</button>
+        <button id="closeError" class="action-btn warn-btn">❌ Protocol Error (1002)</button>
+        <button id="resetClose" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="close-viz">
+        <div class="close-col">
+          <div class="close-node" id="cl-client">
+            <div class="hs-icon">🌐</div>
+            <div class="hs-label">Client</div>
+            <div class="hs-state" id="cl-client-state">OPEN</div>
+          </div>
+        </div>
+        <div class="close-messages" id="closeMessages">
+          <div class="hs-timeline-line"></div>
+        </div>
+        <div class="close-col">
+          <div class="close-node" id="cl-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Server</div>
+            <div class="hs-state" id="cl-server-state">OPEN</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="close-codes" id="closeCodes">
+        <div class="code-card"><strong>1000</strong> Normal Closure</div>
+        <div class="code-card"><strong>1001</strong> Going Away</div>
+        <div class="code-card"><strong>1002</strong> Protocol Error</div>
+        <div class="code-card"><strong>1003</strong> Unsupported Data</div>
+        <div class="code-card"><strong>1006</strong> Abnormal (no close frame)</div>
+        <div class="code-card"><strong>1008</strong> Policy Violation</div>
+        <div class="code-card"><strong>1009</strong> Too Large</div>
+        <div class="code-card"><strong>1011</strong> Server Error</div>
+      </div>
+      <div class="close-log" id="closeLog">Choose a close reason to initiate the close handshake.</div>
+    </section>
+
+    <!-- Multiplexing & Subprotocols -->
+    <section class="sim-section">
+      <h2>🔀 Multiplexing & Subprotocols</h2>
+      <p class="section-desc">WebSocket supports subprotocol negotiation via Sec-WebSocket-Protocol. Applications can multiplex logical channels over a single connection. Explore common patterns.</p>
+      <div class="sim-controls">
+        <button id="muxSendChat" class="action-btn primary-btn">💬 Chat Message</button>
+        <button id="muxSendData" class="action-btn primary-btn-secondary">📊 Data Update</button>
+        <button id="muxSendControl" class="action-btn primary-btn-secondary">⚙️ Control Signal</button>
+        <button id="resetMux" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="mux-viz">
+        <div class="mux-conn">
+          <div class="mux-header">Single WebSocket Connection</div>
+          <div class="mux-channels">
+            <div class="mux-channel" id="muxChan0">
+              <div class="mc-label">💬 chat</div>
+              <div class="mc-msgs" id="muxMsgs0"></div>
+            </div>
+            <div class="mux-channel" id="muxChan1">
+              <div class="mc-label">📊 data</div>
+              <div class="mc-msgs" id="muxMsgs1"></div>
+            </div>
+            <div class="mux-channel" id="muxChan2">
+              <div class="mc-label">⚙️ control</div>
+              <div class="mc-msgs" id="muxMsgs2"></div>
+            </div>
+          </div>
+        </div>
+        <div class="mux-wire" id="muxWire">
+          <div class="mux-wire-label">Wire (frames)</div>
+          <div class="mux-wire-content" id="muxWireContent"></div>
+        </div>
+      </div>
+      <div class="mux-subproto">
+        <div class="sp-title">Common Subprotocols</div>
+        <div class="sp-grid">
+          <div class="sp-item"><code>graphql-ws</code> — GraphQL over WebSocket (subscriptions)</div>
+          <div class="sp-item"><code>wamp</code> — Web Application Messaging Protocol (pub/sub + RPC)</div>
+          <div class="sp-item"><code>stomp</code> — Simple Text Oriented Messaging Protocol</div>
+          <div class="sp-item"><code>mqtt</code> — IoT messaging protocol over WebSocket</div>
+          <div class="sp-item"><code>json</code> — Generic JSON-framed messages</div>
+          <div class="sp-item"><code>protobuf</code> — Protocol Buffers binary framing</div>
+        </div>
+      </div>
+      <div class="mux-log" id="muxLog">Send messages on different logical channels over one WebSocket.</div>
+    </section>
+
+    <!-- Backpressure & Flow Control -->
+    <section class="sim-section">
+      <h2>🚰 Backpressure & Flow Control</h2>
+      <p class="section-desc">When the receiver can't process messages fast enough, the send buffer fills up (bufferedAmount grows). Applications must monitor this to avoid memory exhaustion. WebSocket relies on TCP's flow control underneath.</p>
+      <div class="sim-controls">
+        <button id="bpSendFast" class="action-btn primary-btn">🚀 Send Fast (10 msgs)</button>
+        <button id="bpSendSlow" class="action-btn primary-btn-secondary">🐌 Send One</button>
+        <button id="bpDrain" class="action-btn primary-btn-secondary">📥 Drain Buffer</button>
+        <button id="bpSlowReceiver" class="action-btn warn-btn">🐢 Slow Receiver</button>
+        <button id="resetBp" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="bp-viz">
+        <div class="bp-bar-section">
+          <div class="bp-label">Send Buffer (bufferedAmount)</div>
+          <div class="bp-bar-track">
+            <div class="bp-bar-fill" id="bpBarFill" style="width: 0%"></div>
+          </div>
+          <div class="bp-bar-labels">
+            <span>0 KB</span>
+            <span id="bpCurrent">0 KB</span>
+            <span>1024 KB</span>
+          </div>
+        </div>
+        <div class="bp-bar-section">
+          <div class="bp-label">Receiver Processing Queue</div>
+          <div class="bp-bar-track">
+            <div class="bp-bar-fill bp-recv-fill" id="bpRecvFill" style="width: 0%"></div>
+          </div>
+          <div class="bp-bar-labels">
+            <span>0</span>
+            <span id="bpRecvCurrent">0 msgs</span>
+            <span>50 msgs</span>
+          </div>
+        </div>
+        <div class="bp-stats">
+          <div class="bp-stat">Messages sent: <strong id="bpSentCount">0</strong></div>
+          <div class="bp-stat">Messages processed: <strong id="bpProcCount">0</strong></div>
+          <div class="bp-stat">Dropped (overflow): <strong id="bpDropCount">0</strong></div>
+          <div class="bp-stat">TCP window: <strong id="bpTcpWin">65535</strong></div>
+        </div>
+      </div>
+      <div class="bp-log" id="bpLog">Send messages to see how backpressure builds when the receiver is slow.</div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔑 Sec-WebSocket-Key</h4>
+          <p>A random 16-byte base64 value sent by the client. The server appends the magic GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", SHA-1 hashes it, and returns the base64 result as Sec-WebSocket-Accept. This proves the server understands WebSocket.</p>
+        </div>
+        <div class="concept">
+          <h4>🎭 Masking</h4>
+          <p>Client-to-server frames must be masked with a random 32-bit key. Each payload byte is XORed: masked[i] = payload[i] XOR key[i % 4]. This prevents cache poisoning attacks where intermediary proxies might misinterpret WebSocket data as HTTP.</p>
+        </div>
+        <div class="concept">
+          <h4>🧩 Fragmentation</h4>
+          <p>Large messages can be split across multiple frames. The first frame has FIN=0, continuation frames use opcode 0x0, and the final frame sets FIN=1. This allows streaming large payloads without buffering the entire message.</p>
+        </div>
+        <div class="concept">
+          <h4>🔗 Extensions</h4>
+          <p>The permessage-deflate extension (RFC 7692) enables per-message compression using zlib. RSV1 bit indicates a compressed frame. This can reduce bandwidth 60-80% for text-heavy protocols like JSON.</p>
+        </div>
+        <div class="concept">
+          <h4>🔒 wss:// Security</h4>
+          <p>WebSocket over TLS (wss://) encrypts all traffic. Unlike ws://, wss:// also avoids issues with transparent proxies that may not understand WebSocket framing and could corrupt the connection.</p>
+        </div>
+        <div class="concept">
+          <h4>⚡ vs Server-Sent Events</h4>
+          <p>SSE is HTTP-based, server→client only, auto-reconnects, and uses text/event-stream. WebSocket is bidirectional and binary-capable but requires manual reconnection logic. Use SSE for notifications; WebSocket for interactive protocols.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #8b5cf6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #8b5cf6; }
+    .primary-btn:hover { background: #7c3aed; }
+    .primary-btn-secondary { background: #6366f1; }
+    .warn-btn { background: #ef4444; }
+    .warn-btn:hover { background: #dc2626; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    /* Handshake */
+    .handshake-viz, .close-viz { display: flex; align-items: flex-start; justify-content: center; gap: 1rem; margin: 1rem 0; min-height: 200px; }
+    .hs-col, .close-col { display: flex; flex-direction: column; align-items: center; min-width: 120px; }
+    .hs-node, .close-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; transition: all 0.4s; }
+    .hs-node.active, .close-node.active { border-color: #8b5cf6; background: #2e1065; box-shadow: 0 0 16px rgba(139,92,246,0.3); }
+    .hs-icon { font-size: 1.5rem; }
+    .hs-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .hs-state { color: #fbbf24; font-family: monospace; font-size: 0.75rem; margin-top: 0.25rem; }
+    .hs-messages, .close-messages { flex: 1; position: relative; min-height: 150px; min-width: 200px; }
+    .hs-timeline-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+    .hs-msg { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 0.3rem; animation: msgFade 0.5s ease-out; }
+    .hs-msg.right { flex-direction: row; }
+    .hs-msg.left { flex-direction: row-reverse; }
+    .hs-msg .msg-arrow { color: #8b5cf6; font-size: 1.2rem; flex-shrink: 0; }
+    .hs-msg .msg-text { background: #2e1065; color: #c4b5fd; font-family: monospace; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; white-space: nowrap; }
+    @keyframes msgFade { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .hs-log, .close-log, .ping-log, .mux-log, .bp-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; min-height: 2rem; }
+
+    /* Handshake Details */
+    .handshake-details { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .hd-panel { background: #0c1322; border-radius: 8px; padding: 0.75rem; }
+    .hd-title { color: #94a3b8; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .hd-panel pre { color: #a5b4fc; font-size: 0.72rem; margin: 0; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
+
+    /* Frame Format */
+    .frame-viz { margin: 1rem 0; }
+    .frame-row { display: flex; gap: 2px; margin-bottom: 2px; }
+    .frame-cell { background: #1e293b; border-radius: 6px; padding: 0.5rem; text-align: center; font-family: monospace; font-size: 0.8rem; color: #e2e8f0; position: relative; transition: all 0.3s; }
+    .frame-cell::before { content: attr(data-label); position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 0.65rem; color: #64748b; white-space: nowrap; font-family: sans-serif; }
+    .frame-cell.fin { flex: 0 0 40px; background: #064e3b; color: #6ee7b7; }
+    .frame-cell.rsv { flex: 0 0 36px; background: #1c1917; color: #78716c; }
+    .frame-cell.opcode { flex: 0 0 100px; background: #1e3a5f; color: #93c5fd; }
+    .frame-cell.mask-bit { flex: 0 0 40px; background: #4c1d95; color: #c4b5fd; }
+    .frame-cell.payload-len { flex: 1; background: #3730a3; color: #a5b4fc; }
+    .frame-cell.ext-len { flex: 1; background: #312e81; color: #a5b4fc; }
+    .frame-cell.masking-key { flex: 1; background: #4c1d95; color: #ddd6fe; }
+    .frame-cell.payload { flex: 1; background: #1e293b; color: #fbbf24; }
+    .frame-cell.highlight { box-shadow: 0 0 12px rgba(139, 92, 246, 0.5); transform: scale(1.02); }
+    .frame-desc { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; line-height: 1.6; margin-top: 0.5rem; }
+    .frame-header-row { margin-top: 24px; }
+
+    /* Ping/Pong */
+    .ping-viz { display: flex; align-items: flex-start; justify-content: center; gap: 1rem; margin: 1rem 0; min-height: 180px; }
+    .ping-col { display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+    .ping-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem; text-align: center; transition: all 0.3s; }
+    .ping-node.pinging { border-color: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,0.3); }
+    .ping-node.dead { border-color: #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.3); }
+    .ping-timeline { flex: 1; min-height: 180px; background: #0c1322; border-radius: 8px; padding: 0.5rem; overflow-y: auto; max-height: 250px; }
+    .ping-row { display: flex; align-items: center; margin: 0.3rem 0; animation: msgFade 0.3s ease-out; font-family: monospace; font-size: 0.78rem; }
+    .ping-row.ping-out { color: #8b5cf6; }
+    .ping-row.pong-in { color: #22c55e; }
+    .ping-row.ping-in { color: #f59e0b; }
+    .ping-row.pong-out { color: #06b6d4; }
+    .ping-row.timeout { color: #ef4444; }
+    .ping-stats { display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap; }
+    .ps-stat { color: #94a3b8; font-size: 0.85rem; }
+    .ps-stat strong { color: #f1f5f9; }
+
+    /* Close */
+    .close-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; margin: 1rem 0; }
+    .code-card { background: #1e293b; border-radius: 6px; padding: 0.5rem 0.75rem; color: #cbd5e1; font-size: 0.8rem; }
+    .code-card strong { color: #fbbf24; margin-right: 0.3rem; font-family: monospace; }
+
+    /* Multiplexing */
+    .mux-viz { margin: 1rem 0; }
+    .mux-conn { background: #0c1322; border: 1px solid #334155; border-radius: 10px; padding: 1rem; }
+    .mux-header { color: #94a3b8; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.75rem; text-align: center; }
+    .mux-channels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .mux-channel { background: #1e293b; border-radius: 8px; padding: 0.5rem; min-height: 80px; }
+    .mc-label { color: #f1f5f9; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .mc-msgs { font-size: 0.75rem; color: #94a3b8; font-family: monospace; max-height: 100px; overflow-y: auto; }
+    .mc-msg { padding: 0.15rem 0; animation: msgFade 0.3s ease-out; }
+    .mc-msg.chat { color: #8b5cf6; }
+    .mc-msg.data { color: #22c55e; }
+    .mc-msg.control { color: #f59e0b; }
+    .mux-wire { background: #0c1322; border: 1px solid #334155; border-radius: 10px; padding: 0.75rem; margin-top: 0.75rem; }
+    .mux-wire-label { color: #64748b; font-size: 0.75rem; margin-bottom: 0.3rem; }
+    .mux-wire-content { display: flex; flex-wrap: wrap; gap: 0.25rem; min-height: 30px; }
+    .wire-frame { display: inline-block; border-radius: 4px; padding: 0.15rem 0.4rem; font-family: monospace; font-size: 0.7rem; animation: msgFade 0.3s ease-out; }
+    .wire-frame.chat { background: #2e1065; color: #c4b5fd; border: 1px solid #8b5cf6; }
+    .wire-frame.data { background: #052e16; color: #86efac; border: 1px solid #22c55e; }
+    .wire-frame.control { background: #451a03; color: #fcd34d; border: 1px solid #f59e0b; }
+    .mux-subproto { background: #1e293b; border-radius: 10px; padding: 1rem; margin-top: 0.75rem; }
+    .sp-title { color: #f1f5f9; font-weight: 600; margin-bottom: 0.5rem; }
+    .sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+    .sp-item { color: #94a3b8; font-size: 0.82rem; line-height: 1.4; }
+    .sp-item code { color: #c4b5fd; background: #1e1b4b; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.78rem; }
+
+    /* Backpressure */
+    .bp-viz { margin: 1rem 0; }
+    .bp-bar-section { margin-bottom: 1rem; }
+    .bp-label { color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .bp-bar-track { height: 32px; background: #0c1322; border-radius: 8px; overflow: hidden; border: 1px solid #334155; }
+    .bp-bar-fill { height: 100%; background: linear-gradient(90deg, #8b5cf6, #6366f1); transition: width 0.3s; border-radius: 8px; }
+    .bp-bar-fill.bp-danger { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    .bp-recv-fill { background: linear-gradient(90deg, #22c55e, #16a34a); }
+    .bp-recv-fill.bp-danger { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+    .bp-bar-labels { display: flex; justify-content: space-between; color: #64748b; font-size: 0.7rem; margin-top: 0.2rem; }
+    .bp-stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .bp-stat { color: #94a3b8; font-size: 0.85rem; }
+    .bp-stat strong { color: #f1f5f9; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+
+    @media (max-width: 700px) {
+      .concepts-grid { grid-template-columns: 1fr; }
+      .handshake-details { grid-template-columns: 1fr; }
+      .mux-channels { grid-template-columns: 1fr; }
+      .sp-grid { grid-template-columns: 1fr; }
+      .close-codes { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // === Upgrade Handshake ===
+    function addHsMsg(container, dir, text, topPx) {
+      const div = document.createElement('div');
+      div.className = 'hs-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="msg-arrow">${dir === 'right' ? '→→→' : '←←←'}</span><span class="msg-text">${text}</span>`;
+      container.appendChild(div);
+    }
+
+    function randomBase64(len) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      let r = '';
+      for (let i = 0; i < len; i++) r += chars[Math.floor(Math.random() * chars.length)];
+      return r + '==';
+    }
+
+    $('startUpgrade').onclick = () => {
+      const msgs = $('hs-messages');
+      msgs.querySelectorAll('.hs-msg').forEach(m => m.remove());
+      const wsKey = randomBase64(22);
+      const wsAccept = randomBase64(26);
+
+      setTimeout(() => {
+        $('hs-client-state').textContent = 'UPGRADING';
+        $('hs-client').classList.add('active');
+        addHsMsg(msgs, 'right', 'GET /ws HTTP/1.1 + Upgrade: websocket', 10);
+        $('hdRequestText').textContent =
+          'GET /ws HTTP/1.1\r\n' +
+          'Host: example.com\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          'Sec-WebSocket-Key: ' + wsKey + '\r\n' +
+          'Sec-WebSocket-Version: 13\r\n' +
+          'Sec-WebSocket-Protocol: graphql-ws\r\n' +
+          'Origin: https://example.com';
+        $('hsLog').textContent = 'Client sends HTTP GET with Upgrade: websocket and random Sec-WebSocket-Key';
+      }, 300);
+
+      setTimeout(() => {
+        $('hs-server-state').textContent = 'SWITCHING';
+        $('hs-server').classList.add('active');
+        addHsMsg(msgs, 'left', '101 Switching Protocols', 60);
+        $('hdResponseText').textContent =
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          'Sec-WebSocket-Accept: ' + wsAccept + '\r\n' +
+          'Sec-WebSocket-Protocol: graphql-ws';
+        $('hsLog').textContent = 'Server responds 101. Accept = SHA-1(Key + GUID) base64. Protocol negotiated: graphql-ws';
+      }, 1200);
+
+      setTimeout(() => {
+        $('hs-client-state').textContent = 'OPEN';
+        $('hs-server-state').textContent = 'OPEN';
+        addHsMsg(msgs, 'right', '📨 WebSocket frames begin!', 110);
+        $('hsLog').textContent = '✅ WebSocket connection OPEN. Both sides can now send frames at any time. HTTP is done.';
+      }, 2200);
+    };
+
+    $('resetUpgrade').onclick = () => {
+      $('hs-messages').querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('hs-client-state').textContent = 'HTTP';
+      $('hs-server-state').textContent = 'LISTENING';
+      $('hs-client').classList.remove('active');
+      $('hs-server').classList.remove('active');
+      $('hdRequestText').textContent = 'Click "Start Handshake" to see the HTTP upgrade request...';
+      $('hdResponseText').textContent = 'Waiting for handshake...';
+      $('hsLog').textContent = 'The client sends a standard HTTP GET with Upgrade: websocket and a random base64 key.';
+    };
+
+    // === Frame Format ===
+    function toHex(str) {
+      return Array.from(str).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+    }
+
+    function showFrame(fin, opcode, opcodeLabel, masked, payload, desc) {
+      const payloadBytes = typeof payload === 'string' ? payload.length : payload;
+      const payloadHex = typeof payload === 'string' ? toHex(payload) : '[ ' + payloadBytes + ' bytes of binary data ]';
+      const maskKey = masked ? [0xa1, 0xb2, 0xc3, 0xd4].map(b => b.toString(16)).join(' ') : '—';
+
+      $('fFin').textContent = fin ? '1' : '0';
+      $('fOpcode').textContent = opcode.toString(2).padStart(4, '0');
+      $('fMask').textContent = masked ? '1' : '0';
+
+      if (payloadBytes <= 125) {
+        $('fPayLen').textContent = payloadBytes.toString(2).padStart(7, '0');
+        $('fExtLen').style.display = 'none';
+      } else if (payloadBytes <= 65535) {
+        $('fPayLen').textContent = '1111110';
+        $('fExtLen').style.display = 'flex';
+        $('fExtLenVal').textContent = payloadBytes + ' (16-bit extended)';
+        $('fExtLenVal').setAttribute('data-label', 'Extended Payload Length (16-bit)');
+      } else {
+        $('fPayLen').textContent = '1111111';
+        $('fExtLen').style.display = 'flex';
+        $('fExtLenVal').textContent = payloadBytes + ' (64-bit extended)';
+        $('fExtLenVal').setAttribute('data-label', 'Extended Payload Length (64-bit)');
+      }
+
+      $('fMaskKey').textContent = maskKey;
+      $('fPayload').textContent = payloadHex.substring(0, 120) + (payloadHex.length > 120 ? ' ...' : '');
+      $('frameDesc').innerHTML = `<strong>${opcodeLabel}:</strong> ${desc}`;
+
+      // Highlight animation
+      document.querySelectorAll('.frame-cell').forEach(c => c.classList.remove('highlight'));
+      setTimeout(() => {
+        document.querySelectorAll('.frame-cell').forEach(c => c.classList.add('highlight'));
+        setTimeout(() => document.querySelectorAll('.frame-cell').forEach(c => c.classList.remove('highlight')), 600);
+      }, 50);
+    }
+
+    $('frameText').onclick = () => showFrame(
+      true, 0x1, 'Text Frame (opcode 0x1)', true, 'Hello',
+      'FIN=1 (complete message), Opcode=0x1 (text), MASK=1 (client→server always masked), Payload="Hello" (5 bytes). The masking key XORs each payload byte to prevent cache poisoning attacks by intermediaries.'
+    );
+    $('frameBinary').onclick = () => showFrame(
+      true, 0x2, 'Binary Frame (opcode 0x2)', true, 128,
+      'FIN=1, Opcode=0x2 (binary). Used for Protocol Buffers, MessagePack, images, or any non-text data. Same framing rules apply — the opcode just tells the receiver how to interpret the payload.'
+    );
+    $('frameLarge').onclick = () => showFrame(
+      true, 0x2, 'Large Binary Frame (64KB)', true, 65536,
+      'Payload > 125 bytes uses extended length encoding. 126 → 16-bit length follows. 127 → 64-bit length follows. This frame is 65536 bytes so it uses the 16-bit extended field (value 126 in the 7-bit field).'
+    );
+    $('frameFragment').onclick = () => {
+      showFrame(false, 0x1, 'Fragment 1 of 3 (opcode 0x1)', true, 'Hel',
+        'FIN=0 means more fragments follow. First fragment carries the original opcode (0x1 = text). Continuation frames use opcode 0x0. The final fragment sets FIN=1. Receiver reassembles before delivering to the application.');
+      setTimeout(() => {
+        $('frameDesc').innerHTML += '<br><strong>Fragment 2:</strong> FIN=0, Opcode=0x0 (continuation), Payload="lo " — middle fragment, opcode is always 0.' +
+          '<br><strong>Fragment 3:</strong> FIN=1, Opcode=0x0 (continuation), Payload="World" — final fragment, FIN=1 signals end of message.';
+      }, 100);
+    };
+    $('resetFrame').onclick = () => {
+      showFrame(true, 0x1, 'Text Frame (opcode 0x1)', true, 'Hello',
+        'FIN=1 (complete message), Opcode=0x1 (text), MASK=1 (client→server always masked), Payload="Hello" (5 bytes). The masking key XORs each payload byte to prevent cache poisoning attacks by intermediaries.');
+    };
+
+    // === Ping/Pong ===
+    let pingCount = 0, pongCount = 0, latencies = [], serverDead = false, heartbeatInterval = null;
+
+    function addPingRow(cls, text) {
+      const tl = $('pingTimeline');
+      const row = document.createElement('div');
+      row.className = 'ping-row ' + cls;
+      row.textContent = text;
+      tl.appendChild(row);
+      tl.scrollTop = tl.scrollHeight;
+    }
+
+    function doPing(fromClient) {
+      const payload = Math.floor(Math.random() * 0xFFFF).toString(16);
+      if (fromClient) {
+        pingCount++;
+        $('pingSent').textContent = pingCount;
+        addPingRow('ping-out', '→ PING [0x9] payload=' + payload);
+        $('ping-client').classList.add('pinging');
+        setTimeout(() => $('ping-client').classList.remove('pinging'), 300);
+
+        if (serverDead) {
+          setTimeout(() => {
+            addPingRow('timeout', '✕ PONG timeout — server unreachable!');
+            $('pingStatus').textContent = '❌ Dead';
+            $('pingStatus').style.color = '#ef4444';
+            $('pingLog').textContent = 'No pong received. Server may be dead. Connection should be closed.';
+          }, 1500);
+        } else {
+          const lat = Math.floor(Math.random() * 50) + 5;
+          setTimeout(() => {
+            pongCount++;
+            $('pongRecv').textContent = pongCount;
+            addPingRow('pong-in', '← PONG [0xA] payload=' + payload + ' (' + lat + 'ms)');
+            latencies.push(lat);
+            const avg = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
+            $('pingLatency').textContent = avg + 'ms';
+            $('pingLog').textContent = 'Pong received in ' + lat + 'ms. Payload echoed correctly. Connection healthy.';
+          }, lat * 10 + 200);
+        }
+      } else {
+        addPingRow('ping-in', '← PING [0x9] payload=' + payload + ' (from server)');
+        setTimeout(() => {
+          addPingRow('pong-out', '→ PONG [0xA] payload=' + payload + ' (auto-reply)');
+          $('pingLog').textContent = 'Server sent ping, client auto-replied with pong echoing payload.';
+        }, 150);
+      }
+    }
+
+    $('sendPing').onclick = () => doPing(true);
+    $('sendServerPing').onclick = () => doPing(false);
+    $('startHeartbeat').onclick = () => {
+      if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; $('pingLog').textContent = 'Auto heartbeat stopped.'; return; }
+      heartbeatInterval = setInterval(() => doPing(true), 2000);
+      $('pingLog').textContent = 'Auto heartbeat started — pinging every 2s. Click again to stop.';
+    };
+    $('killConnection').onclick = () => {
+      serverDead = true;
+      $('ping-server').classList.add('dead');
+      $('pingLog').textContent = '💀 Server killed! Next ping will timeout.';
+    };
+    $('resetPing').onclick = () => {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+      pingCount = 0; pongCount = 0; latencies = []; serverDead = false;
+      $('pingTimeline').innerHTML = '';
+      $('pingSent').textContent = '0'; $('pongRecv').textContent = '0';
+      $('pingLatency').textContent = '—'; $('pingStatus').textContent = 'Connected';
+      $('pingStatus').style.color = '';
+      $('ping-client').classList.remove('pinging');
+      $('ping-server').classList.remove('dead');
+      $('pingLog').textContent = 'Send a ping to check connection health.';
+    };
+
+    // === Close Handshake ===
+    function addCloseMsg(container, dir, text, topPx) {
+      const div = document.createElement('div');
+      div.className = 'hs-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="msg-arrow">${dir === 'right' ? '→→→' : '←←←'}</span><span class="msg-text">${text}</span>`;
+      container.appendChild(div);
+    }
+
+    function doClose(code, reason) {
+      const msgs = $('closeMessages');
+      msgs.querySelectorAll('.hs-msg').forEach(m => m.remove());
+
+      setTimeout(() => {
+        $('cl-client-state').textContent = 'CLOSING';
+        $('cl-client').classList.add('active');
+        addCloseMsg(msgs, 'right', `CLOSE [0x8] code=${code} "${reason}"`, 10);
+        $('closeLog').textContent = `Client sends Close frame: code=${code} (${reason})`;
+      }, 200);
+
+      setTimeout(() => {
+        $('cl-server-state').textContent = 'CLOSING';
+        $('cl-server').classList.add('active');
+        addCloseMsg(msgs, 'left', `CLOSE [0x8] code=${code} "${reason}"`, 60);
+        $('closeLog').textContent = `Server echoes Close frame. Both sides agree to close.`;
+      }, 1000);
+
+      setTimeout(() => {
+        addCloseMsg(msgs, 'left', 'TCP FIN →', 110);
+        $('cl-client-state').textContent = 'CLOSED';
+        $('cl-server-state').textContent = 'CLOSED';
+        $('closeLog').textContent = `✅ Connection closed cleanly. Code ${code}: ${reason}. TCP connection terminated.`;
+      }, 1800);
+    }
+
+    $('closeNormal').onclick = () => doClose(1000, 'Normal Closure');
+    $('closeGoingAway').onclick = () => doClose(1001, 'Going Away');
+    $('closeError').onclick = () => doClose(1002, 'Protocol Error');
+    $('resetClose').onclick = () => {
+      $('closeMessages').querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('cl-client-state').textContent = 'OPEN';
+      $('cl-server-state').textContent = 'OPEN';
+      $('cl-client').classList.remove('active');
+      $('cl-server').classList.remove('active');
+      $('closeLog').textContent = 'Choose a close reason to initiate the close handshake.';
+    };
+
+    // === Multiplexing ===
+    let muxSeq = 0;
+    const muxMessages = {
+      chat: ['Hello!', 'How are you?', 'See you later', 'LOL 😂', 'Typing...'],
+      data: ['price: 42.5', 'temp: 23.1°C', 'cpu: 87%', 'users: 1,432', 'latency: 12ms'],
+      control: ['subscribe: #room1', 'unsubscribe: #room2', 'heartbeat', 'auth: token=...', 'resize: 80x24']
+    };
+
+    function muxSend(channel) {
+      muxSeq++;
+      const msgs = muxMessages[channel];
+      const msg = msgs[Math.floor(Math.random() * msgs.length)];
+      const chanIdx = channel === 'chat' ? 0 : channel === 'data' ? 1 : 2;
+      const container = $('muxMsgs' + chanIdx);
+      const div = document.createElement('div');
+      div.className = 'mc-msg ' + channel;
+      div.textContent = '#' + muxSeq + ' ' + msg;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+
+      const wire = $('muxWireContent');
+      const frame = document.createElement('span');
+      frame.className = 'wire-frame ' + channel;
+      frame.textContent = channel + ':' + msg.substring(0, 15);
+      wire.appendChild(frame);
+
+      $('muxLog').textContent = `Frame #${muxSeq} sent on "${channel}" channel: ${msg}`;
+    }
+
+    $('muxSendChat').onclick = () => muxSend('chat');
+    $('muxSendData').onclick = () => muxSend('data');
+    $('muxSendControl').onclick = () => muxSend('control');
+    $('resetMux').onclick = () => {
+      muxSeq = 0;
+      [0, 1, 2].forEach(i => $('muxMsgs' + i).innerHTML = '');
+      $('muxWireContent').innerHTML = '';
+      $('muxLog').textContent = 'Send messages on different logical channels over one WebSocket.';
+    };
+
+    // === Backpressure ===
+    let bpBuffer = 0, bpRecvQueue = 0, bpSent = 0, bpProcessed = 0, bpDropped = 0;
+    let slowReceiver = false, drainInterval = null;
+    const MAX_BUFFER = 1024, MAX_QUEUE = 50;
+
+    function bpUpdate() {
+      const bufPct = Math.min(bpBuffer / MAX_BUFFER * 100, 100);
+      const recvPct = Math.min(bpRecvQueue / MAX_QUEUE * 100, 100);
+      $('bpBarFill').style.width = bufPct + '%';
+      $('bpBarFill').classList.toggle('bp-danger', bufPct > 80);
+      $('bpCurrent').textContent = bpBuffer + ' KB';
+      $('bpRecvFill').style.width = recvPct + '%';
+      $('bpRecvFill').classList.toggle('bp-danger', recvPct > 80);
+      $('bpRecvCurrent').textContent = bpRecvQueue + ' msgs';
+      $('bpSentCount').textContent = bpSent;
+      $('bpProcCount').textContent = bpProcessed;
+      $('bpDropCount').textContent = bpDropped;
+      const tcpWin = Math.max(0, 65535 - bpBuffer * 64);
+      $('bpTcpWin').textContent = tcpWin;
+    }
+
+    function bpSendOne() {
+      bpSent++;
+      const size = Math.floor(Math.random() * 20) + 5;
+      if (bpBuffer + size > MAX_BUFFER) {
+        bpDropped++;
+        $('bpLog').textContent = `⚠️ Buffer full! Message dropped. Check bufferedAmount before sending.`;
+      } else {
+        bpBuffer += size;
+        bpRecvQueue++;
+        if (bpRecvQueue > MAX_QUEUE) {
+          bpRecvQueue = MAX_QUEUE;
+          bpDropped++;
+          $('bpLog').textContent = `⚠️ Receiver queue overflow! TCP backpressure kicking in.`;
+        } else {
+          $('bpLog').textContent = `Sent ${size}KB. Buffer: ${bpBuffer}KB. ${slowReceiver ? 'Receiver is slow!' : 'Receiver processing normally.'}`;
+        }
+      }
+      bpUpdate();
+
+      if (!slowReceiver) {
+        setTimeout(() => {
+          if (bpBuffer > 0) bpBuffer = Math.max(0, bpBuffer - size);
+          if (bpRecvQueue > 0) { bpRecvQueue--; bpProcessed++; }
+          bpUpdate();
+        }, 300);
+      }
+    }
+
+    $('bpSendFast').onclick = () => { for (let i = 0; i < 10; i++) setTimeout(() => bpSendOne(), i * 100); };
+    $('bpSendSlow').onclick = () => bpSendOne();
+    $('bpDrain').onclick = () => {
+      const drainAmt = Math.min(bpRecvQueue, 5);
+      bpRecvQueue -= drainAmt;
+      bpProcessed += drainAmt;
+      bpBuffer = Math.max(0, bpBuffer - drainAmt * 10);
+      bpUpdate();
+      $('bpLog').textContent = `Drained ${drainAmt} messages. Buffer relieved.`;
+    };
+    $('bpSlowReceiver').onclick = () => {
+      slowReceiver = !slowReceiver;
+      if (slowReceiver) {
+        $('bpLog').textContent = '🐢 Receiver is now slow — messages will pile up! Click again to restore.';
+        drainInterval = setInterval(() => {
+          if (bpRecvQueue > 0) { bpRecvQueue--; bpProcessed++; bpBuffer = Math.max(0, bpBuffer - 8); bpUpdate(); }
+        }, 2000);
+      } else {
+        if (drainInterval) clearInterval(drainInterval);
+        drainInterval = null;
+        $('bpLog').textContent = 'Receiver speed restored to normal.';
+      }
+    };
+    $('resetBp').onclick = () => {
+      bpBuffer = 0; bpRecvQueue = 0; bpSent = 0; bpProcessed = 0; bpDropped = 0;
+      slowReceiver = false;
+      if (drainInterval) clearInterval(drainInterval);
+      drainInterval = null;
+      bpUpdate();
+      $('bpLog').textContent = 'Send messages to see how backpressure builds when the receiver is slow.';
+    };
+  </script>
+</BaseLayout>
