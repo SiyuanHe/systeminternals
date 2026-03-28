@@ -1,0 +1,1019 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Helm & Kustomize" 
+  description="Interactive visualization of Helm chart structure, Go template rendering, release management, rollback mechanics, and Kustomize overlays"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Helm & Kustomize", href: "/kubernetes/helm/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⎈ Helm & Kustomize</h1>
+      <p class="subtitle">Chart Structure, Go Template Rendering, Release Management, Rollback & Kustomize Overlays</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Raw Kubernetes YAML doesn't scale. When you have dozens of microservices across dev, staging, and
+          production, you need a way to <strong>template</strong>, <strong>package</strong>, and
+          <strong>version</strong> your manifests. <strong>Helm</strong> is the package manager for Kubernetes —
+          it uses Go templates to generate manifests from reusable <em>charts</em>, tracks
+          <em>releases</em> as versioned snapshots, and supports atomic upgrades with rollback.
+          <strong>Kustomize</strong> takes a different approach: no templates, just pure YAML with
+          <em>overlays</em> that patch a base configuration. Both solve the same problem — managing
+          configuration variance — but with fundamentally different philosophies.
+        </p>
+      </div>
+    </section>
+
+    <!-- Helm Chart Structure -->
+    <section class="sim-section">
+      <h2>📁 Helm Chart Structure</h2>
+      <p class="section-desc">Click each file/directory to understand its role in a Helm chart.</p>
+
+      <div class="chart-anatomy">
+        <div class="chart-tree">
+          <div class="tree-item" data-item="chart-yaml">
+            <span class="tree-icon">📄</span> Chart.yaml
+          </div>
+          <div class="tree-item" data-item="values-yaml">
+            <span class="tree-icon">⚙️</span> values.yaml
+          </div>
+          <div class="tree-item" data-item="templates-dir">
+            <span class="tree-icon">📂</span> templates/
+          </div>
+          <div class="tree-item indent" data-item="tpl-deploy">
+            <span class="tree-icon">📄</span> deployment.yaml
+          </div>
+          <div class="tree-item indent" data-item="tpl-service">
+            <span class="tree-icon">📄</span> service.yaml
+          </div>
+          <div class="tree-item indent" data-item="tpl-ingress">
+            <span class="tree-icon">📄</span> ingress.yaml
+          </div>
+          <div class="tree-item indent" data-item="tpl-helpers">
+            <span class="tree-icon">📄</span> _helpers.tpl
+          </div>
+          <div class="tree-item indent" data-item="tpl-notes">
+            <span class="tree-icon">📄</span> NOTES.txt
+          </div>
+          <div class="tree-item indent" data-item="tpl-tests">
+            <span class="tree-icon">📂</span> tests/
+          </div>
+          <div class="tree-item" data-item="charts-dir">
+            <span class="tree-icon">📂</span> charts/
+          </div>
+          <div class="tree-item" data-item="crds-dir">
+            <span class="tree-icon">📂</span> crds/
+          </div>
+          <div class="tree-item" data-item="chart-lock">
+            <span class="tree-icon">🔒</span> Chart.lock
+          </div>
+        </div>
+
+        <div class="chart-info" id="chartInfo">
+          <div class="chart-info-title">Click a file</div>
+          <div class="chart-info-desc">Click any file or directory in the chart tree to learn what it does.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Go Template Rendering -->
+    <section class="sim-section">
+      <h2>🔧 Go Template Rendering</h2>
+      <p class="section-desc">See how Helm transforms templates + values into final Kubernetes manifests. Edit values and watch the output change.</p>
+
+      <div class="template-viz">
+        <div class="tpl-columns">
+          <div class="tpl-col">
+            <div class="tpl-col-header">values.yaml</div>
+            <div class="tpl-editor" id="valuesEditor">
+              <div class="tpl-line"><span class="tpl-key">replicaCount:</span> <span class="tpl-val editable" id="valReplicas" data-field="replicas">3</span></div>
+              <div class="tpl-line"><span class="tpl-key">image:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">repository:</span> <span class="tpl-val editable" id="valImage" data-field="image">nginx</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">tag:</span> <span class="tpl-val editable" id="valTag" data-field="tag">1.25.3</span></div>
+              <div class="tpl-line"><span class="tpl-key">service:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">type:</span> <span class="tpl-val editable" id="valSvcType" data-field="svcType">ClusterIP</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">port:</span> <span class="tpl-val editable" id="valPort" data-field="port">80</span></div>
+              <div class="tpl-line"><span class="tpl-key">resources:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">limits:</span></div>
+              <div class="tpl-line indent2"><span class="tpl-key">cpu:</span> <span class="tpl-val">500m</span></div>
+              <div class="tpl-line indent2"><span class="tpl-key">memory:</span> <span class="tpl-val">128Mi</span></div>
+            </div>
+          </div>
+
+          <div class="tpl-col">
+            <div class="tpl-col-header">template</div>
+            <div class="tpl-editor">
+              <div class="tpl-line"><span class="tpl-key">apiVersion:</span> apps/v1</div>
+              <div class="tpl-line"><span class="tpl-key">kind:</span> Deployment</div>
+              <div class="tpl-line"><span class="tpl-key">metadata:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">name:</span> <span class="tpl-tpl">{`{{ include "mychart.fullname" . }}`}</span></div>
+              <div class="tpl-line"><span class="tpl-key">spec:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">replicas:</span> <span class="tpl-tpl">{`{{ .Values.replicaCount }}`}</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">template:</span></div>
+              <div class="tpl-line indent2"><span class="tpl-key">spec:</span></div>
+              <div class="tpl-line indent3"><span class="tpl-key">containers:</span></div>
+              <div class="tpl-line indent3">- <span class="tpl-key">image:</span> <span class="tpl-tpl">{`{{ .Values.image.repository }}:{{ .Values.image.tag }}`}</span></div>
+              <div class="tpl-line indent4"><span class="tpl-key">ports:</span></div>
+              <div class="tpl-line indent4">- <span class="tpl-key">containerPort:</span> <span class="tpl-tpl">{`{{ .Values.service.port }}`}</span></div>
+            </div>
+          </div>
+
+          <div class="tpl-col">
+            <div class="tpl-col-header">rendered output</div>
+            <div class="tpl-editor output" id="renderedOutput">
+              <div class="tpl-line"><span class="tpl-key">apiVersion:</span> apps/v1</div>
+              <div class="tpl-line"><span class="tpl-key">kind:</span> Deployment</div>
+              <div class="tpl-line"><span class="tpl-key">metadata:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">name:</span> <span class="tpl-rendered">my-release-mychart</span></div>
+              <div class="tpl-line"><span class="tpl-key">spec:</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">replicas:</span> <span class="tpl-rendered" id="outReplicas">3</span></div>
+              <div class="tpl-line indent"><span class="tpl-key">template:</span></div>
+              <div class="tpl-line indent2"><span class="tpl-key">spec:</span></div>
+              <div class="tpl-line indent3"><span class="tpl-key">containers:</span></div>
+              <div class="tpl-line indent3">- <span class="tpl-key">image:</span> <span class="tpl-rendered" id="outImage">nginx:1.25.3</span></div>
+              <div class="tpl-line indent4"><span class="tpl-key">ports:</span></div>
+              <div class="tpl-line indent4">- <span class="tpl-key">containerPort:</span> <span class="tpl-rendered" id="outPort">80</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="renderBtn">🔧 helm template</button>
+          <button class="action-btn election-btn" id="setOverrideBtn">--set image.tag=2.0.0</button>
+          <button class="action-btn reset-btn" id="resetTemplateBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Common Go Template Patterns -->
+    <section class="sim-section">
+      <h2>📐 Go Template Patterns</h2>
+      <p class="section-desc">Click each pattern to see how it works and when to use it.</p>
+
+      <div class="patterns-grid">
+        <div class="pattern-card active" data-pattern="if">
+          <div class="pattern-name">Conditionals</div>
+          <div class="pattern-syntax">{`{{ if .Values.x }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="range">
+          <div class="pattern-name">Loops</div>
+          <div class="pattern-syntax">{`{{ range .Values.list }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="with">
+          <div class="pattern-name">Scope</div>
+          <div class="pattern-syntax">{`{{ with .Values.x }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="include">
+          <div class="pattern-name">Named Templates</div>
+          <div class="pattern-syntax">{`{{ include "name" . }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="toYaml">
+          <div class="pattern-name">YAML Helpers</div>
+          <div class="pattern-syntax">{`{{ toYaml .Values.x | nindent 4 }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="default">
+          <div class="pattern-name">Defaults</div>
+          <div class="pattern-syntax">{`{{ default "val" .Values.x }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="tpl">
+          <div class="pattern-name">Dynamic Templates</div>
+          <div class="pattern-syntax">{`{{ tpl .Values.x . }}`}</div>
+        </div>
+        <div class="pattern-card" data-pattern="lookup">
+          <div class="pattern-name">Cluster Lookup</div>
+          <div class="pattern-syntax">{`{{ lookup "v1" "Secret" "ns" "name" }}`}</div>
+        </div>
+      </div>
+
+      <div class="pattern-detail" id="patternDetail">
+        <div class="pattern-detail-title">Conditionals</div>
+        <div class="pattern-detail-code">{`{{ if .Values.ingress.enabled }}`}<br/>apiVersion: networking.k8s.io/v1<br/>kind: Ingress<br/>...<br/>{`{{ end }}`}</div>
+        <div class="pattern-detail-desc">
+          Conditionally include entire resources or blocks. Falsy values: false, 0, "", nil, empty collections.
+          Use <code>{`{{ if and .Values.a .Values.b }}`}</code> for compound conditions.
+          The <code>{`{{- if ... }}`}</code> syntax (note the dash) trims leading whitespace to keep YAML clean.
+        </div>
+      </div>
+    </section>
+
+    <!-- Release Management -->
+    <section class="sim-section">
+      <h2>🚀 Release Lifecycle Simulator</h2>
+      <p class="section-desc">Install, upgrade, and rollback a Helm release. Watch how revision history and release state change.</p>
+
+      <div class="release-sim">
+        <div class="release-controls">
+          <h3>Release: my-app</h3>
+          <div class="config-group">
+            <label>Chart Version</label>
+            <select id="chartVersion" class="config-select">
+              <option value="1.0.0">mychart-1.0.0</option>
+              <option value="1.1.0">mychart-1.1.0</option>
+              <option value="2.0.0">mychart-2.0.0</option>
+            </select>
+          </div>
+          <div class="config-group">
+            <label>Replicas: <strong id="relReplicasLabel">2</strong></label>
+            <input type="range" id="relReplicasSlider" min="1" max="10" value="2" step="1" class="slider">
+          </div>
+          <button class="action-btn primary-btn" id="helmInstallBtn">📥 helm install</button>
+          <button class="action-btn election-btn" id="helmUpgradeBtn" style="margin-top: 8px" disabled>⬆️ helm upgrade</button>
+          <button class="action-btn chaos-btn" id="helmRollbackBtn" style="margin-top: 8px" disabled>⏪ helm rollback</button>
+          <button class="action-btn reset-btn" id="helmUninstallBtn" style="margin-top: 8px" disabled>🗑️ helm uninstall</button>
+        </div>
+
+        <div class="release-display">
+          <div class="release-status-bar">
+            <div class="rel-status" id="relStatus">Not installed</div>
+            <div class="rel-revision">Revision: <strong id="relRevision">—</strong></div>
+          </div>
+
+          <div class="release-events" id="releaseEvents">
+            <div class="event-header">Helm Events</div>
+          </div>
+
+          <div class="revision-history" id="revisionHistory">
+            <div class="rev-header">Revision History</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Helm Hooks -->
+    <section class="sim-section">
+      <h2>🪝 Helm Hooks</h2>
+      <p class="section-desc">Hooks let you run Jobs at specific points in the release lifecycle. Click each hook to learn when it fires.</p>
+
+      <div class="hooks-timeline">
+        <div class="hook-item" data-hook="pre-install">
+          <div class="hook-dot"></div>
+          <div class="hook-label">pre-install</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="post-install">
+          <div class="hook-dot"></div>
+          <div class="hook-label">post-install</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="pre-upgrade">
+          <div class="hook-dot"></div>
+          <div class="hook-label">pre-upgrade</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="post-upgrade">
+          <div class="hook-dot"></div>
+          <div class="hook-label">post-upgrade</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="pre-rollback">
+          <div class="hook-dot"></div>
+          <div class="hook-label">pre-rollback</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="pre-delete">
+          <div class="hook-dot"></div>
+          <div class="hook-label">pre-delete</div>
+        </div>
+        <div class="hook-line"></div>
+        <div class="hook-item" data-hook="test">
+          <div class="hook-dot"></div>
+          <div class="hook-label">test</div>
+        </div>
+      </div>
+
+      <div class="hook-detail" id="hookDetail">
+        <div class="hook-detail-title">Click a hook</div>
+        <div class="hook-detail-desc">Click any hook in the timeline to learn when it runs and common use cases.</div>
+      </div>
+    </section>
+
+    <!-- Kustomize vs Helm -->
+    <section class="sim-section">
+      <h2>⚖️ Kustomize vs Helm</h2>
+      <p class="section-desc">Two philosophies for the same problem. Click each approach to compare.</p>
+
+      <div class="compare-viz">
+        <div class="compare-cards">
+          <div class="compare-card active" data-approach="helm">
+            <div class="compare-icon">⎈</div>
+            <h3>Helm</h3>
+            <div class="compare-tagline">Template-based packaging</div>
+          </div>
+          <div class="compare-card" data-approach="kustomize">
+            <div class="compare-icon">🔧</div>
+            <h3>Kustomize</h3>
+            <div class="compare-tagline">Template-free overlays</div>
+          </div>
+        </div>
+        <div class="compare-detail" id="compareDetail">
+          <div class="compare-table">
+            <div class="compare-row header">
+              <div class="compare-cell">Aspect</div>
+              <div class="compare-cell">Helm</div>
+              <div class="compare-cell">Kustomize</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">Philosophy</div>
+              <div class="compare-cell highlight">Parameterize with templates</div>
+              <div class="compare-cell">Patch plain YAML</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">Learning curve</div>
+              <div class="compare-cell highlight">Go templates + Helm concepts</div>
+              <div class="compare-cell">Strategic merge patches</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">Packaging</div>
+              <div class="compare-cell highlight">Charts (tgz archives)</div>
+              <div class="compare-cell">Directories with kustomization.yaml</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">State tracking</div>
+              <div class="compare-cell highlight">Release secrets in cluster</div>
+              <div class="compare-cell">None (stateless)</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">Rollback</div>
+              <div class="compare-cell highlight">Built-in (helm rollback)</div>
+              <div class="compare-cell">Git revert + kubectl apply</div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-cell label">Ecosystem</div>
+              <div class="compare-cell highlight">Artifact Hub, chart repos</div>
+              <div class="compare-cell">Built into kubectl</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Kustomize Overlays -->
+    <section class="sim-section">
+      <h2>📂 Kustomize Overlay System</h2>
+      <p class="section-desc">See how Kustomize patches a base configuration for different environments.</p>
+
+      <div class="kustomize-viz">
+        <div class="kust-columns">
+          <div class="kust-col">
+            <div class="kust-col-header">base/</div>
+            <div class="kust-editor">
+              <div class="kust-line"><span class="tpl-key">apiVersion:</span> apps/v1</div>
+              <div class="kust-line"><span class="tpl-key">kind:</span> Deployment</div>
+              <div class="kust-line"><span class="tpl-key">metadata:</span></div>
+              <div class="kust-line indent"><span class="tpl-key">name:</span> my-app</div>
+              <div class="kust-line"><span class="tpl-key">spec:</span></div>
+              <div class="kust-line indent"><span class="tpl-key">replicas:</span> <span id="kustBaseReplicas">1</span></div>
+              <div class="kust-line indent"><span class="tpl-key">template:</span></div>
+              <div class="kust-line indent2"><span class="tpl-key">spec:</span></div>
+              <div class="kust-line indent3"><span class="tpl-key">containers:</span></div>
+              <div class="kust-line indent3">- <span class="tpl-key">name:</span> app</div>
+              <div class="kust-line indent4"><span class="tpl-key">image:</span> <span id="kustBaseImage">my-app:latest</span></div>
+              <div class="kust-line indent4"><span class="tpl-key">resources:</span></div>
+              <div class="kust-line indent5"><span class="tpl-key">limits:</span></div>
+              <div class="kust-line indent6"><span class="tpl-key">memory:</span> <span id="kustBaseMem">128Mi</span></div>
+            </div>
+          </div>
+
+          <div class="kust-col overlay-col">
+            <div class="kust-col-header">
+              <select id="kustEnv" class="config-select inline-select">
+                <option value="dev">overlays/dev/</option>
+                <option value="staging">overlays/staging/</option>
+                <option value="prod">overlays/prod/</option>
+              </select>
+            </div>
+            <div class="kust-editor" id="kustOverlay">
+              <div class="kust-line"><span class="tpl-key">namePrefix:</span> <span class="kust-patch" id="kustPrefix">dev-</span></div>
+              <div class="kust-line"><span class="tpl-key">replicas:</span></div>
+              <div class="kust-line indent">- <span class="tpl-key">name:</span> my-app</div>
+              <div class="kust-line indent2"><span class="tpl-key">count:</span> <span class="kust-patch" id="kustOverlayReplicas">1</span></div>
+              <div class="kust-line"><span class="tpl-key">images:</span></div>
+              <div class="kust-line indent">- <span class="tpl-key">name:</span> my-app</div>
+              <div class="kust-line indent2"><span class="tpl-key">newTag:</span> <span class="kust-patch" id="kustOverlayTag">dev-abc123</span></div>
+              <div class="kust-line"><span class="tpl-key">patches:</span></div>
+              <div class="kust-line indent"><span class="kust-patch" id="kustOverlayPatch">memory: 128Mi</span></div>
+            </div>
+          </div>
+
+          <div class="kust-col">
+            <div class="kust-col-header">kustomize build output</div>
+            <div class="kust-editor output" id="kustOutput">
+              <div class="kust-line"><span class="tpl-key">apiVersion:</span> apps/v1</div>
+              <div class="kust-line"><span class="tpl-key">kind:</span> Deployment</div>
+              <div class="kust-line"><span class="tpl-key">metadata:</span></div>
+              <div class="kust-line indent"><span class="tpl-key">name:</span> <span class="tpl-rendered" id="kustOutName">dev-my-app</span></div>
+              <div class="kust-line"><span class="tpl-key">spec:</span></div>
+              <div class="kust-line indent"><span class="tpl-key">replicas:</span> <span class="tpl-rendered" id="kustOutReplicas">1</span></div>
+              <div class="kust-line indent"><span class="tpl-key">template:</span></div>
+              <div class="kust-line indent2"><span class="tpl-key">spec:</span></div>
+              <div class="kust-line indent3"><span class="tpl-key">containers:</span></div>
+              <div class="kust-line indent3">- <span class="tpl-key">name:</span> app</div>
+              <div class="kust-line indent4"><span class="tpl-key">image:</span> <span class="tpl-rendered" id="kustOutImage">my-app:dev-abc123</span></div>
+              <div class="kust-line indent4"><span class="tpl-key">resources:</span></div>
+              <div class="kust-line indent5"><span class="tpl-key">limits:</span></div>
+              <div class="kust-line indent6"><span class="tpl-key">memory:</span> <span class="tpl-rendered" id="kustOutMem">128Mi</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="kustBuildBtn">🔧 kustomize build</button>
+          <button class="action-btn reset-btn" id="kustResetBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Helm Release Storage -->
+    <section class="sim-section">
+      <h2>🗄️ How Helm Stores Releases</h2>
+      <p class="section-desc">Helm stores release history as Kubernetes Secrets (or ConfigMaps). Click to explore the internals.</p>
+
+      <div class="storage-viz">
+        <div class="storage-flow">
+          <div class="stor-component">
+            <div class="stor-icon">⎈</div>
+            <div class="stor-name">helm upgrade</div>
+          </div>
+          <div class="stor-arrow">→</div>
+          <div class="stor-component">
+            <div class="stor-icon">📦</div>
+            <div class="stor-name">Render templates</div>
+          </div>
+          <div class="stor-arrow">→</div>
+          <div class="stor-component">
+            <div class="stor-icon">🔐</div>
+            <div class="stor-name">Create Secret</div>
+            <div class="stor-detail">sh.helm.release.v1.my-app.v3</div>
+          </div>
+          <div class="stor-arrow">→</div>
+          <div class="stor-component">
+            <div class="stor-icon">📤</div>
+            <div class="stor-name">kubectl apply</div>
+          </div>
+        </div>
+        <div class="stor-secret-detail">
+          <div class="stor-secret-header">Secret: sh.helm.release.v1.my-app.v3</div>
+          <div class="stor-secret-body">
+            <div class="stor-field"><span class="stor-key">type:</span> helm.sh/release.v1</div>
+            <div class="stor-field"><span class="stor-key">data.release:</span> base64(gzip(json))</div>
+            <div class="stor-field indent"><span class="stor-key">→ chart:</span> metadata + templates</div>
+            <div class="stor-field indent"><span class="stor-key">→ config:</span> merged values</div>
+            <div class="stor-field indent"><span class="stor-key">→ manifest:</span> rendered YAML</div>
+            <div class="stor-field indent"><span class="stor-key">→ info.status:</span> deployed | superseded | failed</div>
+            <div class="stor-field indent"><span class="stor-key">→ version:</span> revision number</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Best Practices -->
+    <section class="sim-section">
+      <h2>🏆 Best Practices</h2>
+      <p class="section-desc">Practical guidelines for production Helm and Kustomize usage.</p>
+
+      <div class="operators-grid">
+        <div class="operator-card">
+          <div class="op-icon">🔒</div>
+          <h3>Pin Chart Versions</h3>
+          <p>Always specify exact chart versions in CI/CD. Use Chart.lock for dependency pinning. Floating versions cause irreproducible deploys and midnight surprises.</p>
+          <div class="op-crd">helm install --version 1.2.3</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">🧪</div>
+          <h3>Template Testing</h3>
+          <p>Use helm template to render locally, helm lint for validation, and helm test for post-deploy smoke tests. Add unit tests with helm-unittest plugin.</p>
+          <div class="op-crd">helm template + helm lint + helm test</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">📋</div>
+          <h3>GitOps with Kustomize</h3>
+          <p>Store base + overlays in Git. Use Argo CD or Flux to reconcile. Kustomize's stateless nature makes it a perfect fit for declarative GitOps workflows.</p>
+          <div class="op-crd">kubectl apply -k overlays/prod/</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">🔄</div>
+          <h3>Helm + Kustomize Together</h3>
+          <p>Use Helm to package vendor charts, then Kustomize to patch for your environment. Argo CD supports this natively with the "helm + kustomize" source type.</p>
+          <div class="op-crd">helmCharts: + patches: in kustomization.yaml</div>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { font-size: 1.1rem; color: #888; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; }
+  .overview-card p { color: #ccc; line-height: 1.8; font-size: 1.05rem; }
+  .overview-card strong { color: #60a5fa; }
+  .overview-card em { color: #fbbf24; }
+  .overview-card code { background: rgba(96,165,250,0.15); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #60a5fa; }
+
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 0.95rem; }
+  .sim-section { margin-bottom: 50px; }
+
+  /* Chart Anatomy */
+  .chart-anatomy { display: grid; grid-template-columns: 300px 1fr; gap: 24px; }
+  .chart-tree { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.85rem; }
+  .tree-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s; color: #ccc; display: flex; align-items: center; gap: 8px; }
+  .tree-item:hover { background: rgba(96,165,250,0.1); }
+  .tree-item.highlight { background: rgba(96,165,250,0.15); border-left: 3px solid #60a5fa; }
+  .tree-icon { font-size: 1rem; }
+  .indent { padding-left: 28px; }
+  .indent2 { padding-left: 48px; }
+  .indent3 { padding-left: 68px; }
+  .indent4 { padding-left: 88px; }
+  .indent5 { padding-left: 108px; }
+  .indent6 { padding-left: 128px; }
+  .chart-info { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .chart-info-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 8px; }
+  .chart-info-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+
+  /* Template Viz */
+  .template-viz { margin-top: 16px; }
+  .tpl-columns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .tpl-col-header { font-size: 0.85rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tpl-editor { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.78rem; line-height: 1.8; }
+  .tpl-editor.output { border-color: rgba(74,222,128,0.3); }
+  .tpl-line { color: #ccc; padding: 1px 0; }
+  .tpl-key { color: #60a5fa; }
+  .tpl-val { color: #4ade80; }
+  .tpl-val.editable { cursor: pointer; border-bottom: 1px dashed rgba(74,222,128,0.4); }
+  .tpl-val.editable:hover { background: rgba(74,222,128,0.1); }
+  .tpl-tpl { color: #fbbf24; }
+  .tpl-rendered { color: #4ade80; font-weight: 600; transition: all 0.3s; }
+  .tpl-rendered.flash { background: rgba(74,222,128,0.2); border-radius: 3px; padding: 0 4px; }
+
+  /* Patterns */
+  .patterns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .pattern-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px; cursor: pointer; transition: all 0.3s; text-align: center; }
+  .pattern-card:hover, .pattern-card.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.1); }
+  .pattern-name { font-weight: 700; color: #fff; font-size: 0.85rem; margin-bottom: 4px; }
+  .pattern-syntax { font-family: 'SF Mono',monospace; font-size: 0.7rem; color: #fbbf24; }
+  .pattern-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .pattern-detail-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 10px; }
+  .pattern-detail-code { font-family: 'SF Mono',monospace; font-size: 0.82rem; color: #fbbf24; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 12px; line-height: 1.6; }
+  .pattern-detail-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+  .pattern-detail-desc code { background: rgba(96,165,250,0.15); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #60a5fa; }
+
+  /* Release Sim */
+  .release-sim { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+  .release-controls { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .release-controls h3 { font-size: 1rem; color: #fff; margin-bottom: 16px; }
+  .release-display { display: flex; flex-direction: column; gap: 16px; }
+  .release-status-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.03); border-radius: 10px; }
+  .rel-status { font-weight: 700; font-size: 0.9rem; color: #888; }
+  .rel-status.deployed { color: #4ade80; }
+  .rel-status.upgrading { color: #60a5fa; }
+  .rel-status.failed { color: #f87171; }
+  .rel-status.rolling-back { color: #fbbf24; }
+  .rel-revision { font-size: 0.85rem; color: #888; }
+  .rel-revision strong { color: #fff; }
+  .release-events { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; max-height: 200px; overflow-y: auto; font-family: 'SF Mono',monospace; font-size: 0.75rem; }
+  .event-header { color: #888; font-weight: 600; margin-bottom: 8px; }
+  .event-entry { padding: 2px 0; }
+  .event-entry.info { color: #60a5fa; }
+  .event-entry.success { color: #4ade80; }
+  .event-entry.warning { color: #fbbf24; }
+  .event-entry.error { color: #f87171; }
+  .revision-history { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; }
+  .rev-header { font-size: 0.8rem; font-weight: 600; color: #aaa; margin-bottom: 8px; }
+  .rev-entry { display: flex; gap: 12px; font-size: 0.78rem; padding: 4px 8px; border-radius: 4px; margin-bottom: 2px; }
+  .rev-entry.current { background: rgba(74,222,128,0.1); }
+  .rev-entry.superseded { opacity: 0.6; }
+  .rev-num { color: #60a5fa; font-weight: 700; min-width: 30px; }
+  .rev-chart { color: #ccc; min-width: 100px; }
+  .rev-status { font-weight: 600; }
+  .rev-status.deployed { color: #4ade80; }
+  .rev-status.superseded { color: #888; }
+
+  /* Hooks */
+  .hooks-timeline { display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin-bottom: 20px; justify-content: center; }
+  .hook-item { text-align: center; cursor: pointer; transition: all 0.3s; padding: 8px 4px; }
+  .hook-item:hover .hook-dot, .hook-item.active .hook-dot { background: #60a5fa; box-shadow: 0 0 12px rgba(96,165,250,0.5); }
+  .hook-dot { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.2); margin: 0 auto 6px; transition: all 0.3s; }
+  .hook-label { font-size: 0.7rem; color: #aaa; font-family: 'SF Mono',monospace; }
+  .hook-line { width: 30px; height: 2px; background: rgba(255,255,255,0.15); margin-bottom: 20px; }
+  .hook-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .hook-detail-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 8px; }
+  .hook-detail-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+
+  /* Compare */
+  .compare-viz { margin-top: 16px; }
+  .compare-cards { display: flex; gap: 16px; margin-bottom: 20px; }
+  .compare-card { flex: 1; background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .compare-card:hover, .compare-card.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.08); }
+  .compare-icon { font-size: 2rem; margin-bottom: 8px; }
+  .compare-card h3 { color: #fff; font-size: 1.1rem; margin-bottom: 4px; }
+  .compare-tagline { font-size: 0.85rem; color: #888; }
+  .compare-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; overflow: hidden; }
+  .compare-table { display: flex; flex-direction: column; }
+  .compare-row { display: grid; grid-template-columns: 140px 1fr 1fr; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .compare-row.header { background: rgba(255,255,255,0.05); }
+  .compare-row.header .compare-cell { font-weight: 700; color: #fff; }
+  .compare-cell { padding: 10px 14px; font-size: 0.85rem; color: #ccc; }
+  .compare-cell.label { color: #aaa; font-weight: 600; }
+  .compare-cell.highlight { color: #60a5fa; }
+
+  /* Kustomize */
+  .kustomize-viz { margin-top: 16px; }
+  .kust-columns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .kust-col-header { font-size: 0.85rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .inline-select { background: transparent; border: none; color: #fbbf24; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; padding: 0; }
+  .inline-select option { background: #1a1a2e; }
+  .kust-editor { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.78rem; line-height: 1.8; }
+  .kust-editor.output { border-color: rgba(74,222,128,0.3); }
+  .kust-line { color: #ccc; padding: 1px 0; }
+  .kust-patch { color: #f472b6; font-weight: 600; }
+  .overlay-col .kust-editor { border-color: rgba(244,114,182,0.3); }
+
+  /* Helm Storage */
+  .storage-viz { margin-top: 16px; }
+  .storage-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+  .stor-component { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; text-align: center; min-width: 110px; }
+  .stor-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .stor-name { font-weight: 700; color: #fff; font-size: 0.85rem; }
+  .stor-detail { font-size: 0.65rem; color: #60a5fa; margin-top: 4px; font-family: 'SF Mono',monospace; }
+  .stor-arrow { font-size: 1.2rem; color: #555; }
+  .stor-secret-detail { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .stor-secret-header { font-weight: 700; color: #60a5fa; font-size: 0.9rem; margin-bottom: 12px; font-family: 'SF Mono',monospace; }
+  .stor-secret-body { font-family: 'SF Mono',monospace; font-size: 0.8rem; }
+  .stor-field { color: #ccc; padding: 2px 0; }
+  .stor-key { color: #fbbf24; }
+
+  /* Operators Grid (reused) */
+  .operators-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .operator-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; transition: all 0.3s; }
+  .operator-card:hover { border-color: rgba(96,165,250,0.3); transform: translateY(-2px); }
+  .op-icon { font-size: 1.8rem; margin-bottom: 8px; }
+  .operator-card h3 { font-size: 1.05rem; color: #fff; margin-bottom: 8px; }
+  .operator-card p { font-size: 0.85rem; color: #888; line-height: 1.6; margin-bottom: 10px; }
+  .op-crd { font-size: 0.75rem; color: #60a5fa; font-family: 'SF Mono',monospace; }
+
+  /* Shared */
+  .action-bar { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59,130,246,0.4); }
+  .election-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; }
+  .election-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .chaos-btn { background: linear-gradient(135deg, #f472b6, #ef4444); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .config-group { margin-bottom: 16px; }
+  .config-group label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .config-group label strong { color: #60a5fa; }
+  .slider { width: 100%; height: 6px; -webkit-appearance: none; background: rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; }
+  .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+  .config-select { width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #ddd; font-size: 0.85rem; }
+
+  @media (max-width: 768px) {
+    .chart-anatomy, .release-sim { grid-template-columns: 1fr; }
+    .tpl-columns, .kust-columns { grid-template-columns: 1fr; }
+    .compare-cards { flex-direction: column; }
+    .compare-row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // Helper
+  function addEvent(container, text, cls) {
+    const el = document.createElement('div');
+    el.className = 'event-entry ' + cls;
+    el.textContent = `[${new Date().toISOString().slice(11,23)}] ${text}`;
+    container.appendChild(el);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // Chart Anatomy
+  const chartInfoData = {
+    'chart-yaml': { title: 'Chart.yaml', desc: 'The chart\'s metadata file. Contains name, version (the chart version), appVersion (the app it deploys), description, type (application or library), dependencies, maintainers, and keywords. This is the only required file — everything else is optional. The version field follows SemVer and determines how Helm resolves chart dependencies.' },
+    'values-yaml': { title: 'values.yaml', desc: 'Default configuration values for the chart. Users override these with --set flags, -f custom-values.yaml, or environment-specific files. Every key here is accessible in templates as .Values.keyName. Good values.yaml files are well-commented and serve as documentation for the chart\'s configuration surface.' },
+    'templates-dir': { title: 'templates/', desc: 'Contains Go template files that Helm renders into Kubernetes manifests. Files ending in .yaml or .yml are rendered; files starting with _ are helpers (not rendered directly). The rendering engine has access to .Values, .Release, .Chart, .Capabilities, and .Template built-in objects.' },
+    'tpl-deploy': { title: 'templates/deployment.yaml', desc: 'A Go template that renders into a Kubernetes Deployment manifest. Typically parameterizes replicas, image, resources, env vars, probes, and affinity rules. Uses {{ include "chart.labels" . }} for consistent labeling across resources.' },
+    'tpl-service': { title: 'templates/service.yaml', desc: 'Renders a Service manifest. Parameterizes type (ClusterIP/NodePort/LoadBalancer), port mappings, and annotations. Often conditionally includes cloud provider annotations for load balancer configuration.' },
+    'tpl-ingress': { title: 'templates/ingress.yaml', desc: 'Often wrapped in {{ if .Values.ingress.enabled }} to be optional. Parameterizes hosts, paths, TLS configuration, and ingress class. One of the most complex templates due to API version differences between networking.k8s.io/v1 and v1beta1.' },
+    'tpl-helpers': { title: 'templates/_helpers.tpl', desc: 'Defines reusable named templates (partials) with {{ define "name" }}. Common helpers: chart.name, chart.fullname, chart.labels, chart.selectorLabels. The underscore prefix tells Helm not to render this file as a manifest — it\'s only included by other templates.' },
+    'tpl-notes': { title: 'templates/NOTES.txt', desc: 'A Go template rendered after install/upgrade and printed to the user. Typically shows how to access the application: port-forward commands, ingress URLs, or initial credentials. This is your chart\'s post-install README.' },
+    'tpl-tests': { title: 'templates/tests/', desc: 'Contains Pod manifests annotated with "helm.sh/hook": test. Running helm test creates these pods and checks exit codes. Common tests: HTTP health check, database connectivity, config validation. Tests are deleted after completion by default.' },
+    'charts-dir': { title: 'charts/', desc: 'Contains dependency charts as .tgz archives. When you declare dependencies in Chart.yaml and run helm dependency update, Helm downloads them here. Subcharts can be overridden via parent values using the subchart name as a key: subchart.key: value.' },
+    'crds-dir': { title: 'crds/', desc: 'CRD manifests placed here are installed before any templates are rendered (since templates may create CRs that need the CRD first). CRDs in this directory are NOT templated — they\'re applied as-is. They\'re also never upgraded or deleted by Helm to prevent accidental data loss.' },
+    'chart-lock': { title: 'Chart.lock', desc: 'Auto-generated lockfile from helm dependency update. Pins exact versions and digests of all dependencies, ensuring reproducible builds. Commit this to version control. Run helm dependency build to install from the lockfile without resolving.' }
+  };
+
+  document.querySelectorAll('.tree-item').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.tree-item').forEach(t => t.classList.remove('highlight'));
+      el.classList.add('highlight');
+      const d = chartInfoData[el.dataset.item];
+      if (d) {
+        document.getElementById('chartInfo').innerHTML = `<div class="chart-info-title">${d.title}</div><div class="chart-info-desc">${d.desc}</div>`;
+      }
+    });
+  });
+
+  // Template Rendering
+  function flashRendered(id) {
+    const el = document.getElementById(id);
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 600);
+  }
+
+  function renderOutput() {
+    const replicas = document.getElementById('valReplicas').textContent;
+    const image = document.getElementById('valImage').textContent;
+    const tag = document.getElementById('valTag').textContent;
+    const port = document.getElementById('valPort').textContent;
+
+    document.getElementById('outReplicas').textContent = replicas;
+    document.getElementById('outImage').textContent = `${image}:${tag}`;
+    document.getElementById('outPort').textContent = port;
+
+    flashRendered('outReplicas');
+    flashRendered('outImage');
+    flashRendered('outPort');
+  }
+
+  document.getElementById('renderBtn').addEventListener('click', renderOutput);
+
+  document.getElementById('setOverrideBtn').addEventListener('click', () => {
+    document.getElementById('valTag').textContent = '2.0.0';
+    renderOutput();
+  });
+
+  document.getElementById('resetTemplateBtn').addEventListener('click', () => {
+    document.getElementById('valReplicas').textContent = '3';
+    document.getElementById('valImage').textContent = 'nginx';
+    document.getElementById('valTag').textContent = '1.25.3';
+    document.getElementById('valSvcType').textContent = 'ClusterIP';
+    document.getElementById('valPort').textContent = '80';
+    renderOutput();
+  });
+
+  // Make editable values clickable
+  document.querySelectorAll('.tpl-val.editable').forEach(el => {
+    el.addEventListener('click', () => {
+      const current = el.textContent;
+      const input = prompt(`Enter new value for ${el.dataset.field}:`, current);
+      if (input !== null && input !== '') {
+        el.textContent = input;
+        renderOutput();
+      }
+    });
+  });
+
+  // Go Template Patterns
+  const patternData = {
+    'if': { title: 'Conditionals', code: '{{ if .Values.ingress.enabled }}\napiVersion: networking.k8s.io/v1\nkind: Ingress\n...\n{{ end }}', desc: 'Conditionally include entire resources or blocks. Falsy values: false, 0, "", nil, empty collections. Use <code>{{ if and .Values.a .Values.b }}</code> for compound conditions. The <code>{{- if ... }}</code> syntax (note the dash) trims leading whitespace to keep YAML clean.' },
+    'range': { title: 'Loops (range)', code: '{{ range .Values.ingress.hosts }}\n- host: {{ .host | quote }}\n  paths:\n  {{ range .paths }}\n  - path: {{ .path }}\n  {{ end }}\n{{ end }}', desc: 'Iterate over lists and maps. Inside range, the dot (.) is rebound to the current element. Use <code>{{ range $key, $val := .Values.env }}</code> for maps. <code>{{ range $i, $e := .Values.list }}</code> gives you the index.' },
+    'with': { title: 'Scope (with)', code: '{{ with .Values.nodeSelector }}\nnodeSelector:\n  {{ toYaml . | nindent 2 }}\n{{ end }}', desc: 'Changes the scope of dot (.) to the specified object. If the value is falsy, the block is skipped entirely — so it doubles as a conditional. Use <code>{{ $.Values.x }}</code> to access the root scope from inside a with block.' },
+    'include': { title: 'Named Templates (include)', code: '{{/* _helpers.tpl */}}\n{{ define "mychart.labels" }}\napp: {{ include "mychart.name" . }}\nrelease: {{ .Release.Name }}\n{{ end }}\n\n{{/* deployment.yaml */}}\nlabels:\n  {{ include "mychart.labels" . | nindent 4 }}', desc: 'Reusable template fragments defined with <code>{{ define }}</code> and called with <code>{{ include }}</code>. Unlike <code>{{ template }}</code>, include captures the output as a string so you can pipe it through functions like nindent. Always define helpers in _helpers.tpl.' },
+    'toYaml': { title: 'YAML Helpers', code: 'resources:\n  {{ toYaml .Values.resources | nindent 2 }}\n\nannotations:\n  {{ include "mychart.annotations" . | nindent 4 }}', desc: '<code>toYaml</code> converts a Go object to YAML string. <code>nindent N</code> adds a newline then indents N spaces — essential for proper YAML formatting. <code>indent N</code> indents without the newline. <code>quote</code> wraps in double quotes. These are the most-used Helm template functions.' },
+    'default': { title: 'Defaults & Coalesce', code: 'image: {{ .Values.image | default "nginx" }}\nreplicas: {{ .Values.replicas | default 1 }}\nname: {{ coalesce .Values.nameOverride .Chart.Name }}', desc: '<code>default</code> provides a fallback when the value is empty/nil. <code>coalesce</code> returns the first non-empty value from a list. <code>required "msg" .Values.x</code> fails the render if the value is missing — use it for values that must be set.' },
+    'tpl': { title: 'Dynamic Templates (tpl)', code: '# values.yaml\nannotation: "app-{{ .Release.Name }}"\n\n# template\nannotations:\n  custom: {{ tpl .Values.annotation . }}', desc: '<code>tpl</code> renders a string as a Go template. This lets users put template expressions in their values.yaml. Powerful but dangerous — it executes arbitrary template code from user input. Use sparingly and document the supported expressions.' },
+    'lookup': { title: 'Cluster Lookup', code: '{{ $secret := lookup "v1" "Secret" "default" "my-secret" }}\n{{ if $secret }}\n# Secret exists, use its data\n{{ end }}', desc: '<code>lookup</code> queries the Kubernetes API during rendering. Useful for conditional logic based on existing resources (e.g., don\'t create a Secret if one exists). Returns empty during helm template (no cluster access) — always guard with {{ if }}. Avoid in library charts.' }
+  };
+
+  document.querySelectorAll('.pattern-card').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      const d = patternData[el.dataset.pattern];
+      if (d) {
+        document.getElementById('patternDetail').innerHTML = `<div class="pattern-detail-title">${d.title}</div><div class="pattern-detail-code">${d.code.replace(/\n/g, '<br/>')}</div><div class="pattern-detail-desc">${d.desc}</div>`;
+      }
+    });
+  });
+
+  // Release Simulator
+  const relReplicasSlider = document.getElementById('relReplicasSlider');
+  relReplicasSlider.addEventListener('input', () => document.getElementById('relReplicasLabel').textContent = relReplicasSlider.value);
+
+  let revisions = [];
+  let currentRevision = 0;
+
+  function addRevision(chart, status, replicas) {
+    currentRevision++;
+    // Mark previous as superseded
+    revisions.forEach(r => { if (r.status === 'deployed') r.status = 'superseded'; });
+    revisions.push({ rev: currentRevision, chart: `mychart-${chart}`, status, replicas });
+    renderRevisions();
+  }
+
+  function renderRevisions() {
+    const container = document.getElementById('revisionHistory');
+    container.innerHTML = '<div class="rev-header">Revision History</div>';
+    revisions.forEach(r => {
+      const cls = r.status === 'deployed' ? 'current' : 'superseded';
+      container.innerHTML += `<div class="rev-entry ${cls}"><span class="rev-num">#${r.rev}</span><span class="rev-chart">${r.chart}</span><span class="rev-status ${r.status}">${r.status}</span><span style="color:#888;font-size:0.75rem">replicas: ${r.replicas}</span></div>`;
+    });
+  }
+
+  document.getElementById('helmInstallBtn').addEventListener('click', async () => {
+    if (currentRevision > 0) return;
+    const events = document.getElementById('releaseEvents');
+    const status = document.getElementById('relStatus');
+    const chart = document.getElementById('chartVersion').value;
+    const replicas = relReplicasSlider.value;
+
+    status.textContent = 'Installing...';
+    status.className = 'rel-status upgrading';
+    addEvent(events, `helm install my-app mychart --version ${chart}`, 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Rendering templates with merged values...', 'info');
+    await new Promise(r => setTimeout(r, 300));
+    addEvent(events, 'Running pre-install hooks...', 'info');
+    await new Promise(r => setTimeout(r, 500));
+    addEvent(events, 'Creating Deployment, Service, ConfigMap...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, `Storing release secret: sh.helm.release.v1.my-app.v1`, 'info');
+    await new Promise(r => setTimeout(r, 300));
+    addEvent(events, 'Running post-install hooks...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Release "my-app" installed ✓', 'success');
+
+    addRevision(chart, 'deployed', replicas);
+    document.getElementById('relRevision').textContent = currentRevision;
+    status.textContent = 'Deployed';
+    status.className = 'rel-status deployed';
+
+    document.getElementById('helmInstallBtn').disabled = true;
+    document.getElementById('helmUpgradeBtn').disabled = false;
+    document.getElementById('helmUninstallBtn').disabled = false;
+  });
+
+  document.getElementById('helmUpgradeBtn').addEventListener('click', async () => {
+    if (currentRevision === 0) return;
+    const events = document.getElementById('releaseEvents');
+    const status = document.getElementById('relStatus');
+    const chart = document.getElementById('chartVersion').value;
+    const replicas = relReplicasSlider.value;
+
+    status.textContent = 'Upgrading...';
+    status.className = 'rel-status upgrading';
+    addEvent(events, `helm upgrade my-app mychart --version ${chart} --set replicaCount=${replicas}`, 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Computing 3-way merge diff...', 'info');
+    await new Promise(r => setTimeout(r, 300));
+    addEvent(events, 'Running pre-upgrade hooks...', 'info');
+    await new Promise(r => setTimeout(r, 500));
+    addEvent(events, 'Applying updated manifests...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, `Storing release secret: sh.helm.release.v1.my-app.v${currentRevision + 1}`, 'info');
+    await new Promise(r => setTimeout(r, 300));
+    addEvent(events, `Release "my-app" upgraded to revision ${currentRevision + 1} ✓`, 'success');
+
+    addRevision(chart, 'deployed', replicas);
+    document.getElementById('relRevision').textContent = currentRevision;
+    status.textContent = 'Deployed';
+    status.className = 'rel-status deployed';
+    document.getElementById('helmRollbackBtn').disabled = false;
+  });
+
+  document.getElementById('helmRollbackBtn').addEventListener('click', async () => {
+    if (currentRevision < 2) return;
+    const events = document.getElementById('releaseEvents');
+    const status = document.getElementById('relStatus');
+    const targetRev = currentRevision - 1;
+    const targetData = revisions[targetRev - 1];
+
+    status.textContent = 'Rolling back...';
+    status.className = 'rel-status rolling-back';
+    addEvent(events, `helm rollback my-app ${targetRev}`, 'warning');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, `Loading revision ${targetRev} manifest from secret...`, 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Running pre-rollback hooks...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, `Restoring manifests from revision ${targetRev}...`, 'info');
+    await new Promise(r => setTimeout(r, 500));
+    addEvent(events, `Rollback to revision ${targetRev} complete — creates new revision ${currentRevision + 1} ✓`, 'success');
+
+    addRevision(targetData.chart.replace('mychart-', ''), 'deployed', targetData.replicas);
+    document.getElementById('relRevision').textContent = currentRevision;
+    status.textContent = 'Deployed';
+    status.className = 'rel-status deployed';
+  });
+
+  document.getElementById('helmUninstallBtn').addEventListener('click', async () => {
+    const events = document.getElementById('releaseEvents');
+    const status = document.getElementById('relStatus');
+
+    addEvent(events, 'helm uninstall my-app', 'warning');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Running pre-delete hooks...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, 'Deleting all release resources...', 'warning');
+    await new Promise(r => setTimeout(r, 500));
+    addEvent(events, 'Removing release secrets...', 'warning');
+    await new Promise(r => setTimeout(r, 300));
+    addEvent(events, 'Release "my-app" uninstalled ✓', 'error');
+
+    revisions = [];
+    currentRevision = 0;
+    renderRevisions();
+    document.getElementById('relRevision').textContent = '—';
+    status.textContent = 'Not installed';
+    status.className = 'rel-status';
+    document.getElementById('helmInstallBtn').disabled = false;
+    document.getElementById('helmUpgradeBtn').disabled = true;
+    document.getElementById('helmRollbackBtn').disabled = true;
+    document.getElementById('helmUninstallBtn').disabled = true;
+  });
+
+  // Hooks
+  const hookData = {
+    'pre-install': { title: 'pre-install', desc: 'Runs after templates are rendered but before any resources are created in Kubernetes. Common uses: database migrations, schema creation, prerequisite checks. The hook Job must succeed before installation proceeds. If it fails, the release is marked as failed.' },
+    'post-install': { title: 'post-install', desc: 'Runs after all resources are created. Common uses: seed data, send notifications, register with external services. The release is already "installed" at this point — a hook failure here marks the release as failed but resources still exist.' },
+    'pre-upgrade': { title: 'pre-upgrade', desc: 'Runs before an upgrade. Common uses: database migrations for the new version, backup current state, validate upgrade path. If this hook fails, the upgrade is aborted and the release stays at its current revision.' },
+    'post-upgrade': { title: 'post-upgrade', desc: 'Runs after upgrade completes. Common uses: cache warming, integration tests, notification. Similar to post-install but for upgrade operations.' },
+    'pre-rollback': { title: 'pre-rollback', desc: 'Runs before a rollback. Common uses: reverse database migrations, snapshot current state for debugging. Useful when you need to undo schema changes that went with the now-failed upgrade.' },
+    'pre-delete': { title: 'pre-delete', desc: 'Runs before the release is deleted. Common uses: final backup, deregister from service mesh, clean up external resources (DNS records, cloud load balancers). This is your last chance to do cleanup with the release context available.' },
+    'test': { title: 'test (helm test)', desc: 'Runs when you execute helm test <release>. Creates Pods that verify the release is working: HTTP health checks, database connectivity, smoke tests. Pods are expected to exit 0 for success. Use hook-delete-policy to clean up test pods.' }
+  };
+
+  document.querySelectorAll('.hook-item').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.hook-item').forEach(h => h.classList.remove('active'));
+      el.classList.add('active');
+      const d = hookData[el.dataset.hook];
+      if (d) {
+        document.getElementById('hookDetail').innerHTML = `<div class="hook-detail-title">${d.title}</div><div class="hook-detail-desc">${d.desc}</div>`;
+      }
+    });
+  });
+
+  // Kustomize Overlays
+  const kustEnvData = {
+    dev: { prefix: 'dev-', replicas: 1, tag: 'dev-abc123', mem: '128Mi' },
+    staging: { prefix: 'staging-', replicas: 3, tag: 'v1.2.0-rc1', mem: '256Mi' },
+    prod: { prefix: '', replicas: 5, tag: 'v1.2.0', mem: '512Mi' }
+  };
+
+  function updateKustOverlay() {
+    const env = document.getElementById('kustEnv').value;
+    const d = kustEnvData[env];
+    document.getElementById('kustPrefix').textContent = d.prefix || '(none)';
+    document.getElementById('kustOverlayReplicas').textContent = d.replicas;
+    document.getElementById('kustOverlayTag').textContent = d.tag;
+    document.getElementById('kustOverlayPatch').textContent = `memory: ${d.mem}`;
+  }
+
+  document.getElementById('kustEnv').addEventListener('change', updateKustOverlay);
+
+  document.getElementById('kustBuildBtn').addEventListener('click', () => {
+    const env = document.getElementById('kustEnv').value;
+    const d = kustEnvData[env];
+    document.getElementById('kustOutName').textContent = `${d.prefix}my-app`;
+    document.getElementById('kustOutReplicas').textContent = d.replicas;
+    document.getElementById('kustOutImage').textContent = `my-app:${d.tag}`;
+    document.getElementById('kustOutMem').textContent = d.mem;
+
+    // Flash
+    ['kustOutName','kustOutReplicas','kustOutImage','kustOutMem'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 600);
+    });
+  });
+
+  document.getElementById('kustResetBtn').addEventListener('click', () => {
+    document.getElementById('kustEnv').value = 'dev';
+    updateKustOverlay();
+    document.getElementById('kustOutName').textContent = 'dev-my-app';
+    document.getElementById('kustOutReplicas').textContent = '1';
+    document.getElementById('kustOutImage').textContent = 'my-app:dev-abc123';
+    document.getElementById('kustOutMem').textContent = '128Mi';
+  });
+
+  // Compare toggle highlight
+  document.querySelectorAll('.compare-card').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.compare-card').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      const approach = el.dataset.approach;
+      document.querySelectorAll('.compare-cell.highlight').forEach(c => c.classList.remove('highlight'));
+      const rows = document.querySelectorAll('.compare-row:not(.header)');
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('.compare-cell');
+        const idx = approach === 'helm' ? 1 : 2;
+        if (cells[idx]) cells[idx].classList.add('highlight');
+      });
+    });
+  });
+</script>
