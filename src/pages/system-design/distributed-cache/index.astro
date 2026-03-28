@@ -1,0 +1,443 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a Distributed Cache — Interactive Visualization"
+  description="Understand distributed caching with consistent hashing, cache eviction policies (LRU, LFU), and replication strategies. Interactive ring visualization."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Distributed Cache", href: "/system-design/distributed-cache/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗄️ Design a Distributed Cache</h1>
+      <p class="subtitle">Consistent hashing, eviction policies, and replication — all interactive</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A distributed cache stores frequently-accessed data across multiple nodes.
+          The key challenge: <strong>how do you decide which node stores which key?</strong>
+          Consistent hashing solves this elegantly — when nodes join or leave, only <em>K/N</em> keys need to move.
+        </p>
+      </div>
+    </section>
+
+    <!-- Consistent Hashing Ring -->
+    <section class="ring-section">
+      <h2>💍 Consistent Hashing Ring</h2>
+      <p class="section-desc">Add/remove nodes and keys to see how consistent hashing distributes data. Notice how adding a node only moves a fraction of keys.</p>
+      <div class="ring-controls">
+        <button id="addNodeBtn" class="action-btn primary-btn">➕ Add Node</button>
+        <button id="removeNodeBtn" class="action-btn reset-btn">➖ Remove Node</button>
+        <button id="addKeysBtn" class="action-btn primary-btn-secondary">🔑 Add 10 Keys</button>
+        <button id="resetRingBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <label class="vnode-label">Virtual Nodes: <strong id="vnodeLabel">3</strong>
+          <input type="range" id="vnodeSlider" min="1" max="10" value="3">
+        </label>
+      </div>
+      <div class="ring-layout">
+        <canvas id="ringCanvas" width="500" height="500"></canvas>
+        <div class="ring-stats">
+          <div class="stat"><span class="stat-l">Nodes</span><span class="stat-v" id="nodeCount">3</span></div>
+          <div class="stat"><span class="stat-l">Keys</span><span class="stat-v" id="keyCount">0</span></div>
+          <div class="stat"><span class="stat-l">Max Load</span><span class="stat-v" id="maxLoad">0%</span></div>
+          <div class="stat"><span class="stat-l">Std Dev</span><span class="stat-v" id="stdDev">0</span></div>
+          <h4>Key Distribution</h4>
+          <div id="distBars"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Eviction Policies -->
+    <section class="eviction-section">
+      <h2>🗑️ Cache Eviction Policies</h2>
+      <p class="section-desc">Compare LRU and LFU eviction. Watch which items get evicted when the cache is full.</p>
+      <div class="eviction-controls">
+        <label>Cache Size: <strong id="cacheSizeLabel">5</strong>
+          <input type="range" id="cacheSizeSlider" min="3" max="10" value="5">
+        </label>
+        <button id="randomAccessBtn" class="action-btn primary-btn">🎲 Random Access</button>
+        <button id="autoAccessBtn" class="action-btn primary-btn-secondary">▶️ Auto Play</button>
+        <button id="resetEvictionBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="eviction-grid">
+        <div class="eviction-panel">
+          <h3>📋 LRU (Least Recently Used)</h3>
+          <div class="cache-slots" id="lruSlots"></div>
+          <div class="eviction-stats">
+            <span class="stat-inline">Hits: <strong class="green" id="lruHits">0</strong></span>
+            <span class="stat-inline">Misses: <strong class="red" id="lruMisses">0</strong></span>
+            <span class="stat-inline">Ratio: <strong id="lruRatio">0%</strong></span>
+          </div>
+          <div class="access-log" id="lruLog"></div>
+        </div>
+        <div class="eviction-panel">
+          <h3>📊 LFU (Least Frequently Used)</h3>
+          <div class="cache-slots" id="lfuSlots"></div>
+          <div class="eviction-stats">
+            <span class="stat-inline">Hits: <strong class="green" id="lfuHits">0</strong></span>
+            <span class="stat-inline">Misses: <strong class="red" id="lfuMisses">0</strong></span>
+            <span class="stat-inline">Ratio: <strong id="lfuRatio">0%</strong></span>
+          </div>
+          <div class="access-log" id="lfuLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Deep Dive -->
+    <section class="arch-section">
+      <h2>🏗️ Architecture Overview</h2>
+      <div class="arch-cards">
+        <div class="arch-card">
+          <h3>Cache-Aside (Lazy Loading)</h3>
+          <div class="arch-flow">App → <span class="miss">Cache Miss?</span> → DB → <span class="fill">Fill Cache</span> → Return</div>
+          <p><strong>Pros:</strong> Only requested data cached, resilient to cache failure</p>
+          <p><strong>Cons:</strong> Cache miss penalty (3 trips), stale data possible</p>
+        </div>
+        <div class="arch-card">
+          <h3>Write-Through</h3>
+          <div class="arch-flow">App → <span class="fill">Write Cache</span> → <span class="fill">Write DB</span> → Ack</div>
+          <p><strong>Pros:</strong> Cache always consistent, no stale reads</p>
+          <p><strong>Cons:</strong> Write latency (2 writes), unused data cached</p>
+        </div>
+        <div class="arch-card">
+          <h3>Write-Behind (Write-Back)</h3>
+          <div class="arch-flow">App → <span class="fill">Write Cache</span> → Ack → <span class="async">Async DB Write</span></div>
+          <p><strong>Pros:</strong> Fast writes, batch DB updates</p>
+          <p><strong>Cons:</strong> Data loss risk, eventual consistency</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interview Tips -->
+    <section class="tips-section">
+      <h2>🎯 Interview Talking Points</h2>
+      <div class="tips-grid">
+        <div class="tip"><strong>Consistency:</strong> How do you handle cache invalidation? TTL + event-driven invalidation is a solid answer.</div>
+        <div class="tip"><strong>Hot Keys:</strong> A viral post floods one node. Solution: local caching layer + key replication across nodes.</div>
+        <div class="tip"><strong>Thundering Herd:</strong> Cache miss on popular key → 1000 DB queries. Solution: single-flight / mutex on cache fill.</div>
+        <div class="tip"><strong>Scaling:</strong> Consistent hashing with virtual nodes for even distribution. Replicate to N nodes for durability.</div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-section { margin-bottom: 2rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #3b82f6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .primary-btn { background: #3b82f6; color: white; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; color: white; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .reset-btn:hover { background: #475569; }
+
+    /* Ring */
+    .ring-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .ring-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .vnode-label { color: #94a3b8; display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+    .vnode-label input { width: 100px; }
+    .ring-layout { display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap; }
+    #ringCanvas { background: #1e293b; border-radius: 12px; flex-shrink: 0; }
+    .ring-stats { flex: 1; min-width: 200px; }
+    .stat { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #1e293b; }
+    .stat-l { color: #94a3b8; }
+    .stat-v { color: #f1f5f9; font-weight: 700; }
+    #distBars { margin-top: 0.5rem; }
+    .dist-bar-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+    .dist-bar-label { width: 60px; font-size: 0.8rem; color: #94a3b8; }
+    .dist-bar { height: 16px; border-radius: 4px; transition: width 0.3s; min-width: 2px; }
+    .dist-bar-val { font-size: 0.8rem; color: #f1f5f9; }
+
+    /* Eviction */
+    .eviction-section { margin-bottom: 2rem; }
+    .eviction-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .eviction-controls label { color: #94a3b8; display: flex; align-items: center; gap: 0.5rem; }
+    .eviction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .eviction-grid { grid-template-columns: 1fr; } .ring-layout { flex-direction: column; } }
+    .eviction-panel { background: #1e293b; border-radius: 12px; padding: 1rem; }
+    .eviction-panel h3 { margin: 0 0 0.5rem; color: #f1f5f9; }
+    .cache-slots { display: flex; gap: 0.3rem; flex-wrap: wrap; min-height: 40px; }
+    .cache-slot { background: #334155; border-radius: 6px; padding: 0.4rem 0.7rem; font-size: 0.85rem; color: #f1f5f9; position: relative; transition: all 0.2s; }
+    .cache-slot.hit { background: #166534; }
+    .cache-slot.evicted { background: #7f1d1d; opacity: 0.6; }
+    .cache-slot .freq { font-size: 0.65rem; color: #94a3b8; position: absolute; top: -0.4rem; right: -0.2rem; background: #475569; border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
+    .eviction-stats { margin: 0.5rem 0; display: flex; gap: 1rem; }
+    .stat-inline { color: #94a3b8; font-size: 0.85rem; }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .access-log { font-size: 0.75rem; color: #64748b; max-height: 80px; overflow-y: auto; font-family: monospace; }
+
+    /* Architecture */
+    .arch-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .arch-card { background: #1e293b; border-radius: 12px; padding: 1.2rem; }
+    .arch-card h3 { color: #f1f5f9; margin: 0 0 0.5rem; }
+    .arch-card p { color: #94a3b8; font-size: 0.9rem; margin: 0.3rem 0; }
+    .arch-flow { background: #0f172a; border-radius: 8px; padding: 0.7rem; font-family: monospace; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.5rem; }
+    .miss { color: #ef4444; }
+    .fill { color: #22c55e; }
+    .async { color: #f59e0b; }
+
+    /* Tips */
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip { background: #1e293b; border-radius: 10px; padding: 1rem; color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; }
+    .tip strong { color: #f1f5f9; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const NODE_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16'];
+
+    // ====== CONSISTENT HASHING ======
+    let nodes = [];
+    let keys = [];
+    let vnodes = 3;
+    let nodeIdCounter = 0;
+
+    function hash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) { h = ((h << 5) - h + str.charCodeAt(i)) | 0; }
+      return Math.abs(h) % 360;
+    }
+
+    function initRing() {
+      nodes = []; keys = []; nodeIdCounter = 0;
+      for (let i = 0; i < 3; i++) addNode();
+    }
+
+    function addNode() {
+      const name = 'N' + nodeIdCounter++;
+      const color = NODE_COLORS[nodes.length % NODE_COLORS.length];
+      const vnodePositions = [];
+      for (let v = 0; v < vnodes; v++) {
+        vnodePositions.push(hash(name + ':' + v));
+      }
+      nodes.push({ name, color, vnodes: vnodePositions });
+      drawRing();
+    }
+
+    function removeNode() {
+      if (nodes.length <= 1) return;
+      nodes.pop();
+      drawRing();
+    }
+
+    function addKeys() {
+      for (let i = 0; i < 10; i++) {
+        const name = 'key_' + Math.random().toString(36).slice(2, 6);
+        keys.push({ name, pos: hash(name) });
+      }
+      drawRing();
+    }
+
+    function getNodeForKey(pos) {
+      let allVnodes = [];
+      nodes.forEach(n => n.vnodes.forEach(v => allVnodes.push({ pos: v, node: n })));
+      allVnodes.sort((a, b) => a.pos - b.pos);
+      for (const vn of allVnodes) { if (vn.pos >= pos) return vn.node; }
+      return allVnodes.length > 0 ? allVnodes[0].node : null;
+    }
+
+    function drawRing() {
+      const canvas = $('ringCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2, R = 190;
+      ctx.clearRect(0, 0, W, H);
+
+      // Ring circle
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.strokeStyle = '#334155'; ctx.lineWidth = 3; ctx.stroke();
+
+      // Degree markings
+      ctx.fillStyle = '#475569'; ctx.font = '9px monospace';
+      for (let d = 0; d < 360; d += 30) {
+        const a = (d - 90) * Math.PI / 180;
+        const x = cx + (R + 15) * Math.cos(a);
+        const y = cy + (R + 15) * Math.sin(a);
+        ctx.fillText(d + '°', x - 10, y + 3);
+      }
+
+      // Draw vnodes
+      nodes.forEach(n => {
+        n.vnodes.forEach((pos, vi) => {
+          const a = (pos - 90) * Math.PI / 180;
+          const x = cx + R * Math.cos(a);
+          const y = cy + R * Math.sin(a);
+          ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2);
+          ctx.fillStyle = n.color; ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(n.name, x, y + 3);
+        });
+      });
+
+      // Draw keys
+      const dist = {};
+      nodes.forEach(n => dist[n.name] = 0);
+      keys.forEach(k => {
+        const owner = getNodeForKey(k.pos);
+        if (owner) dist[owner.name] = (dist[owner.name] || 0) + 1;
+        const a = (k.pos - 90) * Math.PI / 180;
+        const x = cx + (R - 25) * Math.cos(a);
+        const y = cy + (R - 25) * Math.sin(a);
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = owner ? owner.color : '#64748b'; ctx.globalAlpha = 0.7; ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      // Stats
+      $('nodeCount').textContent = nodes.length;
+      $('keyCount').textContent = keys.length;
+      const vals = Object.values(dist);
+      const maxV = Math.max(...vals, 1);
+      $('maxLoad').textContent = keys.length > 0 ? Math.round(maxV / keys.length * 100) + '%' : '0%';
+      const mean = vals.reduce((s, v) => s + v, 0) / (vals.length || 1);
+      const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (vals.length || 1));
+      $('stdDev').textContent = sd.toFixed(1);
+
+      // Dist bars
+      const barsEl = $('distBars');
+      barsEl.innerHTML = '';
+      nodes.forEach(n => {
+        const count = dist[n.name] || 0;
+        const pct = keys.length > 0 ? (count / keys.length * 100) : 0;
+        barsEl.innerHTML += '<div class="dist-bar-row"><span class="dist-bar-label">' + n.name + '</span><div class="dist-bar" style="width:' + Math.max(pct * 2, 2) + 'px;background:' + n.color + '"></div><span class="dist-bar-val">' + count + ' (' + pct.toFixed(0) + '%)</span></div>';
+      });
+    }
+
+    $('addNodeBtn').onclick = addNode;
+    $('removeNodeBtn').onclick = removeNode;
+    $('addKeysBtn').onclick = addKeys;
+    $('resetRingBtn').onclick = () => { initRing(); drawRing(); };
+    $('vnodeSlider').oninput = e => {
+      vnodes = +e.target.value;
+      $('vnodeLabel').textContent = vnodes;
+      // Rebuild vnodes for all nodes
+      nodes.forEach(n => {
+        n.vnodes = [];
+        for (let v = 0; v < vnodes; v++) n.vnodes.push(hash(n.name + ':' + v));
+      });
+      drawRing();
+    };
+
+    // ====== EVICTION SIMULATION ======
+    let cacheSize = 5;
+    let lruCache = []; // [{key, lastAccess}]
+    let lfuCache = []; // [{key, freq}]
+    let lruHits = 0, lruMisses = 0, lfuHits = 0, lfuMisses = 0;
+    let accessStep = 0;
+    let autoInterval = null;
+    const DATA_KEYS = ['A','B','C','D','E','F','G','H','I','J'];
+
+    function accessKey(key) {
+      accessStep++;
+      // LRU
+      const lruIdx = lruCache.findIndex(e => e.key === key);
+      let lruEvicted = null;
+      if (lruIdx >= 0) { lruHits++; lruCache[lruIdx].lastAccess = accessStep; }
+      else {
+        lruMisses++;
+        if (lruCache.length >= cacheSize) {
+          lruCache.sort((a, b) => a.lastAccess - b.lastAccess);
+          lruEvicted = lruCache.shift().key;
+        }
+        lruCache.push({ key, lastAccess: accessStep });
+      }
+      // LFU
+      const lfuIdx = lfuCache.findIndex(e => e.key === key);
+      let lfuEvicted = null;
+      if (lfuIdx >= 0) { lfuHits++; lfuCache[lfuIdx].freq++; }
+      else {
+        lfuMisses++;
+        if (lfuCache.length >= cacheSize) {
+          lfuCache.sort((a, b) => a.freq - b.freq);
+          lfuEvicted = lfuCache.shift().key;
+        }
+        lfuCache.push({ key, freq: 1 });
+      }
+      renderEviction(key, lruEvicted, lfuEvicted);
+    }
+
+    function renderEviction(accessedKey, lruEvicted, lfuEvicted) {
+      renderSlots('lruSlots', lruCache.map(e => e.key), accessedKey, lruEvicted);
+      renderSlots('lfuSlots', lfuCache.map(e => ({ key: e.key, freq: e.freq })), accessedKey, lfuEvicted);
+      $('lruHits').textContent = lruHits;
+      $('lruMisses').textContent = lruMisses;
+      $('lruRatio').textContent = ((lruHits / (lruHits + lruMisses)) * 100).toFixed(0) + '%';
+      $('lfuHits').textContent = lfuHits;
+      $('lfuMisses').textContent = lfuMisses;
+      $('lfuRatio').textContent = ((lfuHits / (lfuHits + lfuMisses)) * 100).toFixed(0) + '%';
+      addLog('lruLog', accessedKey, lruEvicted);
+      addLog('lfuLog', accessedKey, lfuEvicted);
+    }
+
+    function renderSlots(id, items, accessed, evicted) {
+      const el = $(id);
+      el.innerHTML = '';
+      items.forEach(item => {
+        const key = typeof item === 'object' ? item.key : item;
+        const freq = typeof item === 'object' ? item.freq : null;
+        const cls = key === accessed ? ' hit' : '';
+        let html = '<div class="cache-slot' + cls + '">' + key;
+        if (freq !== null) html += '<span class="freq">' + freq + '</span>';
+        html += '</div>';
+        el.innerHTML += html;
+      });
+    }
+
+    function addLog(id, key, evicted) {
+      const el = $(id);
+      let msg = 'GET ' + key;
+      if (evicted) msg += ' (evicted ' + evicted + ')';
+      el.innerHTML = msg + '\\n' + el.innerHTML;
+      if (el.children && el.innerHTML.split('\\n').length > 20) {
+        el.innerHTML = el.innerHTML.split('\\n').slice(0, 20).join('\\n');
+      }
+    }
+
+    function resetEviction() {
+      lruCache = []; lfuCache = [];
+      lruHits = lruMisses = lfuHits = lfuMisses = accessStep = 0;
+      $('lruSlots').innerHTML = ''; $('lfuSlots').innerHTML = '';
+      $('lruHits').textContent = '0'; $('lruMisses').textContent = '0'; $('lruRatio').textContent = '0%';
+      $('lfuHits').textContent = '0'; $('lfuMisses').textContent = '0'; $('lfuRatio').textContent = '0%';
+      $('lruLog').innerHTML = ''; $('lfuLog').innerHTML = '';
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+    }
+
+    $('randomAccessBtn').onclick = () => {
+      // Zipf-like distribution: some keys accessed much more
+      const weights = DATA_KEYS.map((_, i) => 1 / (i + 1));
+      const total = weights.reduce((s, w) => s + w, 0);
+      let r = Math.random() * total, acc = 0;
+      for (let i = 0; i < weights.length; i++) { acc += weights[i]; if (r <= acc) { accessKey(DATA_KEYS[i]); return; } }
+      accessKey(DATA_KEYS[0]);
+    };
+
+    $('autoAccessBtn').onclick = () => {
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; return; }
+      autoInterval = setInterval(() => $('randomAccessBtn').click(), 300);
+    };
+
+    $('resetEvictionBtn').onclick = resetEviction;
+    $('cacheSizeSlider').oninput = e => { cacheSize = +e.target.value; $('cacheSizeLabel').textContent = cacheSize; resetEviction(); };
+
+    // Init
+    initRing();
+    drawRing();
+  </script>
+</BaseLayout>

@@ -1,0 +1,258 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="eBPF: Programmable Kernel — Interactive Visualization"
+  description="Understand eBPF — the technology that lets you run sandboxed programs in the Linux kernel. Interactive hook point visualization and program lifecycle."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Linux", href: "/linux/" },
+    { label: "eBPF", href: "/linux/ebpf/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐝 eBPF: Programmable Kernel</h1>
+      <p class="subtitle">Run sandboxed programs in the Linux kernel — without changing kernel source</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          eBPF (extended Berkeley Packet Filter) lets you attach custom programs to kernel events — 
+          network packets, syscalls, function calls — and run them safely in a sandboxed VM.
+          It's the foundation of modern observability (Cilium, Falco), networking (XDP), and security tools.
+        </p>
+      </div>
+    </section>
+
+    <!-- Program Lifecycle -->
+    <section class="lifecycle-section">
+      <h2>🔄 eBPF Program Lifecycle</h2>
+      <p class="section-desc">Click through each stage to see how an eBPF program goes from C code to running in the kernel.</p>
+      <div class="lifecycle-steps">
+        <div class="lc-step active" data-step="0" onclick="setStep(0)">
+          <div class="lc-num">1</div>
+          <h4>Write</h4>
+          <p>Write eBPF program in restricted C</p>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step" data-step="1" onclick="setStep(1)">
+          <div class="lc-num">2</div>
+          <h4>Compile</h4>
+          <p>Clang/LLVM → BPF bytecode (.o)</p>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step" data-step="2" onclick="setStep(2)">
+          <div class="lc-num">3</div>
+          <h4>Verify</h4>
+          <p>Kernel verifier checks safety</p>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step" data-step="3" onclick="setStep(3)">
+          <div class="lc-num">4</div>
+          <h4>JIT</h4>
+          <p>JIT compile to native machine code</p>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step" data-step="4" onclick="setStep(4)">
+          <div class="lc-num">5</div>
+          <h4>Attach</h4>
+          <p>Hook to kernel event (kprobe, XDP...)</p>
+        </div>
+      </div>
+      <div class="lc-detail" id="lcDetail">
+        <pre id="lcCode"></pre>
+      </div>
+    </section>
+
+    <!-- Hook Points -->
+    <section class="hooks-section">
+      <h2>🎣 Hook Points</h2>
+      <p class="section-desc">eBPF programs attach to different kernel subsystems. Click each to learn more.</p>
+      <div class="kernel-diagram">
+        <div class="kd-layer user">
+          <h4>Userspace</h4>
+          <div class="kd-items">
+            <span class="kd-item" onclick="showHook('uprobe')">uprobe</span>
+            <span class="kd-item" onclick="showHook('usdt')">USDT</span>
+          </div>
+        </div>
+        <div class="kd-boundary">━━━ Kernel Boundary ━━━</div>
+        <div class="kd-layer syscall">
+          <h4>Syscall Interface</h4>
+          <div class="kd-items">
+            <span class="kd-item" onclick="showHook('tracepoint')">Tracepoints</span>
+            <span class="kd-item" onclick="showHook('rawtp')">Raw Tracepoints</span>
+          </div>
+        </div>
+        <div class="kd-layer kernel">
+          <h4>Kernel Functions</h4>
+          <div class="kd-items">
+            <span class="kd-item" onclick="showHook('kprobe')">kprobe</span>
+            <span class="kd-item" onclick="showHook('kretprobe')">kretprobe</span>
+            <span class="kd-item" onclick="showHook('fentry')">fentry/fexit</span>
+          </div>
+        </div>
+        <div class="kd-layer network">
+          <h4>Networking</h4>
+          <div class="kd-items">
+            <span class="kd-item hot" onclick="showHook('xdp')">XDP</span>
+            <span class="kd-item" onclick="showHook('tc')">TC (Traffic Control)</span>
+            <span class="kd-item" onclick="showHook('sockops')">Socket Ops</span>
+          </div>
+        </div>
+        <div class="kd-layer security">
+          <h4>Security</h4>
+          <div class="kd-items">
+            <span class="kd-item" onclick="showHook('lsm')">LSM Hooks</span>
+            <span class="kd-item" onclick="showHook('seccomp')">Seccomp</span>
+          </div>
+        </div>
+      </div>
+      <div class="hook-detail" id="hookDetail">
+        <p id="hookDesc">Click a hook point above to see details.</p>
+      </div>
+    </section>
+
+    <!-- Use Cases -->
+    <section class="usecases-section">
+      <h2>🚀 Real-World Use Cases</h2>
+      <div class="uc-grid">
+        <div class="uc-card">
+          <h3>🔍 Observability</h3>
+          <p><strong>Tools:</strong> bpftrace, BCC, Pixie</p>
+          <p>Trace any kernel/user function, measure latency, count events — all without recompiling or restarting anything.</p>
+          <div class="uc-example"><code>bpftrace -e 'tracepoint:syscalls:sys_enter_read {"{"} @[comm] = count(); {"}"}'</code></div>
+        </div>
+        <div class="uc-card">
+          <h3>🌐 Networking</h3>
+          <p><strong>Tools:</strong> Cilium, Katran (Meta's L4 LB)</p>
+          <p>XDP processes packets at the NIC driver level — before the kernel network stack. 10M+ packets/sec on a single core.</p>
+          <div class="uc-example"><code>XDP_DROP: drop packet | XDP_PASS: continue | XDP_TX: bounce back | XDP_REDIRECT: send elsewhere</code></div>
+        </div>
+        <div class="uc-card">
+          <h3>🔒 Security</h3>
+          <p><strong>Tools:</strong> Falco, Tetragon, KubeArmor</p>
+          <p>Monitor and enforce security policies at the kernel level. Detect suspicious syscalls, file access, network connections in real time.</p>
+          <div class="uc-example"><code>LSM hook → check policy → allow/deny syscall</code></div>
+        </div>
+        <div class="uc-card">
+          <h3>📊 Profiling</h3>
+          <p><strong>Tools:</strong> Pyroscope, Parca</p>
+          <p>Continuous profiling with near-zero overhead. Sample CPU stacks, memory allocations, off-CPU time across entire fleet.</p>
+          <div class="uc-example"><code>perf_event → sample stack → aggregate in BPF map → read from userspace</code></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verifier -->
+    <section class="verifier-section">
+      <h2>🛡️ The Verifier — Safety Guarantees</h2>
+      <div class="ver-grid">
+        <div class="ver-item ok"><span>✅</span> Bounded loops (must terminate)</div>
+        <div class="ver-item ok"><span>✅</span> No null pointer dereference</div>
+        <div class="ver-item ok"><span>✅</span> Memory access bounds checked</div>
+        <div class="ver-item ok"><span>✅</span> Only approved helper functions</div>
+        <div class="ver-item ok"><span>✅</span> Max instruction count (1M)</div>
+        <div class="ver-item no"><span>❌</span> No unbounded loops</div>
+        <div class="ver-item no"><span>❌</span> No sleeping / blocking</div>
+        <div class="ver-item no"><span>❌</span> No arbitrary memory access</div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f59e0b; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+
+    /* Lifecycle */
+    .lifecycle-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .lifecycle-steps { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .lc-step { background: #1e293b; border-radius: 10px; padding: 0.8rem; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; flex: 1; min-width: 100px; text-align: center; }
+    .lc-step:hover, .lc-step.active { border-color: #f59e0b; background: #334155; }
+    .lc-num { background: #f59e0b; color: #000; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 0.3rem; font-weight: bold; font-size: 0.8rem; }
+    .lc-step h4 { color: #f1f5f9; margin: 0; font-size: 0.9rem; }
+    .lc-step p { color: #94a3b8; margin: 0.2rem 0 0; font-size: 0.75rem; }
+    .lc-arrow { color: #64748b; font-size: 1.2rem; flex-shrink: 0; }
+    .lc-detail { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    #lcCode { color: #22c55e; font-size: 0.8rem; margin: 0; white-space: pre-wrap; overflow-x: auto; }
+
+    /* Hooks */
+    .hooks-section { margin-bottom: 2rem; }
+    .kernel-diagram { background: #1e293b; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+    .kd-layer { padding: 0.5rem; margin: 0.3rem 0; border-radius: 8px; }
+    .kd-layer h4 { color: #64748b; margin: 0 0 0.3rem; font-size: 0.8rem; }
+    .kd-layer.user { background: #0f172a; border-left: 3px solid #3b82f6; }
+    .kd-layer.syscall { background: #0f172a; border-left: 3px solid #22c55e; }
+    .kd-layer.kernel { background: #0f172a; border-left: 3px solid #f59e0b; }
+    .kd-layer.network { background: #0f172a; border-left: 3px solid #ef4444; }
+    .kd-layer.security { background: #0f172a; border-left: 3px solid #a855f7; }
+    .kd-boundary { text-align: center; color: #475569; font-family: monospace; font-size: 0.8rem; margin: 0.3rem 0; }
+    .kd-items { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .kd-item { background: #334155; color: #cbd5e1; padding: 0.3rem 0.8rem; border-radius: 6px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
+    .kd-item:hover { background: #475569; }
+    .kd-item.hot { background: #ef4444; color: white; }
+    .hook-detail { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    #hookDesc { color: #94a3b8; margin: 0; font-size: 0.9rem; line-height: 1.6; }
+
+    /* Use Cases */
+    .uc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+    @media (max-width: 700px) { .uc-grid { grid-template-columns: 1fr; } }
+    .uc-card { background: #1e293b; border-radius: 12px; padding: 1.2rem; }
+    .uc-card h3 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .uc-card p { color: #94a3b8; font-size: 0.85rem; margin: 0.2rem 0; }
+    .uc-example { background: #0f172a; border-radius: 6px; padding: 0.5rem; margin-top: 0.5rem; }
+    .uc-example code { color: #22c55e; font-size: 0.75rem; }
+
+    /* Verifier */
+    .ver-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.5rem; margin-bottom: 2rem; }
+    .ver-item { background: #1e293b; border-radius: 8px; padding: 0.7rem; color: #cbd5e1; font-size: 0.85rem; }
+    .ver-item span { margin-right: 0.3rem; }
+    .ver-item.no { opacity: 0.7; }
+  </style>
+
+  <script is:inline>
+    const $ = id => document.getElementById(id);
+
+    const STEP_CODE = [
+      '// Step 1: Write eBPF program in restricted C\\n#include <linux/bpf.h>\\n#include <bpf/bpf_helpers.h>\\n\\nSEC("xdp")\\nint xdp_drop_icmp(struct xdp_md *ctx) {\\n    void *data = (void *)(long)ctx->data;\\n    void *data_end = (void *)(long)ctx->data_end;\\n    struct ethhdr *eth = data;\\n    if ((void *)eth + sizeof(*eth) > data_end)\\n        return XDP_PASS;\\n    if (eth->h_proto == htons(ETH_P_IP)) {\\n        struct iphdr *ip = data + sizeof(*eth);\\n        if ((void *)ip + sizeof(*ip) > data_end)\\n            return XDP_PASS;\\n        if (ip->protocol == IPPROTO_ICMP)\\n            return XDP_DROP;  // Drop ICMP packets\\n    }\\n    return XDP_PASS;\\n}',
+      '// Step 2: Compile with Clang\\n$ clang -O2 -target bpf -c xdp_drop.c -o xdp_drop.o\\n\\n// Output: ELF file containing BPF bytecode\\n// Each instruction is 8 bytes: opcode, regs, offset, imm\\n//\\n// BPF instruction format:\\n// struct bpf_insn {\\n//     __u8  code;    // opcode\\n//     __u8  regs;    // src_reg:4, dst_reg:4\\n//     __s16 off;     // offset\\n//     __s32 imm;     // immediate value\\n// }',
+      '// Step 3: Kernel verifier checks\\n//\\n// ✅ Check 1: No unreachable instructions\\n// ✅ Check 2: All branches terminate (DAG check)\\n// ✅ Check 3: No out-of-bounds memory access\\n// ✅ Check 4: All pointers bounds-checked before deref\\n// ✅ Check 5: Stack depth ≤ 512 bytes\\n// ✅ Check 6: Only allowed helper functions called\\n// ✅ Check 7: Instruction count ≤ 1,000,000\\n//\\n// If any check fails → program REJECTED\\n// Verifier walks every possible execution path!',
+      '// Step 4: JIT compilation\\n//\\n// BPF bytecode → native machine code (x86_64/ARM)\\n//\\n// Before JIT (BPF bytecode):\\n//   r1 = *(u32 *)(r6 + 0)    ; load ctx->data\\n//   r2 = *(u32 *)(r6 + 4)    ; load ctx->data_end\\n//\\n// After JIT (x86_64):\\n//   mov eax, [rdi + 0x00]     ; native load\\n//   mov ecx, [rdi + 0x04]     ; native load\\n//\\n// JIT eliminates interpretation overhead\\n// Near-native execution speed!',
+      '// Step 5: Attach to hook point\\n//\\n// $ ip link set dev eth0 xdpgeneric obj xdp_drop.o sec xdp\\n//\\n// Or programmatically:\\n// bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_UPDATE_IF_EXIST, NULL);\\n//\\n// Now every packet hitting eth0 runs our program!\\n// Flow: NIC → driver → XDP hook → our program → PASS/DROP\\n//\\n// To detach:\\n// $ ip link set dev eth0 xdpgeneric off'
+    ];
+
+    window.setStep = function(n) {
+      document.querySelectorAll('.lc-step').forEach((s, i) => s.classList.toggle('active', i === n));
+      $('lcCode').textContent = STEP_CODE[n];
+    };
+    setStep(0);
+
+    const HOOK_DESCS = {
+      uprobe: '<strong>uprobe/uretprobe:</strong> Attach to any userspace function. Trace function entry/exit, read arguments and return values. Example: trace every malloc() call and its size.',
+      usdt: '<strong>USDT (User Statically-Defined Tracing):</strong> Predefined tracepoints compiled into applications (like DTrace probes). Languages like Python, Ruby, MySQL have built-in USDT probes.',
+      tracepoint: '<strong>Tracepoints:</strong> Stable kernel trace points at well-defined locations (syscall entry/exit, scheduler events, etc). Won\\'t break across kernel versions.',
+      rawtp: '<strong>Raw Tracepoints:</strong> Like tracepoints but with raw access to arguments (no stable ABI). Lower overhead, used when performance matters most.',
+      kprobe: '<strong>kprobe:</strong> Attach to ANY kernel function entry. Dynamic — no need to recompile kernel. Example: trace tcp_sendmsg() to monitor all TCP sends.',
+      kretprobe: '<strong>kretprobe:</strong> Fires when a kernel function returns. Capture return values. Pair with kprobe to measure function latency.',
+      fentry: '<strong>fentry/fexit:</strong> Newer, faster alternative to kprobe/kretprobe. Uses BTF (BPF Type Format) for type-safe access to function arguments.',
+      xdp: '<strong>XDP (eXpress Data Path):</strong> Earliest possible hook — at the NIC driver level, before SKB allocation. Process packets at line rate. Actions: DROP, PASS, TX (bounce), REDIRECT. Used by Cloudflare for DDoS mitigation.',
+      tc: '<strong>TC (Traffic Control):</strong> Hook into Linux traffic control. Runs after XDP but with full SKB access. Can modify packets, apply QoS, implement load balancing.',
+      sockops: '<strong>Socket Ops:</strong> Intercept socket operations (connect, accept, sendmsg). Used by Cilium for transparent service mesh without sidecars.',
+      lsm: '<strong>LSM (Linux Security Modules):</strong> Hook into security decisions. Enforce custom security policies beyond what SELinux/AppArmor provide. Block specific syscalls, file access, network connections.',
+      seccomp: '<strong>Seccomp-BPF:</strong> Filter syscalls for a process. Docker and Kubernetes use this to restrict container syscalls. Classic BPF (not full eBPF) for security reasons.'
+    };
+
+    window.showHook = function(hook) {
+      $('hookDesc').innerHTML = HOOK_DESCS[hook] || 'Unknown hook.';
+    };
+  </script>
+</BaseLayout>

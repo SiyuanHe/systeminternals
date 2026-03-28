@@ -1,0 +1,369 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a Notification System — Interactive Visualization"
+  description="Design a scalable notification system with fan-out strategies, priority queues, and per-user rate limiting. Interactive message flow visualization."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Notification System", href: "/system-design/notification-system/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔔 Design a Notification System</h1>
+      <p class="subtitle">Fan-out strategies, priority queues, and rate limiting — interactive</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A notification system delivers messages across channels (push, SMS, email) to millions of users.
+          Key challenges: <strong>fan-out at scale</strong>, <strong>priority ordering</strong>, 
+          <strong>per-user rate limiting</strong>, and <strong>delivery guarantees</strong>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Message Flow -->
+    <section class="flow-section">
+      <h2>📨 Message Flow Simulation</h2>
+      <p class="section-desc">Watch notifications flow through the system. Toggle fan-out strategy to see the difference.</p>
+      <div class="flow-controls">
+        <button id="sendNotifBtn" class="action-btn primary-btn">📤 Send Notification</button>
+        <button id="sendBatchBtn" class="action-btn primary-btn-secondary">📦 Batch (100 users)</button>
+        <button id="resetFlowBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <div class="toggle-group">
+          <label class="toggle-label">
+            <input type="radio" name="fanout" value="push" checked> Fan-out on Write
+          </label>
+          <label class="toggle-label">
+            <input type="radio" name="fanout" value="pull"> Fan-out on Read
+          </label>
+        </div>
+      </div>
+      <canvas id="flowCanvas" width="900" height="350"></canvas>
+      <div class="flow-stats-row">
+        <div class="stat"><span class="stat-l">Messages Sent</span><span class="stat-v" id="msgSent">0</span></div>
+        <div class="stat"><span class="stat-l">Queue Depth</span><span class="stat-v" id="queueDepth">0</span></div>
+        <div class="stat"><span class="stat-l">Delivered</span><span class="stat-v green" id="delivered">0</span></div>
+        <div class="stat"><span class="stat-l">Rate Limited</span><span class="stat-v red" id="rateLimited">0</span></div>
+      </div>
+    </section>
+
+    <!-- Priority Queue -->
+    <section class="pq-section">
+      <h2>⚡ Priority Queue</h2>
+      <p class="section-desc">Notifications have different priorities. Watch how they're dequeued.</p>
+      <div class="pq-controls">
+        <button class="action-btn pq-btn" data-priority="critical" style="background:#ef4444">🚨 Critical</button>
+        <button class="action-btn pq-btn" data-priority="high" style="background:#f59e0b;color:#000">⚠️ High</button>
+        <button class="action-btn pq-btn" data-priority="normal" style="background:#3b82f6">📋 Normal</button>
+        <button class="action-btn pq-btn" data-priority="low" style="background:#64748b">📌 Low</button>
+        <button id="processPQBtn" class="action-btn primary-btn-secondary">▶️ Process Next</button>
+        <button id="autoProcessBtn" class="action-btn primary-btn-secondary">⏩ Auto Process</button>
+        <button id="resetPQBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="pq-viz">
+        <div class="pq-queue">
+          <h4>Queue (sorted by priority)</h4>
+          <div id="pqItems"></div>
+        </div>
+        <div class="pq-processed">
+          <h4>Processed</h4>
+          <div id="pqProcessed"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Rate Limiting -->
+    <section class="rl-section">
+      <h2>🚦 Per-User Rate Limiting</h2>
+      <p class="section-desc">Users shouldn't get flooded. Configure limits and watch notifications get throttled.</p>
+      <div class="rl-controls">
+        <label class="rl-label">Max per minute: <strong id="rlLimitLabel">5</strong>
+          <input type="range" id="rlLimitSlider" min="1" max="20" value="5">
+        </label>
+        <button id="rlSendBtn" class="action-btn primary-btn">📤 Send to User A</button>
+        <button id="rlFloodBtn" class="action-btn primary-btn-secondary">🌊 Flood (20 msgs)</button>
+        <button id="rlResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="rl-viz">
+        <div class="rl-user">
+          <h4>User A — Notification Window</h4>
+          <div class="rl-window" id="rlWindow"></div>
+          <div class="rl-counter">
+            <span>Delivered: <strong class="green" id="rlDelivered">0</strong></span>
+            <span>Throttled: <strong class="red" id="rlThrottled">0</strong></span>
+            <span>Window: <strong id="rlWindowCount">0</strong> / <strong id="rlWindowMax">5</strong></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="arch-section">
+      <h2>🏗️ System Components</h2>
+      <div class="arch-cards">
+        <div class="arch-card">
+          <h3>📥 Ingestion Service</h3>
+          <p>Receives notification requests, validates, deduplicates (idempotency key), and enqueues.</p>
+        </div>
+        <div class="arch-card">
+          <h3>📊 Priority Router</h3>
+          <p>Routes to different queues based on priority. Critical → fast lane, marketing → batch lane.</p>
+        </div>
+        <div class="arch-card">
+          <h3>📱 Channel Workers</h3>
+          <p>Dedicated workers per channel (push/SMS/email). Handle retries with exponential backoff.</p>
+        </div>
+        <div class="arch-card">
+          <h3>📈 Analytics & Tracking</h3>
+          <p>Track delivery status, open rates, click-through. Feed back into preference learning.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tips -->
+    <section class="tips-section">
+      <h2>🎯 Interview Talking Points</h2>
+      <div class="tips-grid">
+        <div class="tip"><strong>Reliability:</strong> Use persistent queues (Kafka) + at-least-once delivery. Deduplicate at the receiver.</div>
+        <div class="tip"><strong>Scale:</strong> Fan-out on write for &lt; 1000 followers. Fan-out on read for celebrities (millions of followers).</div>
+        <div class="tip"><strong>Preferences:</strong> Users can mute channels, set quiet hours, choose frequency. Store in a fast lookup (Redis).</div>
+        <div class="tip"><strong>Templates:</strong> Don't inline content. Use templates with variables for i18n, A/B testing, and quick changes.</div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-section { margin-bottom: 2rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f59e0b; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .stat { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #1e293b; }
+    .stat-l { color: #94a3b8; }
+    .stat-v { color: #f1f5f9; font-weight: 700; }
+
+    /* Flow */
+    .flow-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .flow-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .toggle-group { display: flex; gap: 1rem; margin-left: auto; }
+    .toggle-label { color: #94a3b8; cursor: pointer; font-size: 0.9rem; }
+    #flowCanvas { width: 100%; background: #1e293b; border-radius: 12px; }
+    .flow-stats-row { display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1rem; }
+
+    /* Priority Queue */
+    .pq-section { margin-bottom: 2rem; }
+    .pq-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .pq-btn { color: white; }
+    .pq-viz { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .pq-viz { grid-template-columns: 1fr; } }
+    .pq-queue, .pq-processed { background: #1e293b; border-radius: 12px; padding: 1rem; min-height: 120px; }
+    .pq-queue h4, .pq-processed h4 { color: #94a3b8; margin: 0 0 0.5rem; }
+    .pq-item { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.8rem; margin: 0.2rem; color: white; }
+    .pq-item.critical { background: #ef4444; }
+    .pq-item.high { background: #f59e0b; color: #000; }
+    .pq-item.normal { background: #3b82f6; }
+    .pq-item.low { background: #64748b; }
+
+    /* Rate Limiting */
+    .rl-section { margin-bottom: 2rem; }
+    .rl-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .rl-label { color: #94a3b8; display: flex; align-items: center; gap: 0.5rem; }
+    .rl-user { background: #1e293b; border-radius: 12px; padding: 1rem; }
+    .rl-user h4 { color: #94a3b8; margin: 0 0 0.5rem; }
+    .rl-window { display: flex; gap: 0.3rem; flex-wrap: wrap; min-height: 36px; }
+    .rl-msg { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; }
+    .rl-msg.ok { background: #166534; color: #22c55e; }
+    .rl-msg.blocked { background: #7f1d1d; color: #ef4444; }
+    .rl-counter { margin-top: 0.5rem; display: flex; gap: 1.5rem; color: #94a3b8; font-size: 0.85rem; }
+
+    /* Arch & Tips */
+    .arch-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .arch-card { background: #1e293b; border-radius: 12px; padding: 1rem; }
+    .arch-card h3 { color: #f1f5f9; margin: 0 0 0.5rem; font-size: 1rem; }
+    .arch-card p { color: #94a3b8; font-size: 0.85rem; margin: 0; line-height: 1.5; }
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip { background: #1e293b; border-radius: 10px; padding: 1rem; color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; }
+    .tip strong { color: #f1f5f9; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // ====== MESSAGE FLOW ======
+    let msgSent = 0, deliveredCount = 0, rateLimitedCount = 0, queueDepth = 0;
+    let particles = [];
+
+    function getFlowMode() { return document.querySelector('input[name="fanout"]:checked').value; }
+
+    function drawFlow() {
+      const canvas = $('flowCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      // Draw components
+      const components = [
+        { x: 60, y: H/2, label: '📱 Client', w: 90 },
+        { x: 240, y: H/2, label: '📥 Ingestion', w: 100 },
+        { x: 440, y: H/2, label: '📊 Router', w: 90 },
+        { x: 640, y: H/2 - 60, label: '📱 Push', w: 80 },
+        { x: 640, y: H/2, label: '📧 Email', w: 80 },
+        { x: 640, y: H/2 + 60, label: '💬 SMS', w: 80 },
+        { x: 820, y: H/2, label: '👤 Users', w: 70 },
+      ];
+
+      // Draw arrows
+      ctx.strokeStyle = '#334155'; ctx.lineWidth = 2;
+      [[0,1],[1,2],[2,3],[2,4],[2,5],[3,6],[4,6],[5,6]].forEach(([a,b]) => {
+        ctx.beginPath();
+        ctx.moveTo(components[a].x + components[a].w/2, components[a].y);
+        ctx.lineTo(components[b].x - components[b].w/2, components[b].y);
+        ctx.stroke();
+      });
+
+      // Draw boxes
+      components.forEach(c => {
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(c.x - c.w/2, c.y - 20, c.w, 40);
+        ctx.strokeStyle = '#475569';
+        ctx.strokeRect(c.x - c.w/2, c.y - 20, c.w, 40);
+        ctx.fillStyle = '#f1f5f9'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(c.label, c.x, c.y + 5);
+      });
+
+      // Draw particles
+      particles.forEach(p => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = p.color; ctx.fill();
+      });
+
+      // Animate
+      particles = particles.filter(p => {
+        p.x += p.dx; p.y += p.dy;
+        if (p.x > 860) { deliveredCount++; updateFlowStats(); return false; }
+        return p.x < W;
+      });
+
+      if (particles.length > 0) requestAnimationFrame(drawFlow);
+    }
+
+    function sendNotif(batch) {
+      const count = batch ? 5 : 1;
+      msgSent += count;
+      queueDepth += count;
+      for (let i = 0; i < count; i++) {
+        const yOff = (Math.random() - 0.5) * 40;
+        particles.push({ x: 100, y: 175 + yOff, dx: 2 + Math.random(), dy: (Math.random() - 0.5) * 0.5, color: '#3b82f6' });
+      }
+      setTimeout(() => { queueDepth = Math.max(0, queueDepth - count); updateFlowStats(); }, 1000);
+      updateFlowStats();
+      drawFlow();
+    }
+
+    function updateFlowStats() {
+      $('msgSent').textContent = msgSent;
+      $('queueDepth').textContent = queueDepth;
+      $('delivered').textContent = deliveredCount;
+      $('rateLimited').textContent = rateLimitedCount;
+    }
+
+    $('sendNotifBtn').onclick = () => sendNotif(false);
+    $('sendBatchBtn').onclick = () => sendNotif(true);
+    $('resetFlowBtn').onclick = () => { msgSent = deliveredCount = rateLimitedCount = queueDepth = 0; particles = []; updateFlowStats(); drawFlow(); };
+
+    // ====== PRIORITY QUEUE ======
+    let pq = [];
+    let pqProcessed = [];
+    let pqCounter = 0;
+    let pqAutoInterval = null;
+    const PRIORITY_ORDER = { critical: 0, high: 1, normal: 2, low: 3 };
+
+    document.querySelectorAll('.pq-btn').forEach(btn => {
+      btn.onclick = () => {
+        const p = btn.dataset.priority;
+        pq.push({ id: ++pqCounter, priority: p, label: p[0].toUpperCase() + pqCounter });
+        pq.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+        renderPQ();
+      };
+    });
+
+    $('processPQBtn').onclick = () => {
+      if (pq.length === 0) return;
+      pqProcessed.unshift(pq.shift());
+      renderPQ();
+    };
+
+    $('autoProcessBtn').onclick = () => {
+      if (pqAutoInterval) { clearInterval(pqAutoInterval); pqAutoInterval = null; return; }
+      pqAutoInterval = setInterval(() => { if (pq.length) { pqProcessed.unshift(pq.shift()); renderPQ(); } }, 400);
+    };
+
+    $('resetPQBtn').onclick = () => { pq = []; pqProcessed = []; pqCounter = 0; if (pqAutoInterval) clearInterval(pqAutoInterval); pqAutoInterval = null; renderPQ(); };
+
+    function renderPQ() {
+      $('pqItems').innerHTML = pq.map(i => '<span class="pq-item ' + i.priority + '">' + i.label + '</span>').join('');
+      $('pqProcessed').innerHTML = pqProcessed.slice(0, 20).map(i => '<span class="pq-item ' + i.priority + '">' + i.label + '</span>').join('');
+    }
+
+    // ====== RATE LIMITING ======
+    let rlLimit = 5;
+    let rlDelivered = 0, rlThrottled = 0;
+    let rlWindow = []; // timestamps
+    let rlViz = [];
+
+    function rlSend(count) {
+      const now = Date.now();
+      for (let i = 0; i < count; i++) {
+        // Clean window
+        rlWindow = rlWindow.filter(t => now - t < 60000);
+        if (rlWindow.length < rlLimit) {
+          rlWindow.push(now + i);
+          rlDelivered++;
+          rlViz.push({ ok: true });
+        } else {
+          rlThrottled++;
+          rlViz.push({ ok: false });
+        }
+      }
+      renderRL();
+    }
+
+    function renderRL() {
+      $('rlWindow').innerHTML = rlViz.slice(-40).map(m =>
+        '<div class="rl-msg ' + (m.ok ? 'ok' : 'blocked') + '">' + (m.ok ? '✓' : '✗') + '</div>'
+      ).join('');
+      $('rlDelivered').textContent = rlDelivered;
+      $('rlThrottled').textContent = rlThrottled;
+      $('rlWindowCount').textContent = rlWindow.length;
+      $('rlWindowMax').textContent = rlLimit;
+    }
+
+    $('rlSendBtn').onclick = () => rlSend(1);
+    $('rlFloodBtn').onclick = () => rlSend(20);
+    $('rlResetBtn').onclick = () => { rlDelivered = rlThrottled = 0; rlWindow = []; rlViz = []; renderRL(); };
+    $('rlLimitSlider').oninput = e => { rlLimit = +e.target.value; $('rlLimitLabel').textContent = rlLimit; $('rlWindowMax').textContent = rlLimit; };
+
+    // Init
+    drawFlow();
+    renderPQ();
+    renderRL();
+  </script>
+</BaseLayout>

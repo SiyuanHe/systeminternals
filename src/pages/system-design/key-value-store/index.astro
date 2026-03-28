@@ -1,0 +1,460 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a Key-Value Store — Interactive Visualization"
+  description="Explore LSM tree write paths, memtable flushing, SSTable compaction, consistent hashing, and replication strategies."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Key-Value Store", href: "/system-design/key-value-store/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗄️ Design a Key-Value Store</h1>
+      <p class="subtitle">LSM tree write path, consistent hashing, and replication — visualized</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A distributed key-value store needs efficient writes, reads, partitioning, and replication.
+          <strong>LSM trees</strong> optimize writes by buffering in memory then flushing to disk.
+          <strong>Consistent hashing</strong> distributes keys across nodes with minimal reshuffling.
+        </p>
+      </div>
+    </section>
+
+    <!-- LSM Tree Write Path -->
+    <section class="controls-section">
+      <h2>📝 LSM Tree Write Path</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Key: <input type="text" id="keyInput" placeholder="user:123" value="" class="text-input"></label>
+        </div>
+        <div class="control-group">
+          <label>Value: <input type="text" id="valInput" placeholder="alice" value="" class="text-input"></label>
+        </div>
+        <div class="control-group">
+          <button id="writeBtn" class="action-btn primary-btn">✏️ Write</button>
+          <button id="flushBtn" class="action-btn primary-btn-secondary">💾 Flush to SSTable</button>
+          <button id="compactBtn" class="action-btn reset-btn">🔄 Compact</button>
+        </div>
+        <div class="control-group">
+          <button id="autofillBtn" class="action-btn primary-btn">⚡ Auto-fill 10 keys</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="algorithms-section">
+      <div class="algo-grid">
+        <!-- WAL -->
+        <div class="algo-panel">
+          <h3>📋 Write-Ahead Log (WAL)</h3>
+          <div class="wal-entries" id="walEntries">
+            <div class="empty-msg">No writes yet</div>
+          </div>
+        </div>
+        <!-- Memtable -->
+        <div class="algo-panel">
+          <h3>🧠 Memtable <span class="badge" id="memSize">0 / 5</span></h3>
+          <div class="memtable-entries" id="memEntries">
+            <div class="empty-msg">Empty — sorted in-memory</div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Entries</span><span class="stat-v" id="memCount">0</span></div>
+            <div class="stat"><span class="stat-l">Flushes</span><span class="stat-v" id="flushCount">0</span></div>
+          </div>
+        </div>
+        <!-- SSTables -->
+        <div class="algo-panel" style="grid-column: 1 / -1;">
+          <h3>💾 SSTables (Sorted String Tables)</h3>
+          <div class="sstable-levels" id="sstLevels">
+            <div class="empty-msg">No SSTables yet — flush memtable first</div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">L0 Tables</span><span class="stat-v" id="l0Count">0</span></div>
+            <div class="stat"><span class="stat-l">L1 Tables</span><span class="stat-v" id="l1Count">0</span></div>
+            <div class="stat"><span class="stat-l">Compactions</span><span class="stat-v" id="compactCount">0</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Consistent Hashing -->
+    <section class="controls-section">
+      <h2>🔵 Consistent Hashing Ring</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Nodes: <strong id="nodeLabel">3</strong></label>
+          <input type="range" id="nodeSlider" min="2" max="8" value="3">
+        </div>
+        <div class="control-group">
+          <label>Virtual Nodes per Server: <strong id="vnodeLabel">3</strong></label>
+          <input type="range" id="vnodeSlider" min="1" max="10" value="3">
+        </div>
+        <div class="control-group">
+          <label>Replication Factor: <strong id="replicaLabel">2</strong></label>
+          <input type="range" id="replicaSlider" min="1" max="5" value="2">
+        </div>
+        <div class="control-group">
+          <button id="hashKeyBtn" class="action-btn primary-btn">🔑 Hash Random Key</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="algorithms-section">
+      <div class="algo-panel" style="max-width:600px;margin:0 auto;">
+        <canvas id="ringCanvas" width="500" height="500"></canvas>
+        <div class="algo-stats" style="margin-top:1rem;">
+          <div class="stat"><span class="stat-l">Primary</span><span class="stat-v green" id="primaryNode">—</span></div>
+          <div class="stat"><span class="stat-l">Replicas</span><span class="stat-v" id="replicaNodes">—</span></div>
+          <div class="stat"><span class="stat-l">Keys Placed</span><span class="stat-v" id="keysPlaced">0</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison -->
+    <section class="comparison-section">
+      <h2>📋 Storage Engine Comparison</h2>
+      <div class="comparison-table">
+        <div class="comp-row header">
+          <div class="comp-cell">Engine</div>
+          <div class="comp-cell">Write</div>
+          <div class="comp-cell">Read</div>
+          <div class="comp-cell">Space</div>
+          <div class="comp-cell">Use Case</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>LSM Tree</strong></div>
+          <div class="comp-cell">✅ O(1) amortized</div>
+          <div class="comp-cell">⚠️ O(log N) + bloom filter</div>
+          <div class="comp-cell">⚠️ Write amplification</div>
+          <div class="comp-cell">Cassandra, RocksDB, LevelDB</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>B+ Tree</strong></div>
+          <div class="comp-cell">⚠️ O(log N) random I/O</div>
+          <div class="comp-cell">✅ O(log N) single seek</div>
+          <div class="comp-cell">✅ No duplication</div>
+          <div class="comp-cell">MySQL InnoDB, PostgreSQL</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tips -->
+    <section class="tips-section">
+      <h2>💡 Interview Tips</h2>
+      <div class="tips-grid">
+        <div class="tip-card">
+          <h4>Start with the API</h4>
+          <p>get(key), put(key, value), delete(key). Clarify consistency model (eventual vs strong), latency requirements, and data size.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Partitioning strategy</h4>
+          <p>Consistent hashing with virtual nodes ensures even distribution. When a node joins/leaves, only K/N keys move on average.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Replication & consistency</h4>
+          <p>Use quorum: W + R > N ensures strong consistency. Dynamo uses W=R=2, N=3. Vector clocks resolve conflicts.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Failure handling</h4>
+          <p>Gossip protocol for failure detection, hinted handoff for temporary failures, Merkle trees for anti-entropy repair.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .text-input { background: #0f0f23; border: 1px solid #2a2a4a; color: #e2e8f0; padding: 0.4rem 0.6rem; border-radius: 6px; width: 140px; font-size: 0.9rem; }
+    .badge { font-size: 0.75rem; background: #667eea33; color: #667eea; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; background: #1a1a2e; padding: 1.5rem; border-radius: 12px; border: 1px solid #2a2a4a; }
+    .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .control-group label { color: #94a3b8; font-size: 0.9rem; }
+    .control-group label strong { color: #667eea; }
+    input[type="range"] { width: 100%; accent-color: #667eea; }
+    .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .primary-btn { background: #667eea; color: white; }
+    .primary-btn-secondary { background: #e74c3c; color: white; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+    @media (max-width: 800px) { .algo-grid { grid-template-columns: 1fr; } .controls-grid { grid-template-columns: 1fr; } }
+    .algo-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .algo-panel h3 { margin: 0 0 1rem; color: #e2e8f0; font-size: 1.1rem; }
+    .algo-stats { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+    .stat-l { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+    .stat-v { font-size: 1.3rem; font-weight: 700; color: #e2e8f0; }
+    .stat-v.green { color: #22c55e; }
+
+    .empty-msg { color: #4a5568; font-style: italic; font-size: 0.85rem; padding: 1rem; text-align: center; }
+
+    .wal-entries, .memtable-entries { max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; }
+    .wal-entry, .mem-entry { padding: 4px 8px; border-bottom: 1px solid #1e1e3a; color: #94a3b8; }
+    .wal-entry .seq { color: #667eea; margin-right: 6px; }
+    .mem-entry { color: #22c55e; }
+
+    .sstable-levels { min-height: 60px; }
+    .sst-level { margin-bottom: 0.75rem; }
+    .sst-level-label { font-size: 0.8rem; color: #667eea; margin-bottom: 4px; font-weight: 600; }
+    .sst-tables { display: flex; gap: 6px; flex-wrap: wrap; }
+    .sst-block { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; padding: 4px 8px; font-size: 0.7rem; color: #94a3b8; font-family: monospace; }
+
+    #ringCanvas { width: 100%; max-width: 500px; display: block; margin: 0 auto; }
+
+    .comparison-table { overflow-x: auto; }
+    .comp-row { display: grid; grid-template-columns: 1fr 1fr 1.2fr 1fr 1.5fr; gap: 1px; background: #2a2a4a; }
+    .comp-row.header { background: #667eea33; }
+    .comp-row.header .comp-cell { color: #e2e8f0; font-weight: 600; }
+    .comp-cell { background: #1a1a2e; padding: 0.75rem; font-size: 0.85rem; color: #94a3b8; }
+
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1.25rem; }
+    .tip-card h4 { margin: 0 0 0.5rem; color: #667eea; }
+    .tip-card p { margin: 0; color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+  </style>
+
+  <script type="module">{`
+    const $ = id => document.getElementById(id);
+
+    // === LSM Tree State ===
+    const MEM_MAX = 5;
+    let memtable = []; // [{key, value}] sorted
+    let wal = []; // [{seq, key, value}]
+    let sstables = { L0: [], L1: [] }; // each entry is array of {key, value}
+    let walSeq = 0;
+    let flushes = 0;
+    let compactions = 0;
+
+    const sampleKeys = ['user:1','user:2','user:3','settings:theme','settings:lang','cache:home','cache:profile','session:abc','session:xyz','config:max'];
+    const sampleVals = ['alice','bob','carol','dark','en','<html>','<div>','tok_1','tok_2','100'];
+
+    $('writeBtn').addEventListener('click', () => {
+      const k = $('keyInput').value.trim() || 'key:' + Math.random().toString(36).slice(2,6);
+      const v = $('valInput').value.trim() || 'val_' + Math.random().toString(36).slice(2,5);
+      writePut(k, v);
+    });
+
+    $('autofillBtn').addEventListener('click', () => {
+      for (let i = 0; i < 10; i++) setTimeout(() => writePut(sampleKeys[i], sampleVals[i]), i * 100);
+    });
+
+    $('flushBtn').addEventListener('click', flushMemtable);
+    $('compactBtn').addEventListener('click', compactSSTables);
+
+    function writePut(key, value) {
+      walSeq++;
+      wal.push({ seq: walSeq, key, value });
+      // Upsert into memtable
+      const idx = memtable.findIndex(e => e.key === key);
+      if (idx >= 0) memtable[idx].value = value;
+      else memtable.push({ key, value });
+      memtable.sort((a, b) => a.key.localeCompare(b.key));
+      if (memtable.length >= MEM_MAX) flushMemtable();
+      renderLSM();
+    }
+
+    function flushMemtable() {
+      if (memtable.length === 0) return;
+      sstables.L0.push([...memtable]);
+      memtable = [];
+      wal = [];
+      flushes++;
+      renderLSM();
+    }
+
+    function compactSSTables() {
+      if (sstables.L0.length < 2) return;
+      // Merge all L0 into L1
+      const merged = new Map();
+      sstables.L0.forEach(table => table.forEach(e => merged.set(e.key, e.value)));
+      if (sstables.L1.length > 0) sstables.L1[0].forEach(e => { if (!merged.has(e.key)) merged.set(e.key, e.value); });
+      const sorted = [...merged.entries()].sort((a,b) => a[0].localeCompare(b[0])).map(([key,value]) => ({key,value}));
+      sstables.L1 = [sorted];
+      sstables.L0 = [];
+      compactions++;
+      renderLSM();
+    }
+
+    function renderLSM() {
+      // WAL
+      const walEl = $('walEntries');
+      if (wal.length === 0) walEl.innerHTML = '<div class="empty-msg">No writes yet</div>';
+      else walEl.innerHTML = wal.slice().reverse().map(e => '<div class="wal-entry"><span class="seq">#' + e.seq + '</span>PUT ' + e.key + ' = ' + e.value + '</div>').join('');
+
+      // Memtable
+      const memEl = $('memEntries');
+      if (memtable.length === 0) memEl.innerHTML = '<div class="empty-msg">Empty — sorted in-memory</div>';
+      else memEl.innerHTML = memtable.map(e => '<div class="mem-entry">' + e.key + ' → ' + e.value + '</div>').join('');
+      $('memSize').textContent = memtable.length + ' / ' + MEM_MAX;
+      $('memCount').textContent = memtable.length;
+      $('flushCount').textContent = flushes;
+
+      // SSTables
+      const sstEl = $('sstLevels');
+      if (sstables.L0.length === 0 && sstables.L1.length === 0) {
+        sstEl.innerHTML = '<div class="empty-msg">No SSTables yet — flush memtable first</div>';
+      } else {
+        let html = '';
+        if (sstables.L0.length > 0) {
+          html += '<div class="sst-level"><div class="sst-level-label">Level 0 (unsorted runs)</div><div class="sst-tables">';
+          sstables.L0.forEach((t, i) => { html += '<div class="sst-block">SST-L0.' + i + ' [' + t.map(e=>e.key).join(', ') + ']</div>'; });
+          html += '</div></div>';
+        }
+        if (sstables.L1.length > 0) {
+          html += '<div class="sst-level"><div class="sst-level-label">Level 1 (compacted, sorted)</div><div class="sst-tables">';
+          sstables.L1.forEach((t, i) => { html += '<div class="sst-block">SST-L1.' + i + ' [' + t.map(e=>e.key).join(', ') + ']</div>'; });
+          html += '</div></div>';
+        }
+        sstEl.innerHTML = html;
+      }
+      $('l0Count').textContent = sstables.L0.length;
+      $('l1Count').textContent = sstables.L1.length;
+      $('compactCount').textContent = compactions;
+    }
+
+    // === Consistent Hashing ===
+    let numNodes = 3, vnodes = 3, replicationFactor = 2, placedKeys = [];
+
+    const nodeColors = ['#667eea','#22c55e','#e74c3c','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+
+    $('nodeSlider').addEventListener('input', e => { numNodes = +e.target.value; $('nodeLabel').textContent = numNodes; placedKeys = []; drawRing(); });
+    $('vnodeSlider').addEventListener('input', e => { vnodes = +e.target.value; $('vnodeLabel').textContent = vnodes; placedKeys = []; drawRing(); });
+    $('replicaSlider').addEventListener('input', e => { replicationFactor = +e.target.value; $('replicaLabel').textContent = replicationFactor; drawRing(); });
+    $('hashKeyBtn').addEventListener('click', () => {
+      const key = 'key_' + Math.random().toString(36).slice(2,6);
+      const hash = simpleHash(key) % 360;
+      placedKeys.push({ key, angle: hash });
+      if (placedKeys.length > 20) placedKeys.shift();
+      drawRing();
+    });
+
+    function simpleHash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      return Math.abs(h) % 360;
+    }
+
+    function getVnodePositions() {
+      const positions = [];
+      for (let n = 0; n < numNodes; n++) {
+        for (let v = 0; v < vnodes; v++) {
+          const angle = simpleHash('node' + n + 'v' + v) % 360;
+          positions.push({ node: n, angle });
+        }
+      }
+      positions.sort((a, b) => a.angle - b.angle);
+      return positions;
+    }
+
+    function findOwners(keyAngle, ring) {
+      const owners = new Set();
+      const result = [];
+      let startIdx = 0;
+      for (let i = 0; i < ring.length; i++) {
+        if (ring[i].angle >= keyAngle) { startIdx = i; break; }
+        if (i === ring.length - 1) startIdx = 0;
+      }
+      for (let i = 0; i < ring.length && owners.size < Math.min(replicationFactor, numNodes); i++) {
+        const idx = (startIdx + i) % ring.length;
+        if (!owners.has(ring[idx].node)) {
+          owners.add(ring[idx].node);
+          result.push(ring[idx].node);
+        }
+      }
+      return result;
+    }
+
+    function drawRing() {
+      const canvas = $('ringCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2, r = 180;
+      ctx.clearRect(0, 0, W, H);
+
+      // Ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = '#2a2a4a';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      const ring = getVnodePositions();
+
+      // Draw vnodes
+      ring.forEach(vn => {
+        const rad = (vn.angle - 90) * Math.PI / 180;
+        const x = cx + r * Math.cos(rad);
+        const y = cy + r * Math.sin(rad);
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = nodeColors[vn.node];
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('N' + vn.node, x, y);
+      });
+
+      // Place keys
+      let lastOwners = [];
+      if (placedKeys.length > 0) {
+        const lastKey = placedKeys[placedKeys.length - 1];
+        lastOwners = findOwners(lastKey.angle, ring);
+        $('primaryNode').textContent = 'N' + lastOwners[0];
+        $('replicaNodes').textContent = lastOwners.slice(1).map(n => 'N' + n).join(', ') || '—';
+      }
+      $('keysPlaced').textContent = placedKeys.length;
+
+      placedKeys.forEach((pk, i) => {
+        const rad = (pk.angle - 90) * Math.PI / 180;
+        const x = cx + (r - 30) * Math.cos(rad);
+        const y = cy + (r - 30) * Math.sin(rad);
+        const isLast = i === placedKeys.length - 1;
+        ctx.beginPath();
+        ctx.arc(x, y, isLast ? 6 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = isLast ? '#f59e0b' : '#64748b';
+        ctx.fill();
+        if (isLast) {
+          ctx.font = '10px monospace';
+          ctx.fillStyle = '#f59e0b';
+          ctx.fillText(pk.key, x + 10, y + 3);
+          // Draw lines to owners
+          lastOwners.forEach((owner, oi) => {
+            const vn = ring.find(v => v.node === owner);
+            if (!vn) return;
+            const vrad = (vn.angle - 90) * Math.PI / 180;
+            const vx = cx + r * Math.cos(vrad);
+            const vy = cy + r * Math.sin(vrad);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(vx, vy);
+            ctx.strokeStyle = oi === 0 ? '#22c55e88' : '#667eea55';
+            ctx.lineWidth = oi === 0 ? 2 : 1;
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          });
+        }
+      });
+
+      // Legend
+      ctx.font = '11px sans-serif';
+      for (let n = 0; n < numNodes; n++) {
+        ctx.fillStyle = nodeColors[n];
+        ctx.fillRect(10, 10 + n * 20, 12, 12);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Node ' + n, 28, 20 + n * 20);
+      }
+    }
+
+    renderLSM();
+    drawRing();
+  `}</script>
+</BaseLayout>

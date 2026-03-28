@@ -1,0 +1,357 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design Search Autocomplete — Interactive Visualization"
+  description="Visualize trie data structures, prefix matching, and top-K frequency ranking for search autocomplete systems."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Search Autocomplete", href: "/system-design/search-autocomplete/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔍 Design Search Autocomplete</h1>
+      <p class="subtitle">Trie visualization with prefix matching and top-K frequency ranking</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Autocomplete suggests completions as users type. A <strong>trie</strong> enables O(p) prefix lookup 
+          where p is prefix length. Each node stores top-K results to avoid traversing the entire subtree at query time.
+        </p>
+      </div>
+    </section>
+
+    <!-- Search Input -->
+    <section class="controls-section">
+      <h2>⌨️ Try It — Type a Prefix</h2>
+      <div class="controls-grid">
+        <div class="control-group" style="grid-column: 1 / -1;">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Start typing..." class="search-input" autocomplete="off">
+          </div>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Trie Visualization -->
+    <section class="algorithms-section">
+      <h2>🌳 Trie Structure</h2>
+      <div class="algo-grid">
+        <div class="algo-panel" style="grid-column: 1 / -1;">
+          <div class="trie-viz" id="trieViz">
+            <canvas id="trieCanvas" width="800" height="400"></canvas>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Nodes</span><span class="stat-v" id="nodeCount">0</span></div>
+            <div class="stat"><span class="stat-l">Words</span><span class="stat-v" id="wordCount">0</span></div>
+            <div class="stat"><span class="stat-l">Matched</span><span class="stat-v green" id="matchCount">0</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Top-K Ranking -->
+    <section class="controls-section">
+      <h2>📊 Top-K Frequency Ranking</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Add a search term:</label>
+          <div style="display:flex;gap:0.5rem;">
+            <input type="text" id="addTermInput" placeholder="new term" class="text-input">
+            <button id="addTermBtn" class="action-btn primary-btn">➕ Add</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Simulate searches:</label>
+          <button id="simSearchBtn" class="action-btn primary-btn-secondary">⚡ Simulate 50 Searches</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="algorithms-section">
+      <div class="algo-grid">
+        <div class="algo-panel" style="grid-column: 1 / -1;">
+          <h3>🏆 Top-K Results <span class="badge">by frequency</span></h3>
+          <div class="ranking-bars" id="rankingBars"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tips -->
+    <section class="tips-section">
+      <h2>💡 Interview Tips</h2>
+      <div class="tips-grid">
+        <div class="tip-card">
+          <h4>Data gathering</h4>
+          <p>Log search queries → aggregate frequencies → build trie offline. Update trie weekly/daily with MapReduce. Real-time updates via streaming (Kafka → Flink).</p>
+        </div>
+        <div class="tip-card">
+          <h4>Storage optimization</h4>
+          <p>Cache top-K at each trie node to avoid DFS at query time. Compress trie paths (radix tree) to reduce memory. Shard by first 2 characters.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Serving layer</h4>
+          <p>Browser caches recent suggestions (200ms debounce). CDN caches popular prefixes. Trie servers handle tail queries. Target &lt;100ms p99 latency.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Filtering & ranking</h4>
+          <p>Remove offensive content, apply personalization (user history, location), recency bias. A/B test ranking signals. Support trending queries.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .search-box { display: flex; align-items: center; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 12px; padding: 0.75rem 1rem; transition: border-color 0.2s; }
+    .search-box:focus-within { border-color: #667eea; }
+    .search-icon { font-size: 1.2rem; margin-right: 0.5rem; }
+    .search-input { background: none; border: none; color: #e2e8f0; font-size: 1.2rem; width: 100%; outline: none; }
+    .suggestions { margin-top: 4px; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px; overflow: hidden; display: none; }
+    .suggestions.show { display: block; }
+    .suggestion-item { padding: 0.6rem 1rem; color: #94a3b8; cursor: pointer; font-size: 0.95rem; display: flex; justify-content: space-between; }
+    .suggestion-item:hover { background: #667eea22; }
+    .suggestion-item .freq { color: #667eea; font-size: 0.8rem; }
+    .suggestion-item .highlight { color: #e2e8f0; font-weight: 600; }
+
+    .text-input { background: #0f0f23; border: 1px solid #2a2a4a; color: #e2e8f0; padding: 0.4rem 0.6rem; border-radius: 6px; width: 140px; font-size: 0.9rem; }
+    .badge { font-size: 0.75rem; background: #667eea33; color: #667eea; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; background: #1a1a2e; padding: 1.5rem; border-radius: 12px; border: 1px solid #2a2a4a; }
+    .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .control-group label { color: #94a3b8; font-size: 0.9rem; }
+    .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .primary-btn { background: #667eea; color: white; }
+    .primary-btn-secondary { background: #e74c3c; color: white; }
+
+    .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+    @media (max-width: 800px) { .algo-grid { grid-template-columns: 1fr; } .controls-grid { grid-template-columns: 1fr; } }
+    .algo-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .algo-panel h3 { margin: 0 0 1rem; color: #e2e8f0; font-size: 1.1rem; }
+    .algo-stats { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+    .stat-l { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+    .stat-v { font-size: 1.3rem; font-weight: 700; color: #e2e8f0; }
+    .stat-v.green { color: #22c55e; }
+
+    #trieCanvas { width: 100%; height: 400px; }
+
+    .ranking-bars { display: flex; flex-direction: column; gap: 6px; }
+    .rank-row { display: flex; align-items: center; gap: 8px; }
+    .rank-label { width: 140px; font-size: 0.85rem; color: #e2e8f0; font-family: monospace; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rank-bar { height: 24px; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 4px; transition: width 0.3s; min-width: 2px; }
+    .rank-freq { font-size: 0.8rem; color: #94a3b8; min-width: 30px; }
+
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1.25rem; }
+    .tip-card h4 { margin: 0 0 0.5rem; color: #667eea; }
+    .tip-card p { margin: 0; color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+  </style>
+
+  <script type="module">{`
+    const $ = id => document.getElementById(id);
+
+    // === Trie ===
+    class TrieNode {
+      constructor() { this.children = {}; this.isEnd = false; this.freq = 0; }
+    }
+    class Trie {
+      constructor() { this.root = new TrieNode(); }
+      insert(word, freq = 1) {
+        let node = this.root;
+        for (const ch of word) {
+          if (!node.children[ch]) node.children[ch] = new TrieNode();
+          node = node.children[ch];
+        }
+        node.isEnd = true;
+        node.freq += freq;
+      }
+      search(prefix) {
+        let node = this.root;
+        for (const ch of prefix) {
+          if (!node.children[ch]) return [];
+          node = node.children[ch];
+        }
+        const results = [];
+        this._dfs(node, prefix, results);
+        return results.sort((a, b) => b.freq - a.freq);
+      }
+      _dfs(node, path, results) {
+        if (node.isEnd) results.push({ word: path, freq: node.freq });
+        for (const [ch, child] of Object.entries(node.children)) {
+          this._dfs(child, path + ch, results);
+        }
+      }
+      countNodes() {
+        let count = 0;
+        const q = [this.root];
+        while (q.length) { count++; const n = q.shift(); Object.values(n.children).forEach(c => q.push(c)); }
+        return count;
+      }
+      countWords() {
+        let count = 0;
+        const q = [this.root];
+        while (q.length) { const n = q.shift(); if (n.isEnd) count++; Object.values(n.children).forEach(c => q.push(c)); }
+        return count;
+      }
+    }
+
+    const trie = new Trie();
+    const seedData = [
+      ['facebook', 45], ['facebook login', 30], ['facebook marketplace', 25],
+      ['ferrari', 15], ['figma', 20], ['firebase', 18],
+      ['google', 50], ['google maps', 40], ['google docs', 35], ['gmail', 38],
+      ['github', 42], ['github copilot', 28], ['gpt', 30],
+      ['amazon', 48], ['amazon prime', 32], ['apple', 44], ['airbnb', 22],
+      ['twitter', 36], ['tiktok', 40], ['tesla', 30],
+      ['netflix', 35], ['notion', 25], ['node js', 20],
+      ['youtube', 47], ['yahoo', 15],
+    ];
+    seedData.forEach(([w, f]) => trie.insert(w, f));
+
+    let currentPrefix = '';
+
+    $('searchInput').addEventListener('input', e => {
+      currentPrefix = e.target.value.toLowerCase();
+      updateSuggestions();
+      drawTrie();
+    });
+
+    function updateSuggestions() {
+      const el = $('suggestions');
+      if (!currentPrefix) { el.classList.remove('show'); el.innerHTML = ''; $('matchCount').textContent = '0'; return; }
+      const results = trie.search(currentPrefix).slice(0, 8);
+      $('matchCount').textContent = results.length;
+      if (results.length === 0) { el.classList.remove('show'); return; }
+      el.classList.add('show');
+      el.innerHTML = results.map(r => {
+        const hl = '<span class="highlight">' + r.word.slice(0, currentPrefix.length) + '</span>' + r.word.slice(currentPrefix.length);
+        return '<div class="suggestion-item"><span>' + hl + '</span><span class="freq">' + r.freq + ' searches</span></div>';
+      }).join('');
+    }
+
+    // === Trie Canvas Drawing ===
+    function drawTrie() {
+      const canvas = $('trieCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      // Show first 3 levels of trie matching prefix
+      const node = trie.root;
+      const startX = W / 2, startY = 30;
+      drawTrieNode(ctx, node, startX, startY, W * 0.4, 0, currentPrefix, '');
+      $('nodeCount').textContent = trie.countNodes();
+      $('wordCount').textContent = trie.countWords();
+    }
+
+    function drawTrieNode(ctx, node, x, y, spread, depth, prefix, path) {
+      if (depth > 3) return;
+      const entries = Object.entries(node.children).slice(0, 8);
+      const count = entries.length;
+      if (count === 0) return;
+
+      entries.forEach(([ch, child], i) => {
+        const cx = x + (i - (count - 1) / 2) * (spread / Math.max(count, 1));
+        const cy = y + 90;
+        const isOnPath = prefix.length > depth && prefix[depth] === ch;
+        const isMatched = depth < prefix.length;
+
+        // Line
+        ctx.beginPath();
+        ctx.moveTo(x, y + 15);
+        ctx.lineTo(cx, cy - 15);
+        ctx.strokeStyle = isOnPath ? '#667eea' : '#2a2a4a';
+        ctx.lineWidth = isOnPath ? 2.5 : 1;
+        ctx.stroke();
+
+        // Circle
+        ctx.beginPath();
+        ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+        ctx.fillStyle = child.isEnd ? (isOnPath ? '#22c55e' : '#22c55e44') : (isOnPath ? '#667eea33' : '#0f0f23');
+        ctx.fill();
+        ctx.strokeStyle = isOnPath ? '#667eea' : '#2a2a4a';
+        ctx.lineWidth = isOnPath ? 2 : 1;
+        ctx.stroke();
+
+        // Letter
+        ctx.fillStyle = isOnPath ? '#e2e8f0' : '#64748b';
+        ctx.font = (isOnPath ? 'bold ' : '') + '13px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ch, cx, cy);
+
+        if (isOnPath || depth >= prefix.length) {
+          drawTrieNode(ctx, child, cx, cy, spread * 0.5, depth + 1, prefix, path + ch);
+        }
+      });
+    }
+
+    // Draw root
+    function drawRootAndTrie() {
+      const canvas = $('trieCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, 30, 15, 0, Math.PI * 2);
+      ctx.fillStyle = '#0f0f23';
+      ctx.fill();
+      ctx.strokeStyle = '#667eea';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#667eea';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('root', canvas.width / 2, 30);
+      drawTrieNode(ctx, trie.root, canvas.width / 2, 30, canvas.width * 0.4, 0, currentPrefix, '');
+      $('nodeCount').textContent = trie.countNodes();
+      $('wordCount').textContent = trie.countWords();
+    }
+
+    // === Top-K Ranking ===
+    function renderRanking() {
+      const all = [];
+      const q = [[trie.root, '']];
+      while (q.length) {
+        const [n, p] = q.shift();
+        if (n.isEnd) all.push({ word: p, freq: n.freq });
+        for (const [ch, child] of Object.entries(n.children)) q.push([child, p + ch]);
+      }
+      all.sort((a, b) => b.freq - a.freq);
+      const top = all.slice(0, 15);
+      const maxFreq = top[0]?.freq || 1;
+      $('rankingBars').innerHTML = top.map((r, i) =>
+        '<div class="rank-row"><span class="rank-label">' + (i+1) + '. ' + r.word + '</span><div class="rank-bar" style="width:' + (r.freq / maxFreq * 100) + '%"></div><span class="rank-freq">' + r.freq + '</span></div>'
+      ).join('');
+    }
+
+    $('addTermBtn').addEventListener('click', () => {
+      const term = $('addTermInput').value.trim().toLowerCase();
+      if (!term) return;
+      trie.insert(term, 5);
+      $('addTermInput').value = '';
+      renderRanking();
+      drawRootAndTrie();
+    });
+
+    $('simSearchBtn').addEventListener('click', () => {
+      const words = seedData.map(d => d[0]);
+      for (let i = 0; i < 50; i++) {
+        const w = words[Math.floor(Math.random() * words.length)];
+        trie.insert(w, Math.ceil(Math.random() * 5));
+      }
+      renderRanking();
+      drawRootAndTrie();
+    });
+
+    drawRootAndTrie();
+    renderRanking();
+  `}</script>
+</BaseLayout>

@@ -1,0 +1,289 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="cgroups & Namespaces — Container Foundations"
+  description="Understand Linux cgroups and namespaces — the foundation of containers. Interactive resource limit visualization and namespace isolation diagrams."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Linux", href: "/linux/" },
+    { label: "cgroups & Namespaces", href: "/linux/cgroups-namespaces/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📦 cgroups & Namespaces</h1>
+      <p class="subtitle">The two pillars that make containers possible</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Containers aren't magic — they're built on two Linux kernel features:
+          <strong>cgroups</strong> (control groups) limit <em>how much</em> resource a process can use,
+          and <strong>namespaces</strong> control <em>what</em> a process can see.
+          Together, they create isolated environments without the overhead of virtual machines.
+        </p>
+      </div>
+    </section>
+
+    <!-- cgroups -->
+    <section class="cg-section">
+      <h2>⚙️ cgroups — Resource Limits</h2>
+      <p class="section-desc">Drag the sliders to set resource limits for each container. Watch what happens when they compete.</p>
+      <div class="cg-grid">
+        <div class="cg-container" id="cg1">
+          <h3>🐳 Container A</h3>
+          <div class="cg-resource">
+            <label>CPU Limit: <strong id="cg1CpuLabel">50%</strong></label>
+            <input type="range" id="cg1Cpu" min="10" max="100" value="50">
+            <div class="cg-bar"><div class="cg-fill cpu" id="cg1CpuBar" style="width:50%"></div></div>
+          </div>
+          <div class="cg-resource">
+            <label>Memory Limit: <strong id="cg1MemLabel">512MB</strong></label>
+            <input type="range" id="cg1Mem" min="64" max="2048" value="512" step="64">
+            <div class="cg-bar"><div class="cg-fill mem" id="cg1MemBar" style="width:25%"></div></div>
+          </div>
+          <div class="cg-resource">
+            <label>IO Weight: <strong id="cg1IoLabel">100</strong></label>
+            <input type="range" id="cg1Io" min="10" max="1000" value="100">
+          </div>
+          <div class="cg-usage">
+            <span>CPU Used: <strong class="green" id="cg1CpuUsed">0%</strong></span>
+            <span>Mem Used: <strong class="green" id="cg1MemUsed">0MB</strong></span>
+          </div>
+        </div>
+        <div class="cg-container" id="cg2">
+          <h3>🐳 Container B</h3>
+          <div class="cg-resource">
+            <label>CPU Limit: <strong id="cg2CpuLabel">30%</strong></label>
+            <input type="range" id="cg2Cpu" min="10" max="100" value="30">
+            <div class="cg-bar"><div class="cg-fill cpu" id="cg2CpuBar" style="width:30%"></div></div>
+          </div>
+          <div class="cg-resource">
+            <label>Memory Limit: <strong id="cg2MemLabel">256MB</strong></label>
+            <input type="range" id="cg2Mem" min="64" max="2048" value="256" step="64">
+            <div class="cg-bar"><div class="cg-fill mem" id="cg2MemBar" style="width:12.5%"></div></div>
+          </div>
+          <div class="cg-resource">
+            <label>IO Weight: <strong id="cg2IoLabel">50</strong></label>
+            <input type="range" id="cg2Io" min="10" max="1000" value="50">
+          </div>
+          <div class="cg-usage">
+            <span>CPU Used: <strong class="green" id="cg2CpuUsed">0%</strong></span>
+            <span>Mem Used: <strong class="green" id="cg2MemUsed">0MB</strong></span>
+          </div>
+        </div>
+      </div>
+      <div class="cg-controls">
+        <button id="simLoadBtn" class="action-btn primary-btn">🔥 Simulate Load</button>
+        <button id="simOomBtn" class="action-btn" style="background:#ef4444;color:white">💀 Trigger OOM</button>
+        <button id="resetCgBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="cg-events" id="cgEvents"></div>
+    </section>
+
+    <!-- Namespaces -->
+    <section class="ns-section">
+      <h2>👁️ Namespaces — Isolation</h2>
+      <p class="section-desc">Each namespace type isolates a different aspect of the system. Click to explore.</p>
+      <div class="ns-grid">
+        <div class="ns-card active" data-ns="pid" onclick="showNs('pid')">
+          <h3>🔢 PID</h3>
+          <p>Process IDs. Container sees PID 1 as init, but host sees it as PID 4521.</p>
+          <div class="ns-example" id="nsPid">
+            <div class="ns-view">
+              <h4>Container View</h4>
+              <div class="ns-procs"><span class="ns-proc">PID 1 (nginx)</span><span class="ns-proc">PID 2 (worker)</span></div>
+            </div>
+            <div class="ns-view host">
+              <h4>Host View</h4>
+              <div class="ns-procs"><span class="ns-proc">PID 4521 (nginx)</span><span class="ns-proc">PID 4522 (worker)</span><span class="ns-proc dim">PID 1 (systemd)</span><span class="ns-proc dim">PID 892 (dockerd)</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="ns-card" data-ns="net" onclick="showNs('net')">
+          <h3>🌐 Network</h3>
+          <p>Network stack. Each container gets its own interfaces, IP, and port space.</p>
+          <div class="ns-example hidden" id="nsNet">
+            <div class="ns-view">
+              <h4>Container View</h4>
+              <div class="ns-procs"><span class="ns-proc">eth0: 172.17.0.2</span><span class="ns-proc">:80 → nginx</span><span class="ns-proc">:3000 → app</span></div>
+            </div>
+            <div class="ns-view host">
+              <h4>Host View</h4>
+              <div class="ns-procs"><span class="ns-proc">eth0: 192.168.1.5</span><span class="ns-proc">docker0: 172.17.0.1</span><span class="ns-proc">veth123 → container</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="ns-card" data-ns="mnt" onclick="showNs('mnt')">
+          <h3>📁 Mount</h3>
+          <p>Filesystem. Container sees its own root filesystem via overlay layers.</p>
+          <div class="ns-example hidden" id="nsMnt">
+            <div class="ns-view">
+              <h4>Container View</h4>
+              <div class="ns-procs"><span class="ns-proc">/  (overlay)</span><span class="ns-proc">/app  (bind mount)</span><span class="ns-proc">/etc  (image layer)</span></div>
+            </div>
+            <div class="ns-view host">
+              <h4>Host View</h4>
+              <div class="ns-procs"><span class="ns-proc">/var/lib/docker/overlay2/...</span><span class="ns-proc">Lower: image layers (read-only)</span><span class="ns-proc">Upper: container layer (read-write)</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="ns-card" data-ns="user" onclick="showNs('user')">
+          <h3>👤 User</h3>
+          <p>UID/GID mapping. Root in container can map to unprivileged user on host.</p>
+          <div class="ns-example hidden" id="nsUser">
+            <div class="ns-view">
+              <h4>Container View</h4>
+              <div class="ns-procs"><span class="ns-proc">root (UID 0)</span><span class="ns-proc">app (UID 1000)</span></div>
+            </div>
+            <div class="ns-view host">
+              <h4>Host View</h4>
+              <div class="ns-procs"><span class="ns-proc">UID 100000 (mapped root)</span><span class="ns-proc">UID 101000 (mapped app)</span><span class="ns-proc dim">No real root access!</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Docker mapping -->
+    <section class="docker-section">
+      <h2>🐋 How Docker Uses These</h2>
+      <div class="docker-flow">
+        <div class="docker-step"><strong>docker run nginx</strong></div>
+        <div class="docker-arrow">↓</div>
+        <div class="docker-step">Clone with CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWNS | CLONE_NEWUTS</div>
+        <div class="docker-arrow">↓</div>
+        <div class="docker-step">Set cgroup limits (--memory=512m --cpus=0.5)</div>
+        <div class="docker-arrow">↓</div>
+        <div class="docker-step">Mount overlay filesystem (image layers + rw layer)</div>
+        <div class="docker-arrow">↓</div>
+        <div class="docker-step">Setup veth pair + bridge networking</div>
+        <div class="docker-arrow">↓</div>
+        <div class="docker-step">exec nginx (PID 1 inside container)</div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #a855f7; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+
+    /* cgroups */
+    .cg-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .cg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 700px) { .cg-grid { grid-template-columns: 1fr; } }
+    .cg-container { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .cg-container h3 { color: #f1f5f9; margin: 0 0 0.5rem; }
+    .cg-resource { margin: 0.5rem 0; }
+    .cg-resource label { color: #94a3b8; font-size: 0.85rem; display: block; margin-bottom: 0.2rem; }
+    .cg-resource input[type=range] { width: 100%; }
+    .cg-bar { background: #0f172a; border-radius: 6px; height: 14px; overflow: hidden; margin-top: 0.2rem; }
+    .cg-fill { height: 100%; border-radius: 6px; transition: width 0.3s; }
+    .cg-fill.cpu { background: #3b82f6; }
+    .cg-fill.mem { background: #a855f7; }
+    .cg-usage { display: flex; gap: 1rem; margin-top: 0.5rem; color: #94a3b8; font-size: 0.85rem; }
+    .cg-controls { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .cg-events { font-family: monospace; font-size: 0.8rem; color: #64748b; max-height: 80px; overflow-y: auto; }
+
+    /* Namespaces */
+    .ns-section { margin-bottom: 2rem; }
+    .ns-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .ns-grid { grid-template-columns: 1fr; } }
+    .ns-card { background: #1e293b; border-radius: 12px; padding: 1rem; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s; }
+    .ns-card:hover, .ns-card.active { border-color: #3b82f6; }
+    .ns-card h3 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .ns-card p { color: #94a3b8; font-size: 0.85rem; margin: 0 0 0.5rem; }
+    .ns-example { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .ns-example.hidden { display: none; }
+    .ns-view { background: #0f172a; border-radius: 8px; padding: 0.5rem; }
+    .ns-view.host { border-left: 2px solid #f59e0b; }
+    .ns-view h4 { color: #64748b; font-size: 0.75rem; margin: 0 0 0.3rem; }
+    .ns-procs { display: flex; flex-direction: column; gap: 0.2rem; }
+    .ns-proc { font-size: 0.75rem; color: #cbd5e1; font-family: monospace; padding: 0.15rem 0.3rem; background: #1e293b; border-radius: 4px; }
+    .ns-proc.dim { opacity: 0.5; }
+
+    /* Docker */
+    .docker-section { margin-bottom: 2rem; }
+    .docker-flow { background: #1e293b; border-radius: 12px; padding: 1.5rem; text-align: center; }
+    .docker-step { background: #0f172a; border-radius: 8px; padding: 0.7rem; color: #cbd5e1; font-family: monospace; font-size: 0.85rem; margin: 0.3rem auto; max-width: 500px; }
+    .docker-step strong { color: #22c55e; }
+    .docker-arrow { color: #64748b; font-size: 1.2rem; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // cgroup sliders
+    ['1','2'].forEach(n => {
+      $('cg' + n + 'Cpu').oninput = e => {
+        $('cg' + n + 'CpuLabel').textContent = e.target.value + '%';
+        $('cg' + n + 'CpuBar').style.width = e.target.value + '%';
+      };
+      $('cg' + n + 'Mem').oninput = e => {
+        $('cg' + n + 'MemLabel').textContent = e.target.value + 'MB';
+        $('cg' + n + 'MemBar').style.width = (e.target.value / 2048 * 100) + '%';
+      };
+      $('cg' + n + 'Io').oninput = e => { $('cg' + n + 'IoLabel').textContent = e.target.value; };
+    });
+
+    let simInterval = null;
+    $('simLoadBtn').onclick = () => {
+      if (simInterval) return;
+      const events = $('cgEvents');
+      events.innerHTML = '▶ Starting load simulation...\\n' + events.innerHTML;
+      let tick = 0;
+      simInterval = setInterval(() => {
+        tick++;
+        const cpu1 = Math.min(+$('cg1Cpu').value, Math.random() * 80 + 20);
+        const cpu2 = Math.min(+$('cg2Cpu').value, Math.random() * 80 + 20);
+        const mem1 = Math.min(+$('cg1Mem').value, Math.floor(Math.random() * +$('cg1Mem').value * 0.9));
+        const mem2 = Math.min(+$('cg2Mem').value, Math.floor(Math.random() * +$('cg2Mem').value * 0.9));
+        $('cg1CpuUsed').textContent = cpu1.toFixed(0) + '%';
+        $('cg2CpuUsed').textContent = cpu2.toFixed(0) + '%';
+        $('cg1MemUsed').textContent = mem1 + 'MB';
+        $('cg2MemUsed').textContent = mem2 + 'MB';
+        if (cpu1 >= +$('cg1Cpu').value) events.innerHTML = '[' + tick + 's] ⚠️ Container A: CPU throttled at ' + $('cg1Cpu').value + '%\\n' + events.innerHTML;
+        if (cpu2 >= +$('cg2Cpu').value) events.innerHTML = '[' + tick + 's] ⚠️ Container B: CPU throttled at ' + $('cg2Cpu').value + '%\\n' + events.innerHTML;
+        if (tick > 20) { clearInterval(simInterval); simInterval = null; events.innerHTML = '✅ Load simulation complete\\n' + events.innerHTML; }
+      }, 500);
+    };
+
+    $('simOomBtn').onclick = () => {
+      const events = $('cgEvents');
+      const limit = $('cg1Mem').value;
+      $('cg1MemUsed').textContent = limit + 'MB';
+      events.innerHTML = '💀 Container A: OOM killed! Memory usage hit ' + limit + 'MB limit. Kernel invoked oom_killer.\\n' + events.innerHTML;
+      $('cg1MemUsed').className = 'red';
+      setTimeout(() => { $('cg1MemUsed').textContent = '0MB'; $('cg1MemUsed').className = 'green'; }, 2000);
+    };
+
+    $('resetCgBtn').onclick = () => {
+      if (simInterval) { clearInterval(simInterval); simInterval = null; }
+      ['1','2'].forEach(n => { $('cg' + n + 'CpuUsed').textContent = '0%'; $('cg' + n + 'MemUsed').textContent = '0MB'; $('cg' + n + 'CpuUsed').className = 'green'; $('cg' + n + 'MemUsed').className = 'green'; });
+      $('cgEvents').innerHTML = '';
+    };
+
+    // Namespace tabs
+    window.showNs = function(ns) {
+      document.querySelectorAll('.ns-card').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.ns-example').forEach(e => e.classList.add('hidden'));
+      document.querySelector('[data-ns="' + ns + '"]').classList.add('active');
+      const map = { pid: 'nsPid', net: 'nsNet', mnt: 'nsMnt', user: 'nsUser' };
+      $(map[ns]).classList.remove('hidden');
+    };
+  </script>
+</BaseLayout>

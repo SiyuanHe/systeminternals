@@ -1,0 +1,287 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Distributed LLM Training — Interactive Visualization"
+  description="Understand data parallelism, model parallelism, and pipeline parallelism for training large language models. Interactive GPU memory calculator."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "LLM", href: "/llm/" },
+    { label: "Distributed Training", href: "/llm/distributed-training/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🖥️ Distributed LLM Training</h1>
+      <p class="subtitle">Data, model, and pipeline parallelism — how to train models that don't fit on one GPU</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          GPT-4 class models have <strong>1.8T+ parameters</strong>. At fp16, that's 3.6TB just for weights —
+          far more than any single GPU (80GB for H100). Distributed training splits the work across
+          hundreds of GPUs using three strategies: <strong>data</strong>, <strong>model</strong>, and <strong>pipeline</strong> parallelism.
+        </p>
+      </div>
+    </section>
+
+    <!-- Parallelism Comparison -->
+    <section class="parallel-section">
+      <h2>📊 Parallelism Strategies</h2>
+      <p class="section-desc">Click each strategy to see how data and computation are distributed across GPUs.</p>
+      <div class="par-tabs">
+        <button class="par-tab active" data-par="data" onclick="showPar('data')">📦 Data Parallel</button>
+        <button class="par-tab" data-par="model" onclick="showPar('model')">🧩 Model (Tensor) Parallel</button>
+        <button class="par-tab" data-par="pipeline" onclick="showPar('pipeline')">🔗 Pipeline Parallel</button>
+      </div>
+
+      <div class="par-panel" id="parData">
+        <div class="par-diagram">
+          <div class="gpu-row">
+            <div class="gpu-box"><h4>GPU 0</h4><div class="gpu-content"><span class="gpu-model">Full Model Copy</span><span class="gpu-data">Batch 0-31</span></div></div>
+            <div class="gpu-box"><h4>GPU 1</h4><div class="gpu-content"><span class="gpu-model">Full Model Copy</span><span class="gpu-data">Batch 32-63</span></div></div>
+            <div class="gpu-box"><h4>GPU 2</h4><div class="gpu-content"><span class="gpu-model">Full Model Copy</span><span class="gpu-data">Batch 64-95</span></div></div>
+            <div class="gpu-box"><h4>GPU 3</h4><div class="gpu-content"><span class="gpu-model">Full Model Copy</span><span class="gpu-data">Batch 96-127</span></div></div>
+          </div>
+          <div class="sync-bar">⬆️ All-Reduce: sync gradients across all GPUs ⬆️</div>
+        </div>
+        <div class="par-info">
+          <p><strong>How:</strong> Each GPU has a full copy of the model but processes different data batches.</p>
+          <p><strong>Sync:</strong> After forward+backward pass, gradients are averaged via <em>all-reduce</em> (Ring AllReduce or tree-based).</p>
+          <p><strong>Pros:</strong> Simple, near-linear scaling for small models. <strong>Cons:</strong> Model must fit in single GPU memory.</p>
+          <p><strong>Used by:</strong> PyTorch DDP, Horovod, DeepSpeed ZeRO Stage 1</p>
+        </div>
+      </div>
+
+      <div class="par-panel hidden" id="parModel">
+        <div class="par-diagram">
+          <div class="gpu-row">
+            <div class="gpu-box tensor"><h4>GPU 0</h4><div class="gpu-content"><span class="gpu-model">Attention Heads 0-15</span><span class="gpu-data">Full Batch</span></div></div>
+            <div class="gpu-box tensor"><h4>GPU 1</h4><div class="gpu-content"><span class="gpu-model">Attention Heads 16-31</span><span class="gpu-data">Full Batch</span></div></div>
+            <div class="gpu-box tensor"><h4>GPU 2</h4><div class="gpu-content"><span class="gpu-model">FFN Columns 0-half</span><span class="gpu-data">Full Batch</span></div></div>
+            <div class="gpu-box tensor"><h4>GPU 3</h4><div class="gpu-content"><span class="gpu-model">FFN Columns half-end</span><span class="gpu-data">Full Batch</span></div></div>
+          </div>
+          <div class="sync-bar">⬆️ All-Reduce after each layer (activations) ⬆️</div>
+        </div>
+        <div class="par-info">
+          <p><strong>How:</strong> Split individual weight matrices across GPUs. Each GPU computes partial results.</p>
+          <p><strong>Sync:</strong> All-reduce activations after each layer — very communication heavy.</p>
+          <p><strong>Pros:</strong> Handles models too large for one GPU. <strong>Cons:</strong> High communication overhead, needs fast NVLink.</p>
+          <p><strong>Used by:</strong> Megatron-LM (NVIDIA), Colossal-AI</p>
+        </div>
+      </div>
+
+      <div class="par-panel hidden" id="parPipeline">
+        <div class="par-diagram">
+          <div class="gpu-row vertical">
+            <div class="gpu-box pipeline"><h4>GPU 0</h4><div class="gpu-content"><span class="gpu-model">Layers 0-7</span></div></div>
+            <div class="pipe-arrow">↓ activations</div>
+            <div class="gpu-box pipeline"><h4>GPU 1</h4><div class="gpu-content"><span class="gpu-model">Layers 8-15</span></div></div>
+            <div class="pipe-arrow">↓ activations</div>
+            <div class="gpu-box pipeline"><h4>GPU 2</h4><div class="gpu-content"><span class="gpu-model">Layers 16-23</span></div></div>
+            <div class="pipe-arrow">↓ activations</div>
+            <div class="gpu-box pipeline"><h4>GPU 3</h4><div class="gpu-content"><span class="gpu-model">Layers 24-31</span></div></div>
+          </div>
+        </div>
+        <div class="par-info">
+          <p><strong>How:</strong> Assign groups of layers to different GPUs. Data flows through the "pipeline" sequentially.</p>
+          <p><strong>Problem:</strong> GPU idle time ("bubble"). Solution: <em>micro-batching</em> — split batch into micro-batches to keep all stages busy.</p>
+          <p><strong>Pros:</strong> Low communication (only pass activations between stages). <strong>Cons:</strong> Pipeline bubbles reduce efficiency.</p>
+          <p><strong>Used by:</strong> GPipe (Google), PipeDream (Microsoft), DeepSpeed</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- GPU Memory Calculator -->
+    <section class="calc-section">
+      <h2>🧮 GPU Memory Calculator</h2>
+      <p class="section-desc">Estimate GPU memory needed for training. Adjust model size and see the breakdown.</p>
+      <div class="calc-controls">
+        <div class="calc-input">
+          <label>Parameters (Billions): <strong id="paramLabel">7</strong></label>
+          <input type="range" id="paramSlider" min="1" max="200" value="7">
+        </div>
+        <div class="calc-input">
+          <label>Precision:</label>
+          <select id="precisionSelect">
+            <option value="4">fp32 (4 bytes)</option>
+            <option value="2" selected>fp16/bf16 (2 bytes)</option>
+            <option value="1">int8 (1 byte)</option>
+          </select>
+        </div>
+        <div class="calc-input">
+          <label>Optimizer:</label>
+          <select id="optimSelect">
+            <option value="adam" selected>Adam (2 states)</option>
+            <option value="sgd">SGD (1 state)</option>
+            <option value="adafactor">Adafactor (low mem)</option>
+          </select>
+        </div>
+        <div class="calc-input">
+          <label>Batch Size: <strong id="batchLabel">32</strong></label>
+          <input type="range" id="batchSlider" min="1" max="128" value="32">
+        </div>
+      </div>
+      <div class="calc-results">
+        <div class="calc-bar-container">
+          <div class="calc-bar-row">
+            <span class="calc-bar-label">Weights</span>
+            <div class="calc-bar"><div class="calc-fill weights" id="weightsBar"></div></div>
+            <span class="calc-bar-val" id="weightsVal">14 GB</span>
+          </div>
+          <div class="calc-bar-row">
+            <span class="calc-bar-label">Gradients</span>
+            <div class="calc-bar"><div class="calc-fill gradients" id="gradientsBar"></div></div>
+            <span class="calc-bar-val" id="gradientsVal">14 GB</span>
+          </div>
+          <div class="calc-bar-row">
+            <span class="calc-bar-label">Optimizer</span>
+            <div class="calc-bar"><div class="calc-fill optimizer" id="optimizerBar"></div></div>
+            <span class="calc-bar-val" id="optimizerVal">28 GB</span>
+          </div>
+          <div class="calc-bar-row">
+            <span class="calc-bar-label">Activations</span>
+            <div class="calc-bar"><div class="calc-fill activations" id="activationsBar"></div></div>
+            <span class="calc-bar-val" id="activationsVal">~8 GB</span>
+          </div>
+        </div>
+        <div class="calc-total">
+          <span>Total: <strong id="totalMem">64 GB</strong></span>
+          <span>GPUs needed (80GB H100): <strong id="gpuCount">1</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- AllReduce -->
+    <section class="allreduce-section">
+      <h2>🔄 Ring AllReduce</h2>
+      <div class="ar-desc">
+        <p>The dominant gradient sync algorithm. Each GPU sends/receives to its neighbor in a ring pattern. In <strong>2(N-1)</strong> steps, all GPUs have the averaged gradients.</p>
+      </div>
+      <div class="ar-steps">
+        <div class="ar-step">
+          <h4>1. Scatter-Reduce</h4>
+          <p>Each GPU sends a chunk to its right neighbor and adds what it receives. After N-1 steps, each GPU has the reduced sum of one chunk.</p>
+        </div>
+        <div class="ar-step">
+          <h4>2. All-Gather</h4>
+          <p>Same ring pattern, but now each GPU sends its reduced chunk around. After N-1 steps, every GPU has all reduced chunks.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #ef4444; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+
+    /* Parallelism */
+    .parallel-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .par-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .par-tab { padding: 0.6rem 1rem; border: 2px solid #334155; border-radius: 8px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .par-tab.active { border-color: #3b82f6; color: #f1f5f9; background: #1e293b; }
+    .par-panel.hidden { display: none; }
+    .par-diagram { margin-bottom: 1rem; }
+    .gpu-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .gpu-row.vertical { flex-direction: column; max-width: 300px; }
+    .gpu-box { background: #1e293b; border-radius: 8px; padding: 0.7rem; flex: 1; min-width: 150px; border: 2px solid #334155; }
+    .gpu-box.tensor { border-color: #22c55e; }
+    .gpu-box.pipeline { border-color: #f59e0b; }
+    .gpu-box h4 { color: #f1f5f9; margin: 0 0 0.3rem; font-size: 0.85rem; }
+    .gpu-content { display: flex; flex-direction: column; gap: 0.2rem; }
+    .gpu-model { background: #3b82f6; color: white; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.75rem; text-align: center; }
+    .gpu-data { background: #22c55e; color: white; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.75rem; text-align: center; }
+    .sync-bar { background: #7f1d1d; color: #fca5a5; padding: 0.5rem; border-radius: 6px; text-align: center; font-size: 0.8rem; margin-top: 0.5rem; }
+    .pipe-arrow { color: #f59e0b; text-align: center; font-size: 0.85rem; }
+    .par-info { background: #1e293b; border-radius: 8px; padding: 1rem; }
+    .par-info p { color: #94a3b8; font-size: 0.85rem; margin: 0.3rem 0; line-height: 1.5; }
+    .par-info strong { color: #f1f5f9; }
+    .par-info em { color: #f59e0b; }
+
+    /* Calculator */
+    .calc-section { margin-bottom: 2rem; }
+    .calc-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .calc-input label { color: #94a3b8; font-size: 0.85rem; display: block; margin-bottom: 0.3rem; }
+    .calc-input input[type=range] { width: 100%; }
+    .calc-input select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem; width: 100%; }
+    .calc-results { background: #1e293b; border-radius: 12px; padding: 1.2rem; }
+    .calc-bar-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+    .calc-bar-label { width: 80px; color: #94a3b8; font-size: 0.85rem; }
+    .calc-bar { flex: 1; background: #0f172a; border-radius: 6px; height: 20px; overflow: hidden; }
+    .calc-fill { height: 100%; border-radius: 6px; transition: width 0.3s; min-width: 2px; }
+    .calc-fill.weights { background: #3b82f6; }
+    .calc-fill.gradients { background: #22c55e; }
+    .calc-fill.optimizer { background: #f59e0b; }
+    .calc-fill.activations { background: #a855f7; }
+    .calc-bar-val { width: 70px; color: #f1f5f9; font-size: 0.85rem; font-weight: 700; text-align: right; }
+    .calc-total { display: flex; gap: 2rem; margin-top: 1rem; padding-top: 0.5rem; border-top: 1px solid #334155; color: #f1f5f9; font-size: 1rem; }
+
+    /* AllReduce */
+    .allreduce-section { margin-bottom: 2rem; }
+    .ar-desc { background: #1e293b; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+    .ar-desc p { color: #94a3b8; margin: 0; line-height: 1.6; }
+    .ar-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .ar-steps { grid-template-columns: 1fr; } }
+    .ar-step { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .ar-step h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .ar-step p { color: #94a3b8; font-size: 0.85rem; margin: 0; line-height: 1.5; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    window.showPar = function(type) {
+      document.querySelectorAll('.par-tab').forEach(t => t.classList.toggle('active', t.dataset.par === type));
+      ['parData','parModel','parPipeline'].forEach(id => $(id).classList.add('hidden'));
+      $('par' + type[0].toUpperCase() + type.slice(1)).classList.remove('hidden');
+    };
+
+    function updateCalc() {
+      const params = +$('paramSlider').value;
+      const bytes = +$('precisionSelect').value;
+      const optim = $('optimSelect').value;
+      const batch = +$('batchSlider').value;
+
+      $('paramLabel').textContent = params;
+      $('batchLabel').textContent = batch;
+
+      const weightsGB = (params * 1e9 * bytes) / 1e9;
+      const gradientsGB = (params * 1e9 * bytes) / 1e9;
+      const optimStates = optim === 'adam' ? 2 : optim === 'sgd' ? 1 : 0.5;
+      // Optimizer states always in fp32
+      const optimizerGB = (params * 1e9 * 4 * optimStates) / 1e9;
+      // Rough activation estimate: ~2x weights * (batch/32)
+      const activationsGB = weightsGB * (batch / 32) * 0.5;
+
+      const totalGB = weightsGB + gradientsGB + optimizerGB + activationsGB;
+      const maxGB = Math.max(weightsGB, gradientsGB, optimizerGB, activationsGB, 1);
+
+      function setBar(id, val, gb) {
+        $(id).style.width = (gb / maxGB * 100) + '%';
+        $(id.replace('Bar', 'Val')).textContent = gb < 1 ? gb.toFixed(1) + ' GB' : Math.round(gb) + ' GB';
+      }
+
+      setBar('weightsBar', weightsGB, weightsGB);
+      setBar('gradientsBar', gradientsGB, gradientsGB);
+      setBar('optimizerBar', optimizerGB, optimizerGB);
+      setBar('activationsBar', activationsGB, activationsGB);
+
+      $('totalMem').textContent = totalGB < 1 ? totalGB.toFixed(1) + ' GB' : Math.round(totalGB) + ' GB';
+      $('gpuCount').textContent = Math.max(1, Math.ceil(totalGB / 80));
+    }
+
+    $('paramSlider').oninput = updateCalc;
+    $('precisionSelect').onchange = updateCalc;
+    $('optimSelect').onchange = updateCalc;
+    $('batchSlider').oninput = updateCalc;
+    updateCalc();
+  </script>
+</BaseLayout>

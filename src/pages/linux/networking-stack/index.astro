@@ -1,0 +1,303 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Linux Networking Stack — Interactive Visualization"
+  description="Explore the Linux TCP/IP networking stack with interactive packet journey visualization, socket buffers, and TCP state machine."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Linux", href: "/linux/" },
+    { label: "Networking Stack", href: "/linux/networking-stack/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🌐 Linux Networking Stack</h1>
+      <p class="subtitle">From userspace to wire — how packets traverse the kernel</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          When an application calls <code>send()</code>, the data passes through multiple kernel layers:
+          the <strong>socket layer</strong>, <strong>TCP/UDP transport</strong>, <strong>IP routing</strong>, 
+          and finally the <strong>network device driver</strong>. Each layer adds headers and manages its own state.
+          Understanding this journey is key to debugging performance and connectivity issues.
+        </p>
+      </div>
+    </section>
+
+    <!-- Packet Journey -->
+    <section class="sim-section">
+      <h2>📦 Packet Journey Visualization</h2>
+      <p class="section-desc">Click "Send Packet" to watch data travel through the networking stack. Each layer lights up as the packet passes through.</p>
+      <div class="sim-controls">
+        <button id="sendBtn" class="action-btn primary-btn">📤 Send Packet</button>
+        <button id="recvBtn" class="action-btn primary-btn-secondary">📥 Receive Packet</button>
+        <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <label class="speed-label">Speed: <strong id="speedLabel">1x</strong>
+          <input type="range" id="speedSlider" min="1" max="5" value="2">
+        </label>
+      </div>
+
+      <div class="stack-viz">
+        <div class="layer" id="layer-app" data-name="Application">
+          <div class="layer-label">Application</div>
+          <div class="layer-detail">send() / recv() syscall</div>
+          <div class="layer-header-tag">Payload: "Hello"</div>
+        </div>
+        <div class="layer-arrow" id="arrow-0">▼</div>
+        <div class="layer" id="layer-socket" data-name="Socket">
+          <div class="layer-label">Socket Layer</div>
+          <div class="layer-detail">AF_INET, SOCK_STREAM — socket buffer (sk_buff)</div>
+          <div class="layer-header-tag">+ Socket metadata</div>
+        </div>
+        <div class="layer-arrow" id="arrow-1">▼</div>
+        <div class="layer" id="layer-tcp" data-name="TCP">
+          <div class="layer-label">TCP (Transport)</div>
+          <div class="layer-detail">Seq/Ack, window, congestion control</div>
+          <div class="layer-header-tag">+ TCP header (20B)</div>
+        </div>
+        <div class="layer-arrow" id="arrow-2">▼</div>
+        <div class="layer" id="layer-ip" data-name="IP">
+          <div class="layer-label">IP (Network)</div>
+          <div class="layer-detail">Routing table lookup, TTL, fragmentation</div>
+          <div class="layer-header-tag">+ IP header (20B)</div>
+        </div>
+        <div class="layer-arrow" id="arrow-3">▼</div>
+        <div class="layer" id="layer-nic" data-name="NIC">
+          <div class="layer-label">Network Device (NIC)</div>
+          <div class="layer-detail">Driver → DMA → ring buffer → wire</div>
+          <div class="layer-header-tag">+ Ethernet frame (14B)</div>
+        </div>
+      </div>
+
+      <div class="packet-info" id="packetInfo">
+        <span class="packet-label">Packet size:</span>
+        <span id="packetSize">—</span>
+      </div>
+    </section>
+
+    <!-- Socket Buffer -->
+    <section class="sim-section">
+      <h2>📋 Socket Buffer (sk_buff)</h2>
+      <p class="section-desc">The sk_buff is the core data structure for network packets in Linux. See how pointers shift as headers are added/removed.</p>
+      <div class="skb-viz">
+        <div class="skb-container">
+          <div class="skb-region" id="skb-head" style="flex:1">head</div>
+          <div class="skb-region skb-mac" id="skb-mac" style="flex:0">MAC</div>
+          <div class="skb-region skb-network" id="skb-network" style="flex:0">IP</div>
+          <div class="skb-region skb-transport" id="skb-transport" style="flex:0">TCP</div>
+          <div class="skb-region skb-data" id="skb-data" style="flex:2">Data (payload)</div>
+          <div class="skb-region" id="skb-tail" style="flex:1">tail</div>
+        </div>
+        <div class="skb-controls">
+          <button id="skbPushMac" class="action-btn primary-btn">Push MAC</button>
+          <button id="skbPushIP" class="action-btn primary-btn">Push IP</button>
+          <button id="skbPushTCP" class="action-btn primary-btn">Push TCP</button>
+          <button id="skbReset" class="action-btn reset-btn">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TCP State Machine -->
+    <section class="sim-section">
+      <h2>🔄 TCP Connection State Machine</h2>
+      <p class="section-desc">Click events to walk through the TCP handshake and teardown. The active state is highlighted.</p>
+      <div class="tcp-sm">
+        <div class="tcp-states" id="tcpStates">
+          <div class="tcp-state" id="ts-CLOSED" data-active="true">CLOSED</div>
+          <div class="tcp-state" id="ts-LISTEN">LISTEN</div>
+          <div class="tcp-state" id="ts-SYN_SENT">SYN_SENT</div>
+          <div class="tcp-state" id="ts-SYN_RCVD">SYN_RCVD</div>
+          <div class="tcp-state" id="ts-ESTABLISHED">ESTABLISHED</div>
+          <div class="tcp-state" id="ts-FIN_WAIT_1">FIN_WAIT_1</div>
+          <div class="tcp-state" id="ts-FIN_WAIT_2">FIN_WAIT_2</div>
+          <div class="tcp-state" id="ts-CLOSE_WAIT">CLOSE_WAIT</div>
+          <div class="tcp-state" id="ts-LAST_ACK">LAST_ACK</div>
+          <div class="tcp-state" id="ts-TIME_WAIT">TIME_WAIT</div>
+        </div>
+        <div class="tcp-controls">
+          <button class="action-btn primary-btn tcp-ev" data-path="client">▶ Client Connect (3-way handshake)</button>
+          <button class="action-btn primary-btn-secondary tcp-ev" data-path="server">▶ Server Accept</button>
+          <button class="action-btn reset-btn tcp-ev" data-path="close-client">Close (Client)</button>
+          <button class="action-btn reset-btn tcp-ev" data-path="reset">Reset</button>
+        </div>
+        <div class="tcp-log" id="tcpLog"></div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔌 NAPI</h4>
+          <p>New API for network drivers. Combines interrupts with polling to handle high packet rates without interrupt storms.</p>
+        </div>
+        <div class="concept">
+          <h4>📊 Congestion Control</h4>
+          <p>BBR, CUBIC, Reno — algorithms that detect network congestion and adjust send rate. <code>sysctl net.ipv4.tcp_congestion_control</code></p>
+        </div>
+        <div class="concept">
+          <h4>🔀 RSS/RPS</h4>
+          <p>Receive Side Scaling distributes packets across CPU cores via NIC hardware queues. RPS does it in software for NICs without RSS.</p>
+        </div>
+        <div class="concept">
+          <h4>🏗️ Netfilter / iptables</h4>
+          <p>Hook points in the stack (PREROUTING, INPUT, FORWARD, OUTPUT, POSTROUTING) for filtering, NAT, and mangling packets.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #3b82f6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    .overview-card code { color: #22c55e; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+    .speed-label { color: #94a3b8; display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+
+    .stack-viz { display: flex; flex-direction: column; align-items: center; gap: 0; }
+    .layer { width: 80%; max-width: 500px; padding: 1rem; border-radius: 10px; background: #1e293b; border: 2px solid #334155; text-align: center; transition: all 0.4s; position: relative; }
+    .layer.active { border-color: #3b82f6; background: #1e3a5f; box-shadow: 0 0 20px rgba(59,130,246,0.3); }
+    .layer-label { font-weight: 700; color: #f1f5f9; font-size: 1rem; }
+    .layer-detail { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
+    .layer-header-tag { color: #22c55e; font-size: 0.75rem; margin-top: 0.3rem; opacity: 0; transition: opacity 0.3s; }
+    .layer.active .layer-header-tag { opacity: 1; }
+    .layer-arrow { color: #475569; font-size: 1.2rem; line-height: 1; padding: 0.2rem 0; transition: color 0.3s; }
+    .layer-arrow.active { color: #3b82f6; }
+
+    .packet-info { text-align: center; margin-top: 1rem; color: #94a3b8; }
+    .packet-label { font-weight: 600; }
+    #packetSize { color: #22c55e; font-weight: 700; margin-left: 0.5rem; }
+
+    .skb-viz { margin-top: 1rem; }
+    .skb-container { display: flex; height: 60px; border-radius: 8px; overflow: hidden; border: 2px solid #334155; }
+    .skb-region { display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; color: #f1f5f9; transition: flex 0.4s; }
+    .skb-region:nth-child(1) { background: #334155; }
+    .skb-mac { background: #7c3aed; }
+    .skb-network { background: #2563eb; }
+    .skb-transport { background: #059669; }
+    .skb-data { background: #1e293b; }
+    .skb-region:last-child { background: #334155; }
+    .skb-controls { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+    .tcp-sm { margin-top: 1rem; }
+    .tcp-states { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 1rem; }
+    .tcp-state { padding: 0.5rem 1rem; border-radius: 8px; background: #1e293b; border: 2px solid #334155; color: #64748b; font-size: 0.8rem; font-weight: 700; font-family: monospace; transition: all 0.3s; }
+    .tcp-state[data-active="true"] { border-color: #22c55e; color: #22c55e; background: #14532d; box-shadow: 0 0 12px rgba(34,197,94,0.3); }
+    .tcp-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .tcp-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; max-height: 120px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; color: #94a3b8; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+    .concept code { color: #22c55e; font-size: 0.8rem; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const layers = ['layer-app','layer-socket','layer-tcp','layer-ip','layer-nic'];
+    const arrows = ['arrow-0','arrow-1','arrow-2','arrow-3'];
+    const sizes = [5, 5, 25, 45, 59]; // cumulative bytes as headers added
+    let speed = 2;
+
+    function clearLayers() {
+      layers.forEach(l => $(l).classList.remove('active'));
+      arrows.forEach(a => $(a).classList.remove('active'));
+      $('packetSize').textContent = '—';
+    }
+
+    function animateLayers(order, sizeList) {
+      clearLayers();
+      let delay = 0;
+      const interval = 600 / speed;
+      order.forEach((idx, i) => {
+        setTimeout(() => {
+          if (i > 0) $(layers[order[i-1]]).classList.remove('active');
+          $(layers[idx]).classList.add('active');
+          if (i < arrows.length && order[0] === 0) $(arrows[i]).classList.add('active');
+          else if (i > 0 && order[0] !== 0) $(arrows[arrows.length - i]).classList.add('active');
+          $('packetSize').textContent = sizeList[i] + ' bytes';
+        }, delay);
+        delay += interval;
+      });
+    }
+
+    $('sendBtn').onclick = () => animateLayers([0,1,2,3,4], sizes);
+    $('recvBtn').onclick = () => animateLayers([4,3,2,1,0], [...sizes].reverse());
+    $('resetBtn').onclick = clearLayers;
+    $('speedSlider').oninput = e => { speed = +e.target.value; $('speedLabel').textContent = speed + 'x'; };
+
+    // sk_buff
+    let skbState = 0;
+    function updateSkb() {
+      $('skb-mac').style.flex = skbState >= 1 ? '1' : '0';
+      $('skb-network').style.flex = skbState >= 2 ? '1' : '0';
+      $('skb-transport').style.flex = skbState >= 3 ? '1' : '0';
+      $('skb-head').style.flex = Math.max(1, 4 - skbState);
+    }
+    $('skbPushMac').onclick = () => { if (skbState < 1) { skbState = 1; updateSkb(); } };
+    $('skbPushIP').onclick = () => { if (skbState < 2) { skbState = 2; updateSkb(); } };
+    $('skbPushTCP').onclick = () => { if (skbState < 3) { skbState = 3; updateSkb(); } };
+    $('skbReset').onclick = () => { skbState = 0; updateSkb(); };
+
+    // TCP State Machine
+    let tcpState = 'CLOSED';
+    const tcpLog = [];
+    function setTcpState(s, msg) {
+      document.querySelectorAll('.tcp-state').forEach(el => el.dataset.active = 'false');
+      $('ts-' + s).dataset.active = 'true';
+      tcpState = s;
+      if (msg) { tcpLog.push(msg); $('tcpLog').innerHTML = tcpLog.slice(-8).join('<br>'); }
+    }
+
+    const sequences = {
+      'client': [
+        ['SYN_SENT', '→ SYN sent to server'],
+        ['ESTABLISHED', '← SYN+ACK received, → ACK sent. Connection established!']
+      ],
+      'server': [
+        ['LISTEN', 'Server listening on port...'],
+        ['SYN_RCVD', '← SYN received, → SYN+ACK sent'],
+        ['ESTABLISHED', '← ACK received. Connection established!']
+      ],
+      'close-client': [
+        ['FIN_WAIT_1', '→ FIN sent'],
+        ['FIN_WAIT_2', '← ACK received'],
+        ['TIME_WAIT', '← FIN received, → ACK sent'],
+        ['CLOSED', '2MSL timeout expired. Connection closed.']
+      ],
+      'reset': [['CLOSED', 'State reset to CLOSED']]
+    };
+
+    document.querySelectorAll('.tcp-ev').forEach(btn => {
+      btn.onclick = () => {
+        const path = btn.dataset.path;
+        const seq = sequences[path];
+        if (!seq) return;
+        seq.forEach(([state, msg], i) => {
+          setTimeout(() => setTcpState(state, msg), i * (500 / speed));
+        });
+      };
+    });
+  </script>
+</BaseLayout>

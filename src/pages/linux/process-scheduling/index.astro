@@ -1,0 +1,290 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Linux Process Scheduling (CFS) — Interactive Visualization"
+  description="Understand the Completely Fair Scheduler (CFS) with interactive red-black tree visualization, vruntime calculation, and nice value effects."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Linux", href: "/linux/" },
+    { label: "Process Scheduling", href: "/linux/process-scheduling/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⏱️ Linux Process Scheduling (CFS)</h1>
+      <p class="subtitle">The Completely Fair Scheduler — red-black trees, vruntime, and nice values</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Linux's CFS doesn't use traditional time slices. Instead, it tracks each process's <strong>virtual runtime (vruntime)</strong> — 
+          how much CPU time it has "fairly" consumed. The process with the <em>lowest vruntime</em> always runs next.
+          Processes are stored in a <strong>red-black tree</strong> sorted by vruntime, giving O(log n) scheduling decisions.
+        </p>
+      </div>
+    </section>
+
+    <!-- CFS Simulation -->
+    <section class="sim-section">
+      <h2>🎮 CFS Simulator</h2>
+      <p class="section-desc">Watch the scheduler pick the process with the lowest vruntime. Adjust nice values to see priority effects.</p>
+      <div class="sim-controls">
+        <button id="addProcBtn" class="action-btn primary-btn">➕ Add Process</button>
+        <button id="removeProcBtn" class="action-btn reset-btn">➖ Remove</button>
+        <button id="stepBtn" class="action-btn primary-btn-secondary">⏭️ Step</button>
+        <button id="autoRunBtn" class="action-btn primary-btn-secondary">▶️ Auto Run</button>
+        <button id="resetSimBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <label class="speed-label">Speed: <strong id="speedLabel">1x</strong>
+          <input type="range" id="speedSlider" min="1" max="5" value="1">
+        </label>
+      </div>
+
+      <div class="sim-layout">
+        <!-- Process table -->
+        <div class="proc-table">
+          <h3>Processes</h3>
+          <table>
+            <thead><tr><th>PID</th><th>Nice</th><th>Weight</th><th>vruntime</th><th>Status</th></tr></thead>
+            <tbody id="procTableBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline-panel">
+          <h3>CPU Timeline</h3>
+          <canvas id="timelineCanvas" width="600" height="120"></canvas>
+        </div>
+      </div>
+
+      <!-- vruntime bar chart -->
+      <div class="vruntime-panel">
+        <h3>vruntime Comparison (lower = runs next)</h3>
+        <div id="vruntimeBars"></div>
+      </div>
+    </section>
+
+    <!-- Nice Values -->
+    <section class="nice-section">
+      <h2>🎛️ Nice Values & Weights</h2>
+      <div class="nice-grid">
+        <div class="nice-card">
+          <h3>How Nice Works</h3>
+          <p>Nice values range from <strong>-20</strong> (highest priority) to <strong>+19</strong> (lowest).
+          Each nice level maps to a <strong>weight</strong>. A process with nice 0 (weight 1024) gets ~10% more CPU than nice 1 (weight 820).</p>
+          <p>vruntime increases <em>slower</em> for high-priority (low nice) processes, so they get picked more often.</p>
+        </div>
+        <div class="nice-card">
+          <h3>vruntime Formula</h3>
+          <div class="formula">
+            <code>vruntime += (delta_exec × NICE_0_WEIGHT) / weight</code>
+          </div>
+          <p>Where <code>NICE_0_WEIGHT = 1024</code> (nice 0). Higher weight → vruntime grows slower → more CPU time.</p>
+        </div>
+        <div class="nice-card">
+          <h3>Nice → Weight Table</h3>
+          <div class="nice-table" id="niceTable"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🌳 Red-Black Tree</h4>
+          <p>Self-balancing BST. Processes sorted by vruntime. Leftmost node (lowest vruntime) is cached for O(1) access.</p>
+        </div>
+        <div class="concept">
+          <h4>⏱️ Time Slice</h4>
+          <p>CFS calculates ideal runtime: <code>period × (weight / total_weight)</code>. Typical scheduling period: 6ms for ≤8 tasks.</p>
+        </div>
+        <div class="concept">
+          <h4>🔄 min_vruntime</h4>
+          <p>Tracks the minimum vruntime in the tree. New processes start at min_vruntime to avoid starvation or unfair advantage.</p>
+        </div>
+        <div class="concept">
+          <h4>💤 Sleeper Fairness</h4>
+          <p>When a sleeping process wakes, its vruntime is set to max(vruntime, min_vruntime - thresh) to prevent it from monopolizing CPU.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #22c55e; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .speed-label { color: #94a3b8; display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+    .sim-layout { display: grid; grid-template-columns: 1fr 1.5fr; gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 700px) { .sim-layout { grid-template-columns: 1fr; } }
+
+    .proc-table { background: #1e293b; border-radius: 10px; padding: 1rem; overflow-x: auto; }
+    .proc-table h3 { color: #94a3b8; margin: 0 0 0.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { color: #64748b; text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #334155; }
+    td { color: #f1f5f9; padding: 0.3rem 0.5rem; }
+    tr.running { background: #166534; }
+    td select { background: #334155; color: #f1f5f9; border: 1px solid #475569; border-radius: 4px; padding: 0.1rem; }
+
+    .timeline-panel { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .timeline-panel h3 { color: #94a3b8; margin: 0 0 0.5rem; }
+    #timelineCanvas { width: 100%; background: #0f172a; border-radius: 8px; }
+
+    .vruntime-panel { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .vruntime-panel h3 { color: #94a3b8; margin: 0 0 0.5rem; font-size: 0.9rem; }
+    .vbar-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+    .vbar-label { width: 50px; font-size: 0.8rem; color: #94a3b8; }
+    .vbar { height: 20px; border-radius: 4px; transition: width 0.3s; min-width: 2px; }
+    .vbar-val { font-size: 0.8rem; color: #f1f5f9; }
+
+    .nice-section { margin-bottom: 2rem; }
+    .nice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .nice-card { background: #1e293b; border-radius: 12px; padding: 1.2rem; }
+    .nice-card h3 { color: #f1f5f9; margin: 0 0 0.5rem; }
+    .nice-card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.6; margin: 0.3rem 0; }
+    .formula { background: #0f172a; border-radius: 8px; padding: 0.7rem; margin: 0.5rem 0; }
+    .formula code { color: #22c55e; font-size: 0.9rem; }
+    .nice-table { font-size: 0.75rem; color: #94a3b8; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.2rem; }
+    .nt-cell { background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px; text-align: center; }
+
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+    .concept code { color: #22c55e; font-size: 0.8rem; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#ec4899','#14b8a6','#f97316'];
+    const NICE_WEIGHTS = {'-20':88761,'-19':71755,'-18':56483,'-17':46273,'-16':36291,'-15':29154,'-14':23254,'-13':18705,'-12':14949,'-11':11916,'-10':9548,'-9':7620,'-8':6100,'-7':4904,'-6':3906,'-5':3121,'-4':2501,'-3':1991,'-2':1586,'-1':1277,'0':1024,'1':820,'2':655,'3':526,'4':423,'5':335,'6':272,'7':215,'8':172,'9':137,'10':110,'11':87,'12':70,'13':56,'14':45,'15':36,'16':29,'17':23,'18':18,'19':15};
+
+    let procs = [];
+    let pidCounter = 0;
+    let tick = 0;
+    let timeline = []; // [{pid, color}]
+    let autoInterval = null;
+
+    function addProc() {
+      if (procs.length >= 8) return;
+      const pid = ++pidCounter;
+      procs.push({ pid, nice: 0, weight: 1024, vruntime: getMinVruntime(), color: COLORS[(pid - 1) % COLORS.length], status: 'ready' });
+      render();
+    }
+
+    function removeProc() {
+      if (procs.length <= 1) return;
+      procs.pop();
+      render();
+    }
+
+    function getMinVruntime() {
+      if (procs.length === 0) return 0;
+      return Math.min(...procs.map(p => p.vruntime));
+    }
+
+    function step() {
+      if (procs.length === 0) return;
+      // Pick lowest vruntime
+      procs.forEach(p => p.status = 'ready');
+      procs.sort((a, b) => a.vruntime - b.vruntime);
+      const running = procs[0];
+      running.status = 'running';
+      // Increase vruntime: delta * 1024 / weight
+      const delta = 1;
+      running.vruntime += (delta * 1024) / running.weight;
+      tick++;
+      timeline.push({ pid: running.pid, color: running.color });
+      if (timeline.length > 60) timeline.shift();
+      render();
+    }
+
+    function render() {
+      // Table
+      const tbody = $('procTableBody');
+      tbody.innerHTML = procs.map(p => {
+        const cls = p.status === 'running' ? ' class="running"' : '';
+        return '<tr' + cls + '><td>P' + p.pid + '</td><td><select data-pid="' + p.pid + '">' +
+          [-5,-4,-3,-2,-1,0,1,2,3,4,5].map(n => '<option value="' + n + '"' + (n === p.nice ? ' selected' : '') + '>' + n + '</option>').join('') +
+          '</select></td><td>' + p.weight + '</td><td>' + p.vruntime.toFixed(1) + '</td><td>' + (p.status === 'running' ? '🏃 Running' : '⏳ Ready') + '</td></tr>';
+      }).join('');
+      // Nice change handlers
+      tbody.querySelectorAll('select').forEach(sel => {
+        sel.onchange = e => {
+          const proc = procs.find(p => p.pid === +e.target.dataset.pid);
+          if (proc) { proc.nice = +e.target.value; proc.weight = NICE_WEIGHTS['' + proc.nice] || 1024; render(); }
+        };
+      });
+
+      // vruntime bars
+      const maxVr = Math.max(...procs.map(p => p.vruntime), 1);
+      $('vruntimeBars').innerHTML = procs.map(p => {
+        const w = (p.vruntime / maxVr * 300);
+        return '<div class="vbar-row"><span class="vbar-label">P' + p.pid + '</span><div class="vbar" style="width:' + Math.max(w, 2) + 'px;background:' + p.color + '"></div><span class="vbar-val">' + p.vruntime.toFixed(1) + '</span></div>';
+      }).join('');
+
+      // Timeline
+      drawTimeline();
+    }
+
+    function drawTimeline() {
+      const canvas = $('timelineCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const bw = W / 60;
+      timeline.forEach((t, i) => {
+        ctx.fillStyle = t.color;
+        ctx.fillRect(i * bw, 10, bw - 1, H - 30);
+        ctx.fillStyle = '#fff'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('P' + t.pid, i * bw + bw / 2, H - 10);
+      });
+    }
+
+    $('addProcBtn').onclick = addProc;
+    $('removeProcBtn').onclick = removeProc;
+    $('stepBtn').onclick = step;
+    $('autoRunBtn').onclick = () => {
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; return; }
+      const speed = +$('speedSlider').value;
+      autoInterval = setInterval(step, 500 / speed);
+    };
+    $('speedSlider').oninput = e => {
+      $('speedLabel').textContent = e.target.value + 'x';
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = setInterval(step, 500 / +e.target.value); }
+    };
+    $('resetSimBtn').onclick = () => {
+      procs = []; pidCounter = 0; tick = 0; timeline = [];
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+      for (let i = 0; i < 4; i++) addProc();
+    };
+
+    // Nice table
+    const nt = $('niceTable');
+    [-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7,8,9,10].forEach(n => {
+      nt.innerHTML += '<div class="nt-cell"><strong>' + n + '</strong><br>' + (NICE_WEIGHTS['' + n] || '?') + '</div>';
+    });
+
+    // Init with 4 processes
+    for (let i = 0; i < 4; i++) addProc();
+    render();
+  </script>
+</BaseLayout>

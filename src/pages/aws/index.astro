@@ -1,0 +1,66 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const services = [
+  { title: "S3", description: "Object storage internals — consistency model, request routing, and storage architecture", href: "/aws/s3/", status: "live", emoji: "🪣" },
+  { title: "Lambda", description: "Serverless compute — cold starts, Firecracker microVMs, and execution lifecycle", href: "#", status: "coming", emoji: "⚡" },
+  { title: "ECS", description: "Container orchestration — task placement, service discovery, and capacity providers", href: "#", status: "coming", emoji: "🐳" },
+  { title: "DynamoDB", description: "Distributed key-value store — partitioning, LSI/GSI, and consistent reads", href: "#", status: "coming", emoji: "🗄️" },
+  { title: "VPC", description: "Virtual networking — ENIs, NAT gateways, security groups, and packet flow", href: "#", status: "coming", emoji: "🌐" },
+  { title: "IAM", description: "Identity and access — policy evaluation logic, role chaining, and trust boundaries", href: "#", status: "coming", emoji: "🔐" },
+];
+---
+
+<BaseLayout 
+  title="AWS Internals" 
+  description="Interactive visualizations for understanding AWS service internals — S3, Lambda, ECS, and more"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "AWS", href: "/aws/" }]}
+>
+  <section class="section-header">
+    <h1>☁️ AWS Internals</h1>
+    <p>
+      AWS services are black boxes by design. These interactive visualizations peek behind the curtain — 
+      how S3 actually stores objects, how Lambda boots microVMs, and how DynamoDB partitions your data.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {services.map(svc => (
+      <a href={svc.href} class={`topic-card ${svc.status}`}>
+        <div class="topic-status">
+          {svc.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{svc.emoji} {svc.title}</h3>
+        <p>{svc.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 40px; }
+  .section-header h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 16px; color: #fff; }
+  .section-header p { font-size: 1.1rem; color: #888; max-width: 700px; line-height: 1.7; }
+
+  .topics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px; padding: 24px;
+    transition: all 0.3s; display: block; color: inherit;
+  }
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 153, 0, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+  .topic-card.coming { opacity: 0.5; cursor: default; }
+  .topic-card.coming:hover { transform: none; background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.1); box-shadow: none; }
+
+  .topic-status { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; color: #666; }
+  .topic-card.live .topic-status { color: #22c55e; }
+  .topic-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; color: #fff; }
+  .topic-card p { font-size: 0.95rem; color: #888; line-height: 1.5; }
+</style>

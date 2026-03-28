@@ -1,0 +1,314 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Amazon S3 Internals — Interactive Visualization"
+  description="Explore S3's object storage architecture, strong consistency model, and request routing with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "AWS", href: "/aws/" },
+    { label: "S3", href: "/aws/s3/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🪣 Amazon S3 Internals</h1>
+      <p class="subtitle">Object storage architecture, consistency, and request routing</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          S3 stores objects across multiple <strong>Availability Zones</strong> using a distributed key-value architecture.
+          Since December 2020, S3 provides <strong>strong read-after-write consistency</strong> for all operations.
+          Objects are identified by (bucket, key) and stored with automatic replication across AZs for 99.999999999% (11 9's) durability.
+        </p>
+      </div>
+    </section>
+
+    <!-- Storage Architecture -->
+    <section class="sim-section">
+      <h2>🏗️ Object Storage Architecture</h2>
+      <p class="section-desc">PUT an object and watch it flow through S3's internal architecture. Click "PUT Object" to start.</p>
+      <div class="sim-controls">
+        <button id="putBtn" class="action-btn primary-btn">📤 PUT Object</button>
+        <button id="getBtn" class="action-btn primary-btn-secondary">📥 GET Object</button>
+        <button id="resetArchBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="arch-viz">
+        <div class="arch-col">
+          <div class="arch-node" id="arch-client">
+            <div class="arch-icon">💻</div>
+            <div class="arch-label">Client</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="arch-a1">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="arch-fe">
+            <div class="arch-icon">🌐</div>
+            <div class="arch-label">S3 Frontend</div>
+            <div class="arch-detail">Auth, routing, API</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="arch-a2">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="arch-index">
+            <div class="arch-icon">📇</div>
+            <div class="arch-label">Index (Metadata)</div>
+            <div class="arch-detail">Key → storage location</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="arch-a3">→</div>
+        <div class="arch-col arch-storage">
+          <div class="arch-node az" id="arch-az1">
+            <div class="arch-icon">🏢</div>
+            <div class="arch-label">AZ-1</div>
+          </div>
+          <div class="arch-node az" id="arch-az2">
+            <div class="arch-icon">🏢</div>
+            <div class="arch-label">AZ-2</div>
+          </div>
+          <div class="arch-node az" id="arch-az3">
+            <div class="arch-icon">🏢</div>
+            <div class="arch-label">AZ-3</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="archStatus">Ready</div>
+    </section>
+
+    <!-- Consistency Model -->
+    <section class="sim-section">
+      <h2>🔄 Consistency Model Timeline</h2>
+      <p class="section-desc">S3 now provides strong consistency. See how reads behave relative to writes.</p>
+      <div class="sim-controls">
+        <button id="writeObjBtn" class="action-btn primary-btn">✍️ Write Object</button>
+        <button id="readObjBtn" class="action-btn primary-btn-secondary">📖 Read Object</button>
+        <button id="overwriteBtn" class="action-btn primary-btn-secondary">🔄 Overwrite</button>
+        <button id="resetTimelineBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="timeline-viz">
+        <div class="timeline-bar">
+          <div class="timeline-line"></div>
+          <div id="timelineEvents"></div>
+        </div>
+        <div class="timeline-result" id="timelineResult">Perform operations to see consistency behavior</div>
+      </div>
+    </section>
+
+    <!-- Request Routing Simulator -->
+    <section class="sim-section">
+      <h2>🗺️ Request Routing Simulator</h2>
+      <p class="section-desc">See how S3 routes requests based on key prefix. Enter a key to see which partition handles it.</p>
+      <div class="routing-sim">
+        <div class="routing-input">
+          <input type="text" id="routingKey" placeholder="e.g. images/photo-001.jpg" value="images/photo-001.jpg" />
+          <button id="routeBtn" class="action-btn primary-btn">Route →</button>
+        </div>
+        <div class="partitions" id="partitions">
+          <div class="partition" id="part-0" data-range="0-3">
+            <div class="part-label">Partition 1</div>
+            <div class="part-range">Keys: 0-3...</div>
+          </div>
+          <div class="partition" id="part-1" data-range="4-7">
+            <div class="part-label">Partition 2</div>
+            <div class="part-range">Keys: 4-7...</div>
+          </div>
+          <div class="partition" id="part-2" data-range="8-b">
+            <div class="part-label">Partition 3</div>
+            <div class="part-range">Keys: 8-b...</div>
+          </div>
+          <div class="partition" id="part-3" data-range="c-f">
+            <div class="part-label">Partition 4</div>
+            <div class="part-range">Keys: c-f...</div>
+          </div>
+        </div>
+        <div class="routing-result" id="routingResult"></div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔑 Key Design</h4>
+          <p>S3 partitions by key prefix hash. Previously, sequential prefixes (dates) caused hot partitions. S3 now auto-splits, but random prefixes still help at extreme scale.</p>
+        </div>
+        <div class="concept">
+          <h4>📦 Multipart Upload</h4>
+          <p>Objects >5GB must use multipart. Parts upload in parallel to different storage nodes, then S3 assembles them. Improves throughput and enables resume.</p>
+        </div>
+        <div class="concept">
+          <h4>🏷️ Storage Classes</h4>
+          <p>Standard, IA, One Zone-IA, Glacier, Deep Archive. Each trades access latency and cost. Lifecycle policies auto-transition objects between classes.</p>
+        </div>
+        <div class="concept">
+          <h4>🔐 Server-Side Encryption</h4>
+          <p>SSE-S3 (AES-256, managed keys), SSE-KMS (AWS KMS keys with audit trail), SSE-C (customer-provided keys). All encrypt at the storage layer.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f97316; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #f97316; }
+    .primary-btn:hover { background: #ea580c; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    .arch-viz { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .arch-col { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+    .arch-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; min-width: 100px; transition: all 0.4s; }
+    .arch-node.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .arch-node.az { min-width: 80px; padding: 0.7rem; }
+    .arch-icon { font-size: 1.5rem; }
+    .arch-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .arch-detail { color: #64748b; font-size: 0.7rem; }
+    .arch-arrow { color: #475569; font-size: 1.5rem; transition: color 0.3s; }
+    .arch-arrow.active { color: #f97316; }
+    .arch-status { text-align: center; color: #94a3b8; margin-top: 0.5rem; font-family: monospace; font-size: 0.85rem; }
+
+    .timeline-viz { margin-top: 1rem; }
+    .timeline-bar { position: relative; height: 80px; margin-bottom: 0.5rem; }
+    .timeline-line { position: absolute; top: 35px; left: 0; right: 0; height: 2px; background: #334155; }
+    .timeline-event { position: absolute; top: 10px; transform: translateX(-50%); text-align: center; }
+    .timeline-event .te-icon { font-size: 1.2rem; }
+    .timeline-event .te-label { font-size: 0.7rem; color: #94a3b8; white-space: nowrap; }
+    .timeline-result { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; text-align: center; }
+
+    .routing-sim { margin-top: 1rem; }
+    .routing-input { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .routing-input input { flex: 1; padding: 0.5rem 0.75rem; background: #1e293b; border: 1px solid #334155; border-radius: 8px; color: #f1f5f9; font-family: monospace; font-size: 0.9rem; }
+    .partitions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+    .partition { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 1rem; text-align: center; transition: all 0.3s; }
+    .partition.active { border-color: #22c55e; background: #14532d; box-shadow: 0 0 12px rgba(34,197,94,0.3); }
+    .part-label { color: #f1f5f9; font-weight: 700; font-size: 0.9rem; }
+    .part-range { color: #64748b; font-size: 0.75rem; font-family: monospace; }
+    .routing-result { margin-top: 0.75rem; color: #94a3b8; font-size: 0.85rem; font-family: monospace; text-align: center; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .partitions { grid-template-columns: repeat(2, 1fr); } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const nodes = ['arch-client','arch-fe','arch-index','arch-az1','arch-az2','arch-az3'];
+    const arrowIds = ['arch-a1','arch-a2','arch-a3'];
+
+    function clearArch() {
+      nodes.forEach(n => $(n).classList.remove('active'));
+      arrowIds.forEach(a => $(a).classList.remove('active'));
+      $('archStatus').textContent = 'Ready';
+    }
+
+    function animateArch(steps) {
+      clearArch();
+      steps.forEach(([nodeIds, arrowId, msg], i) => {
+        setTimeout(() => {
+          if (i > 0) {
+            const prev = steps[i-1][0];
+            prev.forEach(n => $(n).classList.remove('active'));
+          }
+          nodeIds.forEach(n => $(n).classList.add('active'));
+          if (arrowId) $(arrowId).classList.add('active');
+          $('archStatus').textContent = msg;
+        }, i * 700);
+      });
+    }
+
+    $('putBtn').onclick = () => animateArch([
+      [['arch-client'], null, 'Client sends PUT request...'],
+      [['arch-fe'], 'arch-a1', 'Frontend authenticates & validates...'],
+      [['arch-index'], 'arch-a2', 'Index updated with object metadata...'],
+      [['arch-az1','arch-az2','arch-az3'], 'arch-a3', '✅ Object replicated across 3 AZs — 200 OK'],
+    ]);
+
+    $('getBtn').onclick = () => animateArch([
+      [['arch-client'], null, 'Client sends GET request...'],
+      [['arch-fe'], 'arch-a1', 'Frontend routes request...'],
+      [['arch-index'], 'arch-a2', 'Index lookup: key → storage location...'],
+      [['arch-az1'], 'arch-a3', '✅ Object retrieved from nearest AZ — 200 OK'],
+    ]);
+
+    $('resetArchBtn').onclick = clearArch;
+
+    // Consistency timeline
+    let events = [];
+    let evtCounter = 0;
+    let currentVersion = 0;
+
+    function renderTimeline() {
+      const container = $('timelineEvents');
+      container.innerHTML = '';
+      events.forEach((e, i) => {
+        const pct = 10 + (i * 80 / Math.max(events.length - 1, 1));
+        const div = document.createElement('div');
+        div.className = 'timeline-event';
+        div.style.left = pct + '%';
+        div.innerHTML = '<div class="te-icon">' + e.icon + '</div><div class="te-label">' + e.label + '</div>';
+        container.appendChild(div);
+      });
+    }
+
+    $('writeObjBtn').onclick = () => {
+      currentVersion++;
+      events.push({ icon: '✍️', label: 'PUT v' + currentVersion, type: 'write', version: currentVersion });
+      renderTimeline();
+      $('timelineResult').textContent = 'Object v' + currentVersion + ' written. Strong consistency: any subsequent GET returns v' + currentVersion + '.';
+    };
+
+    $('readObjBtn').onclick = () => {
+      if (currentVersion === 0) { $('timelineResult').textContent = '404 — No object exists yet.'; return; }
+      events.push({ icon: '📖', label: 'GET → v' + currentVersion, type: 'read', version: currentVersion });
+      renderTimeline();
+      $('timelineResult').textContent = '✅ GET returns v' + currentVersion + ' (strong read-after-write consistency).';
+    };
+
+    $('overwriteBtn').onclick = () => {
+      if (currentVersion === 0) { $('timelineResult').textContent = 'Write an object first!'; return; }
+      currentVersion++;
+      events.push({ icon: '🔄', label: 'PUT v' + currentVersion, type: 'overwrite', version: currentVersion });
+      renderTimeline();
+      $('timelineResult').textContent = 'Overwritten to v' + currentVersion + '. Next GET guaranteed to return v' + currentVersion + '.';
+    };
+
+    $('resetTimelineBtn').onclick = () => { events = []; currentVersion = 0; renderTimeline(); $('timelineResult').textContent = 'Perform operations to see consistency behavior'; };
+
+    // Request routing
+    function simpleHash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    }
+
+    $('routeBtn').onclick = () => {
+      const key = $('routingKey').value.trim();
+      if (!key) return;
+      const hash = simpleHash(key);
+      const partIdx = hash % 4;
+      document.querySelectorAll('.partition').forEach((p, i) => {
+        p.classList.toggle('active', i === partIdx);
+      });
+      $('routingResult').textContent = 'Key "' + key + '" → hash: 0x' + hash.toString(16) + ' → Partition ' + (partIdx + 1);
+    };
+  </script>
+</BaseLayout>

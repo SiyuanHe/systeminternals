@@ -1,0 +1,374 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Design a News Feed — Interactive Visualization"
+  description="Compare fan-out on write vs read strategies, simulate feed ranking algorithms, and explore news feed system design."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "News Feed", href: "/system-design/news-feed/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📰 Design a News Feed</h1>
+      <p class="subtitle">Fan-out strategies, feed ranking, and real-time delivery — visualized</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A news feed delivers a personalized stream of posts from friends/follows. The core challenge:
+          <strong>fan-out on write</strong> (push to all followers at post time) vs <strong>fan-out on read</strong>
+          (pull and merge at read time). Most real systems use a hybrid approach.
+        </p>
+      </div>
+    </section>
+
+    <!-- Fan-out Comparison -->
+    <section class="controls-section">
+      <h2>📤 Fan-out: Write vs Read</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Followers: <strong id="followerLabel">100</strong></label>
+          <input type="range" id="followerSlider" min="10" max="10000" value="100" step="10">
+        </div>
+        <div class="control-group">
+          <label>Followees (friends): <strong id="followeeLabel">50</strong></label>
+          <input type="range" id="followeeSlider" min="5" max="500" value="50" step="5">
+        </div>
+        <div class="control-group">
+          <button id="postBtn" class="action-btn primary-btn">📝 Publish a Post</button>
+          <button id="readBtn" class="action-btn primary-btn-secondary">📖 Load Feed</button>
+          <button id="resetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        </div>
+        <div class="control-group">
+          <button id="celeb-btn" class="action-btn reset-btn">⭐ Celebrity Posts (10K followers)</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="algorithms-section">
+      <div class="algo-grid">
+        <!-- Fan-out on Write -->
+        <div class="algo-panel">
+          <h3>📤 Fan-out on Write (Push)</h3>
+          <div class="fanout-viz">
+            <div class="fanout-flow" id="fowFlow">
+              <div class="flow-step poster">👤 Author posts</div>
+              <div class="flow-arrow">→</div>
+              <div class="flow-step queue">📬 Push to <span id="fowCount">0</span> feeds</div>
+              <div class="flow-arrow">→</div>
+              <div class="flow-step cache">💾 Pre-computed feeds</div>
+            </div>
+            <div class="fanout-animation" id="fowAnim"></div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Write Cost</span><span class="stat-v red" id="fowWriteCost">0</span></div>
+            <div class="stat"><span class="stat-l">Read Cost</span><span class="stat-v green" id="fowReadCost">O(1)</span></div>
+            <div class="stat"><span class="stat-l">Posts</span><span class="stat-v" id="fowPosts">0</span></div>
+          </div>
+          <div class="algo-log" id="fowLog"></div>
+        </div>
+
+        <!-- Fan-out on Read -->
+        <div class="algo-panel">
+          <h3>📥 Fan-out on Read (Pull)</h3>
+          <div class="fanout-viz">
+            <div class="fanout-flow" id="forFlow">
+              <div class="flow-step reader">👤 User opens feed</div>
+              <div class="flow-arrow">→</div>
+              <div class="flow-step merge">🔀 Merge <span id="forCount">0</span> sources</div>
+              <div class="flow-arrow">→</div>
+              <div class="flow-step rank">📊 Rank & return</div>
+            </div>
+            <div class="fanout-animation" id="forAnim"></div>
+          </div>
+          <div class="algo-stats">
+            <div class="stat"><span class="stat-l">Write Cost</span><span class="stat-v green" id="forWriteCost">O(1)</span></div>
+            <div class="stat"><span class="stat-l">Read Cost</span><span class="stat-v red" id="forReadCost">0</span></div>
+            <div class="stat"><span class="stat-l">Reads</span><span class="stat-v" id="forReads">0</span></div>
+          </div>
+          <div class="algo-log" id="forLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Feed Ranking Simulator -->
+    <section class="controls-section">
+      <h2>📊 Feed Ranking Simulator</h2>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Ranking Signal Weight — Recency: <strong id="recencyLabel">40</strong>%</label>
+          <input type="range" id="recencySlider" min="0" max="100" value="40">
+        </div>
+        <div class="control-group">
+          <label>Engagement: <strong id="engageLabel">35</strong>%</label>
+          <input type="range" id="engageSlider" min="0" max="100" value="35">
+        </div>
+        <div class="control-group">
+          <label>Affinity (closeness): <strong id="affinityLabel">25</strong>%</label>
+          <input type="range" id="affinitySlider" min="0" max="100" value="25">
+        </div>
+        <div class="control-group">
+          <button id="rerankBtn" class="action-btn primary-btn">🔄 Re-rank Feed</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="algorithms-section">
+      <div class="algo-panel" style="max-width:700px;margin:0 auto;">
+        <h3>📱 Your Feed</h3>
+        <div class="feed-items" id="feedItems"></div>
+      </div>
+    </section>
+
+    <!-- Comparison -->
+    <section class="comparison-section">
+      <h2>📋 Fan-out Strategy Comparison</h2>
+      <div class="comparison-table">
+        <div class="comp-row header">
+          <div class="comp-cell">Strategy</div>
+          <div class="comp-cell">Write</div>
+          <div class="comp-cell">Read</div>
+          <div class="comp-cell">Best For</div>
+          <div class="comp-cell">Worst For</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Fan-out on Write</strong></div>
+          <div class="comp-cell">O(followers) per post</div>
+          <div class="comp-cell">O(1) — pre-computed</div>
+          <div class="comp-cell">Normal users, fast reads</div>
+          <div class="comp-cell">Celebrities (millions of followers)</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Fan-out on Read</strong></div>
+          <div class="comp-cell">O(1) — just store post</div>
+          <div class="comp-cell">O(followees) — merge at read</div>
+          <div class="comp-cell">Celebrities, inactive users</div>
+          <div class="comp-cell">Users following many accounts</div>
+        </div>
+        <div class="comp-row">
+          <div class="comp-cell"><strong>Hybrid</strong></div>
+          <div class="comp-cell">Push for normal, pull for celebs</div>
+          <div class="comp-cell">O(1) + merge celeb feeds</div>
+          <div class="comp-cell">Production systems (Twitter/X)</div>
+          <div class="comp-cell">Complexity</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tips -->
+    <section class="tips-section">
+      <h2>💡 Interview Tips</h2>
+      <div class="tips-grid">
+        <div class="tip-card">
+          <h4>Start with the API</h4>
+          <p>POST /feed (publish), GET /feed (retrieve). Pagination via cursor (timestamp + post_id). Clarify: real-time push (WebSocket) or poll?</p>
+        </div>
+        <div class="tip-card">
+          <h4>Storage design</h4>
+          <p>Posts table (post_id, author_id, content, timestamp). Feed cache in Redis (user_id → sorted set of post_ids). Social graph in graph DB or adjacency list.</p>
+        </div>
+        <div class="tip-card">
+          <h4>The celebrity problem</h4>
+          <p>Users with millions of followers break fan-out on write. Solution: hybrid — push for users with &lt;10K followers, pull for celebrities. Twitter's approach.</p>
+        </div>
+        <div class="tip-card">
+          <h4>Ranking signals</h4>
+          <p>EdgeRank (Facebook): Affinity × Weight × Decay. Modern: ML model with features — engagement prediction, content type, recency, user affinity, diversity.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; background: #1a1a2e; padding: 1.5rem; border-radius: 12px; border: 1px solid #2a2a4a; }
+    .control-group { display: flex; flex-direction: column; gap: 0.5rem; }
+    .control-group label { color: #94a3b8; font-size: 0.9rem; }
+    .control-group label strong { color: #667eea; }
+    input[type="range"] { width: 100%; accent-color: #667eea; }
+    .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .primary-btn { background: #667eea; color: white; }
+    .primary-btn-secondary { background: #e74c3c; color: white; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+    @media (max-width: 800px) { .algo-grid { grid-template-columns: 1fr; } .controls-grid { grid-template-columns: 1fr; } }
+    .algo-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .algo-panel h3 { margin: 0 0 1rem; color: #e2e8f0; font-size: 1.1rem; }
+    .algo-stats { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+    .stat-l { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+    .stat-v { font-size: 1.3rem; font-weight: 700; color: #e2e8f0; }
+    .stat-v.green { color: #22c55e; }
+    .stat-v.red { color: #ef4444; }
+    .algo-log { max-height: 80px; overflow-y: auto; font-size: 0.75rem; color: #64748b; font-family: monospace; padding: 0.5rem; background: #0f0f23; border-radius: 6px; margin-top: 0.5rem; }
+
+    .fanout-viz { margin-bottom: 1rem; }
+    .fanout-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .flow-step { background: #0f0f23; border: 1px solid #2a2a4a; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.8rem; color: #94a3b8; }
+    .flow-step.active { border-color: #667eea; color: #e2e8f0; background: #667eea22; }
+    .flow-arrow { color: #4a5568; font-size: 1.2rem; }
+    .fanout-animation { height: 40px; position: relative; overflow: hidden; margin-top: 8px; }
+    .dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; top: 16px; }
+
+    .feed-items { display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto; }
+    .feed-item { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1rem; }
+    .feed-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .feed-author { font-weight: 600; color: #e2e8f0; font-size: 0.9rem; }
+    .feed-time { font-size: 0.75rem; color: #64748b; }
+    .feed-content { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+    .feed-engagement { display: flex; gap: 1rem; margin-top: 8px; font-size: 0.8rem; color: #64748b; }
+    .feed-score { font-size: 0.7rem; color: #667eea; margin-top: 4px; font-family: monospace; }
+
+    .comparison-table { overflow-x: auto; }
+    .comp-row { display: grid; grid-template-columns: 1.2fr 1.2fr 1.2fr 1.2fr 1.2fr; gap: 1px; background: #2a2a4a; }
+    .comp-row.header { background: #667eea33; }
+    .comp-row.header .comp-cell { color: #e2e8f0; font-weight: 600; }
+    .comp-cell { background: #1a1a2e; padding: 0.75rem; font-size: 0.85rem; color: #94a3b8; }
+
+    .tips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (max-width: 700px) { .tips-grid { grid-template-columns: 1fr; } }
+    .tip-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1.25rem; }
+    .tip-card h4 { margin: 0 0 0.5rem; color: #667eea; }
+    .tip-card p { margin: 0; color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+  </style>
+
+  <script type="module">{`
+    const $ = id => document.getElementById(id);
+
+    let followers = 100, followees = 50;
+    let fowPosts = 0, forReads = 0, fowTotalWrites = 0;
+
+    $('followerSlider').addEventListener('input', e => { followers = +e.target.value; $('followerLabel').textContent = followers.toLocaleString(); });
+    $('followeeSlider').addEventListener('input', e => { followees = +e.target.value; $('followeeLabel').textContent = followees; });
+
+    $('postBtn').addEventListener('click', () => publishPost(followers));
+    $('celeb-btn').addEventListener('click', () => {
+      $('followerSlider').value = 10000; followers = 10000; $('followerLabel').textContent = '10,000';
+      publishPost(10000);
+    });
+    $('readBtn').addEventListener('click', loadFeed);
+    $('resetBtn').addEventListener('click', () => {
+      fowPosts = 0; forReads = 0; fowTotalWrites = 0;
+      $('fowPosts').textContent = '0'; $('forReads').textContent = '0';
+      $('fowWriteCost').textContent = '0'; $('forReadCost').textContent = '0';
+      $('fowLog').textContent = ''; $('forLog').textContent = '';
+      $('fowCount').textContent = '0'; $('forCount').textContent = '0';
+    });
+
+    function publishPost(numFollowers) {
+      fowPosts++;
+      fowTotalWrites += numFollowers;
+      $('fowPosts').textContent = fowPosts;
+      $('fowWriteCost').textContent = numFollowers.toLocaleString();
+      $('fowCount').textContent = numFollowers.toLocaleString();
+      addLog('fowLog', '📝 Post published → pushed to ' + numFollowers.toLocaleString() + ' feeds');
+
+      // Animate dots
+      animateDots('fowAnim', numFollowers > 1000 ? '#ef4444' : '#22c55e', Math.min(20, Math.ceil(numFollowers / 50)));
+
+      addLog('forLog', '📝 Post stored (O(1))');
+      $('forWriteCost').textContent = 'O(1)';
+    }
+
+    function loadFeed() {
+      forReads++;
+      $('forReads').textContent = forReads;
+      $('forReadCost').textContent = followees + ' merges';
+      $('forCount').textContent = followees;
+      addLog('forLog', '📖 Feed loaded → merged ' + followees + ' sources');
+      addLog('fowLog', '📖 Feed loaded (O(1) from cache)');
+      $('fowReadCost').textContent = 'O(1)';
+
+      animateDots('forAnim', '#667eea', Math.min(15, Math.ceil(followees / 10)));
+      renderFeed();
+    }
+
+    function animateDots(containerId, color, count) {
+      const el = $(containerId);
+      el.innerHTML = '';
+      for (let i = 0; i < count; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        dot.style.background = color;
+        dot.style.left = '0px';
+        dot.style.transition = 'left 0.5s ease ' + (i * 30) + 'ms, opacity 0.3s ease ' + (300 + i * 30) + 'ms';
+        el.appendChild(dot);
+        requestAnimationFrame(() => { dot.style.left = '90%'; });
+        setTimeout(() => { dot.style.opacity = '0'; }, 500 + i * 30);
+      }
+    }
+
+    function addLog(id, msg) {
+      const el = $(id);
+      el.textContent = msg + '\\n' + el.textContent.split('\\n').slice(0, 15).join('\\n');
+    }
+
+    // === Feed Ranking ===
+    const authors = ['Alice Chen', 'Bob Kumar', 'Carol Wu', 'Dave Park', 'Eve Johnson', 'Frank Li', 'Grace Kim', 'Hank Davis'];
+    const contents = [
+      'Just launched our new product! 🚀 Check it out',
+      'Beautiful sunset at the beach today 🌅',
+      'Hot take: microservices are overrated for small teams',
+      'Sharing my system design interview prep notes 📚',
+      'Who else is excited about the new framework release?',
+      'My dog learned a new trick today! 🐕',
+      'Great article on distributed consensus algorithms',
+      'Coffee and code — perfect Monday morning ☕',
+      'Just hit 1000 commits on my open source project!',
+      'Unpopular opinion: monoliths are fine',
+      'Working on a new side project — stay tuned!',
+      'TIL about consistent hashing. Mind blown 🤯',
+    ];
+
+    let feedPosts = [];
+    for (let i = 0; i < 12; i++) {
+      feedPosts.push({
+        id: i,
+        author: authors[i % authors.length],
+        content: contents[i],
+        time: Math.random() * 48, // hours ago
+        likes: Math.floor(Math.random() * 500),
+        comments: Math.floor(Math.random() * 80),
+        shares: Math.floor(Math.random() * 30),
+        affinity: Math.random(), // 0-1
+      });
+    }
+
+    let recency = 40, engagement = 35, affinity = 25;
+
+    $('recencySlider').addEventListener('input', e => { recency = +e.target.value; $('recencyLabel').textContent = recency; });
+    $('engageSlider').addEventListener('input', e => { engagement = +e.target.value; $('engageLabel').textContent = engagement; });
+    $('affinitySlider').addEventListener('input', e => { affinity = +e.target.value; $('affinityLabel').textContent = affinity; });
+    $('rerankBtn').addEventListener('click', renderFeed);
+
+    function renderFeed() {
+      const total = recency + engagement + affinity || 1;
+      const rW = recency / total, eW = engagement / total, aW = affinity / total;
+
+      const scored = feedPosts.map(p => {
+        const recencyScore = Math.max(0, 1 - p.time / 48);
+        const engagementScore = Math.min(1, (p.likes + p.comments * 3 + p.shares * 5) / 1000);
+        const score = rW * recencyScore + eW * engagementScore + aW * p.affinity;
+        return { ...p, score, recencyScore, engagementScore };
+      });
+      scored.sort((a, b) => b.score - a.score);
+
+      $('feedItems').innerHTML = scored.map(p => {
+        const timeStr = p.time < 1 ? Math.round(p.time * 60) + 'm ago' : Math.round(p.time) + 'h ago';
+        return '<div class="feed-item">' +
+          '<div class="feed-item-header"><span class="feed-author">' + p.author + '</span><span class="feed-time">' + timeStr + '</span></div>' +
+          '<div class="feed-content">' + p.content + '</div>' +
+          '<div class="feed-engagement">❤️ ' + p.likes + '  💬 ' + p.comments + '  🔄 ' + p.shares + '</div>' +
+          '<div class="feed-score">score: ' + p.score.toFixed(3) + ' (recency: ' + p.recencyScore.toFixed(2) + ' × ' + rW.toFixed(2) + ' + engage: ' + p.engagementScore.toFixed(2) + ' × ' + eW.toFixed(2) + ' + affinity: ' + p.affinity.toFixed(2) + ' × ' + aW.toFixed(2) + ')</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    renderFeed();
+  `}</script>
+</BaseLayout>

@@ -1,0 +1,278 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="ext4 Filesystem Internals — Interactive Visualization"
+  description="Explore ext4 filesystem internals with interactive block allocation, inode structure, and journaling mode visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Linux", href: "/linux/" },
+    { label: "Filesystem", href: "/linux/filesystem/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>💾 ext4 Filesystem Internals</h1>
+      <p class="subtitle">Block groups, inodes, extents, and journaling — how data reaches the disk</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          ext4 is the default Linux filesystem. It organizes the disk into <strong>block groups</strong>, each containing 
+          a superblock copy, group descriptors, block/inode bitmaps, an inode table, and data blocks.
+          Files are tracked by <strong>inodes</strong> which store metadata and pointers to data blocks via <strong>extents</strong> (contiguous block ranges).
+        </p>
+      </div>
+    </section>
+
+    <!-- Block Allocation -->
+    <section class="sim-section">
+      <h2>🧱 Block Allocation Visualization</h2>
+      <p class="section-desc">Click "Allocate File" to see blocks being allocated. Each cell is a 4KB block. Colors represent different files.</p>
+      <div class="sim-controls">
+        <button id="allocBtn" class="action-btn primary-btn">📄 Allocate File</button>
+        <button id="deallocBtn" class="action-btn primary-btn-secondary">🗑️ Delete Last File</button>
+        <button id="fragBtn" class="action-btn primary-btn-secondary">💥 Fragment</button>
+        <button id="resetBlocksBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="block-grid" id="blockGrid"></div>
+      <div class="block-legend" id="blockLegend"></div>
+    </section>
+
+    <!-- Inode Structure -->
+    <section class="sim-section">
+      <h2>📋 Inode Structure</h2>
+      <p class="section-desc">An inode (256 bytes in ext4) stores all file metadata except the name. Click fields to learn more.</p>
+      <div class="inode-viz">
+        <div class="inode-box">
+          <div class="inode-field" data-info="File type + rwxr-xr-x permissions (16 bits)">
+            <span class="field-name">mode</span><span class="field-val">0100644</span>
+          </div>
+          <div class="inode-field" data-info="Owner user ID">
+            <span class="field-name">uid</span><span class="field-val">1000</span>
+          </div>
+          <div class="inode-field" data-info="File size in bytes (lower 32 bits)">
+            <span class="field-name">size_lo</span><span class="field-val">8192</span>
+          </div>
+          <div class="inode-field" data-info="Last access time (seconds since epoch)">
+            <span class="field-name">atime</span><span class="field-val">1711612800</span>
+          </div>
+          <div class="inode-field" data-info="Inode change time">
+            <span class="field-name">ctime</span><span class="field-val">1711612800</span>
+          </div>
+          <div class="inode-field" data-info="Last data modification time">
+            <span class="field-name">mtime</span><span class="field-val">1711612800</span>
+          </div>
+          <div class="inode-field" data-info="Hard link count. File is deleted when this reaches 0.">
+            <span class="field-name">links_count</span><span class="field-val">1</span>
+          </div>
+          <div class="inode-field" data-info="Number of 512-byte sectors allocated (not bytes!)">
+            <span class="field-name">blocks_lo</span><span class="field-val">16</span>
+          </div>
+          <div class="inode-field" data-info="Flags: extents, journaled data, immutable, etc.">
+            <span class="field-name">flags</span><span class="field-val">0x80000 (extents)</span>
+          </div>
+          <div class="inode-field extent" data-info="ext4 uses extents instead of indirect blocks. Each extent maps a contiguous range of logical blocks to physical blocks.">
+            <span class="field-name">extent tree</span><span class="field-val">[0-1] → phys 1024</span>
+          </div>
+        </div>
+        <div class="inode-info" id="inodeInfo">Click a field to see details</div>
+      </div>
+    </section>
+
+    <!-- Journaling Modes -->
+    <section class="sim-section">
+      <h2>📝 Journaling Modes</h2>
+      <p class="section-desc">ext4 supports three journaling modes that trade safety for performance. Click each to see the write sequence.</p>
+      <div class="journal-modes">
+        <div class="jmode" id="jm-writeback">
+          <h3>Writeback</h3>
+          <p class="jmode-speed">⚡ Fastest</p>
+          <p>Only metadata is journaled. Data may be written before or after metadata. Risk: stale data in files after crash.</p>
+          <div class="jmode-seq">
+            <span class="jstep" data-step="1">1. Metadata → Journal</span>
+            <span class="jstep" data-step="2">2. Data → Disk (any time)</span>
+            <span class="jstep" data-step="3">3. Metadata → Disk</span>
+          </div>
+        </div>
+        <div class="jmode active" id="jm-ordered">
+          <h3>Ordered <span class="default-tag">default</span></h3>
+          <p class="jmode-speed">⚖️ Balanced</p>
+          <p>Only metadata is journaled, but data is written <em>before</em> metadata commit. No stale data exposure.</p>
+          <div class="jmode-seq">
+            <span class="jstep" data-step="1">1. Data → Disk</span>
+            <span class="jstep" data-step="2">2. Metadata → Journal</span>
+            <span class="jstep" data-step="3">3. Metadata → Disk</span>
+          </div>
+        </div>
+        <div class="jmode" id="jm-journal">
+          <h3>Journal</h3>
+          <p class="jmode-speed">🛡️ Safest</p>
+          <p>Both data and metadata are journaled. Maximum safety but all data is written twice (journal + final location).</p>
+          <div class="jmode-seq">
+            <span class="jstep" data-step="1">1. Data → Journal</span>
+            <span class="jstep" data-step="2">2. Metadata → Journal</span>
+            <span class="jstep" data-step="3">3. Data → Disk</span>
+            <span class="jstep" data-step="4">4. Metadata → Disk</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🌳 Extent Tree</h4>
+          <p>ext4 replaced indirect block pointers with extents — each maps a contiguous range of logical to physical blocks. Reduces metadata and improves sequential I/O.</p>
+        </div>
+        <div class="concept">
+          <h4>📦 Block Groups</h4>
+          <p>Disk is divided into groups (~128MB each). Each has its own bitmap and inode table, enabling parallel allocation and locality.</p>
+        </div>
+        <div class="concept">
+          <h4>🗂️ Directory Entries</h4>
+          <p>Directories are files containing (inode#, name) entries. ext4 uses HTree (hash tree) indexes for fast lookup in large directories.</p>
+        </div>
+        <div class="concept">
+          <h4>⚡ Delayed Allocation</h4>
+          <p>ext4 delays block allocation until writeback, allowing the allocator to see the full write and choose contiguous blocks, reducing fragmentation.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f59e0b; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+
+    .block-grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-bottom: 0.5rem; }
+    .block-cell { width: 100%; aspect-ratio: 1; border-radius: 4px; background: #1e293b; border: 1px solid #334155; transition: background 0.3s; }
+    .block-legend { display: flex; gap: 1rem; flex-wrap: wrap; color: #94a3b8; font-size: 0.8rem; margin-top: 0.5rem; }
+    .legend-item { display: flex; align-items: center; gap: 0.3rem; }
+    .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+
+    .inode-viz { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .inode-viz { grid-template-columns: 1fr; } }
+    .inode-box { display: flex; flex-direction: column; gap: 0.3rem; }
+    .inode-field { display: flex; justify-content: space-between; padding: 0.5rem 0.75rem; background: #1e293b; border-radius: 6px; cursor: pointer; border: 1px solid #334155; transition: border-color 0.2s; }
+    .inode-field:hover { border-color: #3b82f6; }
+    .inode-field.extent { border-color: #22c55e; background: #14532d33; }
+    .field-name { color: #94a3b8; font-family: monospace; font-size: 0.85rem; }
+    .field-val { color: #f1f5f9; font-family: monospace; font-size: 0.85rem; }
+    .inode-info { background: #1e293b; border-radius: 10px; padding: 1rem; color: #cbd5e1; font-size: 0.9rem; line-height: 1.6; display: flex; align-items: center; justify-content: center; text-align: center; }
+
+    .journal-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    @media (max-width: 700px) { .journal-modes { grid-template-columns: 1fr; } }
+    .jmode { background: #1e293b; border-radius: 12px; padding: 1.2rem; border: 2px solid #334155; cursor: pointer; transition: all 0.3s; }
+    .jmode.active { border-color: #3b82f6; background: #1e3a5f; }
+    .jmode h3 { color: #f1f5f9; margin: 0 0 0.3rem; font-size: 1rem; }
+    .jmode p { color: #94a3b8; font-size: 0.82rem; line-height: 1.5; margin: 0.3rem 0; }
+    .jmode-speed { font-weight: 700; }
+    .default-tag { font-size: 0.7rem; background: #22c55e; color: #000; padding: 0.1rem 0.4rem; border-radius: 4px; }
+    .jmode-seq { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem; }
+    .jstep { font-size: 0.75rem; color: #64748b; font-family: monospace; padding: 0.2rem 0.4rem; background: #0f172a; border-radius: 4px; transition: all 0.3s; }
+    .jmode.active .jstep { color: #22c55e; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#ec4899','#14b8a6','#f97316'];
+    const TOTAL_BLOCKS = 128;
+    let blocks = new Array(TOTAL_BLOCKS).fill(null); // null = free, {fileId, color}
+    let files = []; // [{id, color, blocks:[]}]
+    let fileCounter = 0;
+
+    function renderBlocks() {
+      const grid = $('blockGrid');
+      grid.innerHTML = blocks.map((b, i) =>
+        '<div class="block-cell" style="background:' + (b ? b.color : '#1e293b') + '" title="Block ' + i + (b ? ' (File ' + b.fileId + ')' : ' (free)') + '"></div>'
+      ).join('');
+      const legend = $('blockLegend');
+      legend.innerHTML = files.map(f =>
+        '<div class="legend-item"><div class="legend-swatch" style="background:' + f.color + '"></div>File ' + f.id + ' (' + f.blocks.length + ' blocks)</div>'
+      ).join('') + '<div class="legend-item"><div class="legend-swatch" style="background:#1e293b;border:1px solid #334155"></div>Free (' + blocks.filter(b => !b).length + ')</div>';
+    }
+
+    function allocate() {
+      const freeIndices = blocks.map((b, i) => b === null ? i : -1).filter(i => i >= 0);
+      if (freeIndices.length < 2) return;
+      const size = Math.min(2 + Math.floor(Math.random() * 10), freeIndices.length);
+      const id = ++fileCounter;
+      const color = COLORS[(id - 1) % COLORS.length];
+      // Try contiguous first
+      let start = -1;
+      for (let i = 0; i <= TOTAL_BLOCKS - size; i++) {
+        if (blocks.slice(i, i + size).every(b => b === null)) { start = i; break; }
+      }
+      const allocated = [];
+      if (start >= 0) {
+        for (let i = start; i < start + size; i++) { blocks[i] = { fileId: id, color }; allocated.push(i); }
+      } else {
+        for (let j = 0; j < size; j++) { const idx = freeIndices[j]; blocks[idx] = { fileId: id, color }; allocated.push(idx); }
+      }
+      files.push({ id, color, blocks: allocated });
+      renderBlocks();
+    }
+
+    function dealloc() {
+      if (files.length === 0) return;
+      const f = files.pop();
+      f.blocks.forEach(i => blocks[i] = null);
+      renderBlocks();
+    }
+
+    function fragment() {
+      // Delete every other file
+      const toRemove = files.filter((_, i) => i % 2 === 0);
+      toRemove.forEach(f => { f.blocks.forEach(i => blocks[i] = null); });
+      files = files.filter((_, i) => i % 2 !== 0);
+      renderBlocks();
+    }
+
+    $('allocBtn').onclick = allocate;
+    $('deallocBtn').onclick = dealloc;
+    $('fragBtn').onclick = fragment;
+    $('resetBlocksBtn').onclick = () => { blocks.fill(null); files = []; fileCounter = 0; renderBlocks(); };
+
+    // Init
+    renderBlocks();
+
+    // Inode info
+    document.querySelectorAll('.inode-field').forEach(f => {
+      f.onclick = () => $('inodeInfo').textContent = f.dataset.info;
+    });
+
+    // Journal modes
+    document.querySelectorAll('.jmode').forEach(m => {
+      m.onclick = () => {
+        document.querySelectorAll('.jmode').forEach(x => x.classList.remove('active'));
+        m.classList.add('active');
+      };
+    });
+  </script>
+</BaseLayout>
