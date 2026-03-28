@@ -1,0 +1,662 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="AWS Lambda Internals — Interactive Visualization"
+  description="Explore Lambda's execution model, Firecracker microVMs, cold starts, concurrency, and invoke flow with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "AWS", href: "/aws/" },
+    { label: "Lambda", href: "/aws/lambda/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ AWS Lambda Internals</h1>
+      <p class="subtitle">Cold starts, Firecracker microVMs, execution model, and concurrency</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          AWS Lambda runs your code inside <strong>Firecracker microVMs</strong> — lightweight virtual machines that boot in &lt;125ms.
+          Each function execution gets an isolated sandbox. Lambda manages a <strong>worker fleet</strong> across multiple Availability Zones,
+          placing and recycling execution environments to balance cold start latency against resource efficiency.
+          The invoke path flows through a <strong>Frontend → Counting Service → Placement Service → Worker</strong> pipeline.
+        </p>
+      </div>
+    </section>
+
+    <!-- Invoke Flow -->
+    <section class="sim-section">
+      <h2>🚀 Lambda Invoke Flow</h2>
+      <p class="section-desc">Trace a synchronous invocation through Lambda's internal services. Click "Invoke" to start.</p>
+      <div class="sim-controls">
+        <button id="invokeBtn" class="action-btn primary-btn">⚡ Invoke (Cold)</button>
+        <button id="invokeWarmBtn" class="action-btn primary-btn-secondary">🔥 Invoke (Warm)</button>
+        <button id="resetInvokeBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="arch-viz">
+        <div class="arch-col">
+          <div class="arch-node" id="inv-client">
+            <div class="arch-icon">💻</div>
+            <div class="arch-label">Client</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="inv-a1">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="inv-fe">
+            <div class="arch-icon">🌐</div>
+            <div class="arch-label">Frontend</div>
+            <div class="arch-detail">Auth, throttle, route</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="inv-a2">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="inv-counting">
+            <div class="arch-icon">🔢</div>
+            <div class="arch-label">Counting</div>
+            <div class="arch-detail">Concurrency limits</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="inv-a3">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="inv-placement">
+            <div class="arch-icon">📍</div>
+            <div class="arch-label">Placement</div>
+            <div class="arch-detail">Find/create sandbox</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="inv-a4">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="inv-worker">
+            <div class="arch-icon">⚙️</div>
+            <div class="arch-label">Worker</div>
+            <div class="arch-detail">Firecracker microVM</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="invokeStatus">Ready — choose cold or warm invoke</div>
+      <div class="latency-bar" id="latencyBar">
+        <div class="latency-fill" id="latencyFill"></div>
+      </div>
+      <div class="latency-label" id="latencyLabel"></div>
+    </section>
+
+    <!-- Cold Start Anatomy -->
+    <section class="sim-section">
+      <h2>🥶 Cold Start Anatomy</h2>
+      <p class="section-desc">A cold start has distinct phases. Click "Start Cold Boot" to see each phase and its typical latency.</p>
+      <div class="sim-controls">
+        <button id="coldStartBtn" class="action-btn primary-btn">🥶 Start Cold Boot</button>
+        <button id="resetColdBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="cold-phases" id="coldPhases">
+        <div class="phase" id="phase-download">
+          <div class="phase-bar">
+            <div class="phase-fill" data-width="15"></div>
+          </div>
+          <div class="phase-info">
+            <span class="phase-name">📦 Download Code</span>
+            <span class="phase-time">~50-200ms</span>
+          </div>
+          <div class="phase-desc">Fetch deployment package from S3 (or container image from ECR)</div>
+        </div>
+        <div class="phase" id="phase-microvm">
+          <div class="phase-bar">
+            <div class="phase-fill" data-width="10"></div>
+          </div>
+          <div class="phase-info">
+            <span class="phase-name">🔥 Start MicroVM</span>
+            <span class="phase-time">~<125ms</span>
+          </div>
+          <div class="phase-desc">Firecracker boots a lightweight VM with minimal Linux kernel</div>
+        </div>
+        <div class="phase" id="phase-runtime">
+          <div class="phase-bar">
+            <div class="phase-fill" data-width="25"></div>
+          </div>
+          <div class="phase-info">
+            <span class="phase-name">🏗️ Init Runtime</span>
+            <span class="phase-time">~100-500ms</span>
+          </div>
+          <div class="phase-desc">Start language runtime (Python, Node, Java JVM, .NET CLR)</div>
+        </div>
+        <div class="phase" id="phase-init">
+          <div class="phase-bar">
+            <div class="phase-fill" data-width="35"></div>
+          </div>
+          <div class="phase-info">
+            <span class="phase-name">📋 Run Init Code</span>
+            <span class="phase-time">~0-10,000ms</span>
+          </div>
+          <div class="phase-desc">Execute global/static initialization (DB connections, SDK clients, model loading)</div>
+        </div>
+        <div class="phase" id="phase-handler">
+          <div class="phase-bar">
+            <div class="phase-fill" data-width="15"></div>
+          </div>
+          <div class="phase-info">
+            <span class="phase-name">▶️ Run Handler</span>
+            <span class="phase-time">your code</span>
+          </div>
+          <div class="phase-desc">Actually execute the handler function — this is what you pay for</div>
+        </div>
+      </div>
+      <div class="cold-total" id="coldTotal"></div>
+    </section>
+
+    <!-- Firecracker MicroVM -->
+    <section class="sim-section">
+      <h2>🔥 Firecracker MicroVM Architecture</h2>
+      <p class="section-desc">Each Lambda execution runs inside a Firecracker microVM. Explore the isolation layers.</p>
+      <div class="sim-controls">
+        <button id="fcBootBtn" class="action-btn primary-btn">🚀 Boot MicroVM</button>
+        <button id="fcIsolateBtn" class="action-btn primary-btn-secondary">🛡️ Show Isolation</button>
+        <button id="resetFcBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="fc-stack">
+        <div class="fc-layer" id="fc-hw">
+          <div class="fc-label">🖥️ Bare Metal (Nitro)</div>
+          <div class="fc-detail">Custom AWS hardware with dedicated security chip</div>
+        </div>
+        <div class="fc-layer" id="fc-host">
+          <div class="fc-label">🐧 Host Kernel</div>
+          <div class="fc-detail">Minimal Linux kernel with KVM</div>
+        </div>
+        <div class="fc-layer" id="fc-firecracker">
+          <div class="fc-label">🔥 Firecracker VMM</div>
+          <div class="fc-detail">~50K lines of Rust, minimal device model</div>
+        </div>
+        <div class="fc-workers" id="fc-workers">
+          <div class="fc-vm" id="fc-vm1">
+            <div class="fc-vm-label">microVM 1</div>
+            <div class="fc-vm-parts">
+              <span class="fc-part">Guest Kernel</span>
+              <span class="fc-part">Runtime</span>
+              <span class="fc-part">Your Code</span>
+            </div>
+          </div>
+          <div class="fc-vm" id="fc-vm2">
+            <div class="fc-vm-label">microVM 2</div>
+            <div class="fc-vm-parts">
+              <span class="fc-part">Guest Kernel</span>
+              <span class="fc-part">Runtime</span>
+              <span class="fc-part">Your Code</span>
+            </div>
+          </div>
+          <div class="fc-vm" id="fc-vm3">
+            <div class="fc-vm-label">microVM 3</div>
+            <div class="fc-vm-parts">
+              <span class="fc-part">Guest Kernel</span>
+              <span class="fc-part">Runtime</span>
+              <span class="fc-part">Your Code</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="fcStatus">Explore Firecracker's isolation model</div>
+    </section>
+
+    <!-- Concurrency Simulator -->
+    <section class="sim-section">
+      <h2>📊 Concurrency Simulator</h2>
+      <p class="section-desc">See how Lambda scales execution environments. Each bar is a concurrent execution. Watch cold starts vs warm reuse.</p>
+      <div class="sim-controls">
+        <button id="burstBtn" class="action-btn primary-btn">💥 Burst (10 requests)</button>
+        <button id="steadyBtn" class="action-btn primary-btn-secondary">📈 Steady Traffic</button>
+        <button id="scaleDownBtn" class="action-btn primary-btn-secondary">📉 Scale Down</button>
+        <button id="resetConcBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="conc-viz">
+        <div class="conc-header">
+          <span>Active Execution Environments</span>
+          <span id="concCount">0 / 1000 limit</span>
+        </div>
+        <div class="conc-grid" id="concGrid"></div>
+        <div class="conc-legend">
+          <span class="legend-item"><span class="legend-dot cold"></span> Cold Start</span>
+          <span class="legend-item"><span class="legend-dot warm"></span> Warm Reuse</span>
+          <span class="legend-item"><span class="legend-dot idle"></span> Idle (may freeze)</span>
+        </div>
+      </div>
+      <div class="arch-status" id="concStatus">Ready — burst or start steady traffic</div>
+    </section>
+
+    <!-- Provisioned Concurrency -->
+    <section class="sim-section">
+      <h2>🏎️ Provisioned vs On-Demand Concurrency</h2>
+      <p class="section-desc">Provisioned concurrency pre-warms execution environments. Compare response latencies.</p>
+      <div class="sim-controls">
+        <button id="provisionBtn" class="action-btn primary-btn">🏎️ Provision 5 Envs</button>
+        <button id="invokeProvBtn" class="action-btn primary-btn-secondary">⚡ Invoke (Provisioned)</button>
+        <button id="invokeOnDemandBtn" class="action-btn primary-btn-secondary">🐌 Invoke (On-Demand)</button>
+        <button id="resetProvBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="prov-viz">
+        <div class="prov-row">
+          <div class="prov-label">Provisioned</div>
+          <div class="prov-slots" id="provSlots"></div>
+        </div>
+        <div class="prov-row">
+          <div class="prov-label">On-Demand</div>
+          <div class="prov-slots" id="ondemandSlots"></div>
+        </div>
+      </div>
+      <div class="prov-latency" id="provLatency"></div>
+    </section>
+
+    <!-- Execution Lifecycle -->
+    <section class="sim-section">
+      <h2>♻️ Execution Environment Lifecycle</h2>
+      <p class="section-desc">Follow a single execution environment through its lifecycle stages.</p>
+      <div class="sim-controls">
+        <button id="lifecycleBtn" class="action-btn primary-btn">▶️ Start Lifecycle</button>
+        <button id="resetLifecycleBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="lifecycle-viz">
+        <div class="lc-stage" id="lc-init">
+          <div class="lc-icon">🆕</div>
+          <div class="lc-name">INIT</div>
+          <div class="lc-desc">Download code, start runtime, run init</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="lc-invoke">
+          <div class="lc-icon">⚡</div>
+          <div class="lc-name">INVOKE</div>
+          <div class="lc-desc">Execute handler, return response</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="lc-frozen">
+          <div class="lc-icon">🧊</div>
+          <div class="lc-name">FROZEN</div>
+          <div class="lc-desc">Environment paused, waiting for reuse</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="lc-thaw">
+          <div class="lc-icon">🔥</div>
+          <div class="lc-name">THAW</div>
+          <div class="lc-desc">Warm start — resume from frozen state</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="lc-shutdown">
+          <div class="lc-icon">💀</div>
+          <div class="lc-name">SHUTDOWN</div>
+          <div class="lc-desc">Idle too long — environment destroyed</div>
+        </div>
+      </div>
+      <div class="arch-status" id="lifecycleStatus">Click to animate the lifecycle</div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔥 Firecracker</h4>
+          <p>Open-source VMM written in Rust. Boots a microVM in &lt;125ms with &lt;5MB memory overhead. Uses KVM for hardware virtualization, provides only virtio-net and virtio-block devices — minimal attack surface.</p>
+        </div>
+        <div class="concept">
+          <h4>📦 SnapStart (Java)</h4>
+          <p>Snapshots the initialized execution environment after init. On cold start, restores from snapshot instead of re-initializing — reduces Java cold starts from ~5s to ~200ms.</p>
+        </div>
+        <div class="concept">
+          <h4>🔢 Counting Service</h4>
+          <p>Distributed system that tracks per-function, per-region concurrency in real-time. Enforces account limits (default 1000) and reserved/provisioned concurrency. Must be fast — in the invoke hot path.</p>
+        </div>
+        <div class="concept">
+          <h4>📍 Placement Service</h4>
+          <p>Decides which worker host runs your function. Maintains a cache of warm sandboxes. On cold start, selects a worker with capacity, initiates microVM boot, and waits for sandbox readiness.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f97316; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #f97316; }
+    .primary-btn:hover { background: #ea580c; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    .arch-viz { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .arch-col { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+    .arch-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; min-width: 90px; transition: all 0.4s; }
+    .arch-node.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .arch-icon { font-size: 1.5rem; }
+    .arch-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .arch-detail { color: #64748b; font-size: 0.7rem; }
+    .arch-arrow { color: #475569; font-size: 1.5rem; transition: color 0.3s; }
+    .arch-arrow.active { color: #f97316; }
+    .arch-status { text-align: center; color: #94a3b8; margin-top: 0.5rem; font-family: monospace; font-size: 0.85rem; }
+
+    /* Latency bar */
+    .latency-bar { height: 8px; background: #1e293b; border-radius: 4px; margin-top: 0.75rem; overflow: hidden; }
+    .latency-fill { height: 100%; width: 0; border-radius: 4px; transition: width 1.5s ease-out; }
+    .latency-fill.cold { background: linear-gradient(90deg, #ef4444, #f97316); }
+    .latency-fill.warm { background: linear-gradient(90deg, #22c55e, #10b981); }
+    .latency-label { text-align: center; color: #94a3b8; font-size: 0.8rem; font-family: monospace; margin-top: 0.3rem; }
+
+    /* Cold Start Phases */
+    .cold-phases { display: flex; flex-direction: column; gap: 0.75rem; }
+    .phase { opacity: 0.3; transition: opacity 0.5s; }
+    .phase.active { opacity: 1; }
+    .phase-bar { height: 24px; background: #1e293b; border-radius: 6px; overflow: hidden; }
+    .phase-fill { height: 100%; width: 0; background: linear-gradient(90deg, #f97316, #fb923c); border-radius: 6px; transition: width 0.8s ease-out; }
+    .phase-info { display: flex; justify-content: space-between; margin-top: 0.25rem; }
+    .phase-name { color: #f1f5f9; font-weight: 600; font-size: 0.85rem; }
+    .phase-time { color: #f97316; font-family: monospace; font-size: 0.8rem; }
+    .phase-desc { color: #64748b; font-size: 0.75rem; }
+    .cold-total { text-align: center; color: #f97316; font-family: monospace; font-weight: 700; margin-top: 1rem; font-size: 1.1rem; }
+
+    /* Firecracker Stack */
+    .fc-stack { display: flex; flex-direction: column; gap: 0.5rem; margin: 1rem 0; }
+    .fc-layer { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 0.75rem 1rem; transition: all 0.4s; }
+    .fc-layer.active { border-color: #f97316; background: #431407; }
+    .fc-label { color: #f1f5f9; font-weight: 700; font-size: 0.9rem; }
+    .fc-detail { color: #64748b; font-size: 0.75rem; }
+    .fc-workers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+    .fc-vm { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 0.75rem; text-align: center; transition: all 0.4s; }
+    .fc-vm.active { border-color: #22c55e; background: #14532d; }
+    .fc-vm.isolated { border-color: #eab308; background: #422006; box-shadow: 0 0 12px rgba(234,179,8,0.2); }
+    .fc-vm-label { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .fc-vm-parts { display: flex; flex-direction: column; gap: 0.2rem; }
+    .fc-part { background: #334155; border-radius: 4px; padding: 0.15rem 0.4rem; font-size: 0.7rem; color: #94a3b8; }
+
+    /* Concurrency */
+    .conc-viz { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .conc-header { display: flex; justify-content: space-between; color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.75rem; }
+    .conc-grid { display: flex; gap: 3px; flex-wrap: wrap; min-height: 40px; }
+    .conc-bar { width: 20px; height: 32px; border-radius: 4px; transition: all 0.3s; }
+    .conc-bar.cold { background: #ef4444; animation: flashCold 0.5s; }
+    .conc-bar.warm { background: #22c55e; }
+    .conc-bar.idle { background: #475569; }
+    @keyframes flashCold { 0% { transform: scaleY(0); } 100% { transform: scaleY(1); } }
+    .conc-legend { display: flex; gap: 1rem; margin-top: 0.75rem; }
+    .legend-item { display: flex; align-items: center; gap: 0.3rem; color: #94a3b8; font-size: 0.8rem; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+    .legend-dot.cold { background: #ef4444; }
+    .legend-dot.warm { background: #22c55e; }
+    .legend-dot.idle { background: #475569; }
+
+    /* Provisioned */
+    .prov-viz { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
+    .prov-row { display: flex; align-items: center; gap: 0.75rem; }
+    .prov-label { color: #94a3b8; font-size: 0.85rem; font-weight: 600; min-width: 100px; }
+    .prov-slots { display: flex; gap: 4px; flex-wrap: wrap; }
+    .prov-slot { width: 36px; height: 36px; border-radius: 8px; border: 2px solid #334155; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; transition: all 0.3s; }
+    .prov-slot.ready { border-color: #22c55e; background: #14532d; }
+    .prov-slot.running { border-color: #f97316; background: #431407; animation: pulse 0.5s; }
+    .prov-slot.cold { border-color: #ef4444; background: #450a0a; }
+    @keyframes pulse { 0% { transform: scale(1.2); } 100% { transform: scale(1); } }
+    .prov-latency { text-align: center; color: #94a3b8; font-family: monospace; font-size: 0.9rem; margin-top: 0.5rem; }
+
+    /* Lifecycle */
+    .lifecycle-viz { display: flex; align-items: center; justify-content: center; gap: 0.3rem; flex-wrap: wrap; margin: 1rem 0; }
+    .lc-stage { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem; text-align: center; min-width: 90px; transition: all 0.4s; }
+    .lc-stage.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .lc-stage.done { border-color: #22c55e; background: #14532d; }
+    .lc-icon { font-size: 1.3rem; }
+    .lc-name { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; }
+    .lc-desc { color: #64748b; font-size: 0.65rem; max-width: 100px; }
+    .lc-arrow { color: #475569; font-size: 1.2rem; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .fc-workers { grid-template-columns: 1fr; } .lifecycle-viz { flex-direction: column; } .lc-arrow { transform: rotate(90deg); } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const invNodes = ['inv-client','inv-fe','inv-counting','inv-placement','inv-worker'];
+    const invArrows = ['inv-a1','inv-a2','inv-a3','inv-a4'];
+
+    function clearInvoke() {
+      invNodes.forEach(n => $(n).classList.remove('active'));
+      invArrows.forEach(a => $(a).classList.remove('active'));
+      $('invokeStatus').textContent = 'Ready — choose cold or warm invoke';
+      $('latencyFill').style.width = '0';
+      $('latencyFill').className = 'latency-fill';
+      $('latencyLabel').textContent = '';
+    }
+
+    function animateInvoke(steps, isCold) {
+      clearInvoke();
+      steps.forEach(([nodeId, arrowId, msg], i) => {
+        setTimeout(() => {
+          if (i > 0) $(steps[i-1][0]).classList.remove('active');
+          $(nodeId).classList.add('active');
+          if (arrowId) $(arrowId).classList.add('active');
+          $('invokeStatus').textContent = msg;
+          if (i === steps.length - 1) {
+            const fill = $('latencyFill');
+            fill.className = 'latency-fill ' + (isCold ? 'cold' : 'warm');
+            fill.style.width = isCold ? '80%' : '15%';
+            $('latencyLabel').textContent = isCold ? '~500-2000ms (cold)' : '~1-10ms (warm)';
+          }
+        }, i * 600);
+      });
+    }
+
+    $('invokeBtn').onclick = () => animateInvoke([
+      ['inv-client', null, 'Client calls Invoke API...'],
+      ['inv-fe', 'inv-a1', 'Frontend authenticates, checks throttle...'],
+      ['inv-counting', 'inv-a2', 'Counting Service: concurrency +1 (checking limits)...'],
+      ['inv-placement', 'inv-a3', 'No warm sandbox found — creating new microVM... 🥶'],
+      ['inv-worker', 'inv-a4', '✅ Cold start complete — handler executing on new microVM'],
+    ], true);
+
+    $('invokeWarmBtn').onclick = () => animateInvoke([
+      ['inv-client', null, 'Client calls Invoke API...'],
+      ['inv-fe', 'inv-a1', 'Frontend authenticates...'],
+      ['inv-counting', 'inv-a2', 'Counting Service: concurrency +1...'],
+      ['inv-placement', 'inv-a3', 'Warm sandbox found! Routing to existing environment... 🔥'],
+      ['inv-worker', 'inv-a4', '✅ Warm invoke — handler executing on reused microVM'],
+    ], false);
+
+    $('resetInvokeBtn').onclick = clearInvoke;
+
+    // Cold Start Phases
+    const phases = ['phase-download','phase-microvm','phase-runtime','phase-init','phase-handler'];
+    $('coldStartBtn').onclick = () => {
+      phases.forEach(p => { $(p).classList.remove('active'); $(p).querySelector('.phase-fill').style.width = '0'; });
+      $('coldTotal').textContent = '';
+      phases.forEach((p, i) => {
+        setTimeout(() => {
+          $(p).classList.add('active');
+          const fill = $(p).querySelector('.phase-fill');
+          fill.style.width = fill.dataset.width + '%';
+        }, i * 500);
+      });
+      setTimeout(() => {
+        $('coldTotal').textContent = 'Total cold start: ~250ms - 10s+ (depends on runtime & init code)';
+      }, phases.length * 500);
+    };
+    $('resetColdBtn').onclick = () => {
+      phases.forEach(p => { $(p).classList.remove('active'); $(p).querySelector('.phase-fill').style.width = '0'; });
+      $('coldTotal').textContent = '';
+    };
+
+    // Firecracker
+    const fcLayers = ['fc-hw','fc-host','fc-firecracker'];
+    const fcVms = ['fc-vm1','fc-vm2','fc-vm3'];
+
+    $('fcBootBtn').onclick = () => {
+      fcLayers.forEach(l => $(l).classList.remove('active'));
+      fcVms.forEach(v => { $(v).classList.remove('active'); $(v).classList.remove('isolated'); });
+      $('fcStatus').textContent = 'Booting...';
+      fcLayers.forEach((l, i) => {
+        setTimeout(() => { $(l).classList.add('active'); }, i * 400);
+      });
+      fcVms.forEach((v, i) => {
+        setTimeout(() => { $(v).classList.add('active'); }, (fcLayers.length + i) * 400);
+      });
+      setTimeout(() => {
+        $('fcStatus').textContent = '✅ 3 microVMs booted — each fully isolated with own kernel';
+      }, (fcLayers.length + fcVms.length) * 400);
+    };
+
+    $('fcIsolateBtn').onclick = () => {
+      fcVms.forEach(v => { v && $(v).classList.remove('active'); $(v).classList.add('isolated'); });
+      $('fcStatus').textContent = '🛡️ Each microVM has: own kernel, own network namespace, memory encryption, jailer process';
+    };
+
+    $('resetFcBtn').onclick = () => {
+      fcLayers.forEach(l => $(l).classList.remove('active'));
+      fcVms.forEach(v => { $(v).classList.remove('active'); $(v).classList.remove('isolated'); });
+      $('fcStatus').textContent = 'Explore Firecracker\'s isolation model';
+    };
+
+    // Concurrency
+    let envs = [];
+    let steadyInterval = null;
+
+    function renderConc() {
+      const grid = $('concGrid');
+      grid.innerHTML = '';
+      envs.forEach(e => {
+        const div = document.createElement('div');
+        div.className = 'conc-bar ' + e.state;
+        grid.appendChild(div);
+      });
+      $('concCount').textContent = envs.length + ' / 1000 limit';
+    }
+
+    $('burstBtn').onclick = () => {
+      const newCount = 10;
+      const warmCount = Math.min(envs.filter(e => e.state === 'idle').length, newCount);
+      // Reuse idle envs
+      let reused = 0;
+      envs.forEach(e => { if (e.state === 'idle' && reused < warmCount) { e.state = 'warm'; reused++; } });
+      for (let i = 0; i < newCount - warmCount; i++) envs.push({ state: 'cold' });
+      renderConc();
+      $('concStatus').textContent = `💥 Burst: ${warmCount} warm reuse, ${newCount - warmCount} cold starts`;
+      setTimeout(() => {
+        envs.forEach(e => { if (e.state === 'cold' || e.state === 'warm') e.state = 'idle'; });
+        renderConc();
+        $('concStatus').textContent = 'All invocations complete — environments idle';
+      }, 2000);
+    };
+
+    $('steadyBtn').onclick = () => {
+      if (steadyInterval) return;
+      $('concStatus').textContent = '📈 Steady traffic — 2 requests every 500ms';
+      steadyInterval = setInterval(() => {
+        if (envs.length >= 30) { clearInterval(steadyInterval); steadyInterval = null; $('concStatus').textContent = 'Steady state reached (30 envs)'; return; }
+        const idle = envs.findIndex(e => e.state === 'idle');
+        if (idle >= 0) envs[idle].state = 'warm';
+        else envs.push({ state: 'cold' });
+        if (envs.length < 30) {
+          const idle2 = envs.findIndex(e => e.state === 'idle');
+          if (idle2 >= 0) envs[idle2].state = 'warm';
+          else envs.push({ state: 'cold' });
+        }
+        renderConc();
+        setTimeout(() => {
+          envs.forEach(e => { if (e.state === 'cold' || e.state === 'warm') e.state = 'idle'; });
+          renderConc();
+        }, 300);
+      }, 500);
+    };
+
+    $('scaleDownBtn').onclick = () => {
+      if (steadyInterval) { clearInterval(steadyInterval); steadyInterval = null; }
+      const removeCount = Math.floor(envs.length / 2);
+      envs.splice(0, removeCount);
+      renderConc();
+      $('concStatus').textContent = `📉 Scaled down: ${removeCount} environments destroyed`;
+    };
+
+    $('resetConcBtn').onclick = () => {
+      if (steadyInterval) { clearInterval(steadyInterval); steadyInterval = null; }
+      envs = [];
+      renderConc();
+      $('concStatus').textContent = 'Ready — burst or start steady traffic';
+    };
+
+    // Provisioned Concurrency
+    let provEnvs = [];
+    $('provisionBtn').onclick = () => {
+      provEnvs = [];
+      const slots = $('provSlots');
+      slots.innerHTML = '';
+      for (let i = 0; i < 5; i++) {
+        setTimeout(() => {
+          provEnvs.push('ready');
+          const s = document.createElement('div');
+          s.className = 'prov-slot ready';
+          s.textContent = '✓';
+          slots.appendChild(s);
+        }, i * 200);
+      }
+      $('provLatency').textContent = '5 environments pre-warmed and ready';
+    };
+
+    $('invokeProvBtn').onclick = () => {
+      const slots = $('provSlots');
+      if (!slots.children.length) { $('provLatency').textContent = 'Provision environments first!'; return; }
+      const first = slots.children[0];
+      first.className = 'prov-slot running';
+      first.textContent = '⚡';
+      $('provLatency').innerHTML = 'Provisioned invoke: <strong style="color:#22c55e">~1-2ms</strong> (no cold start!)';
+      setTimeout(() => { first.className = 'prov-slot ready'; first.textContent = '✓'; }, 800);
+    };
+
+    $('invokeOnDemandBtn').onclick = () => {
+      const slots = $('ondemandSlots');
+      const s = document.createElement('div');
+      s.className = 'prov-slot cold';
+      s.textContent = '🥶';
+      slots.appendChild(s);
+      $('provLatency').innerHTML = 'On-demand invoke: <strong style="color:#ef4444">~500-2000ms</strong> (cold start)';
+      setTimeout(() => { s.className = 'prov-slot ready'; s.textContent = '✓'; }, 1500);
+    };
+
+    $('resetProvBtn').onclick = () => {
+      $('provSlots').innerHTML = '';
+      $('ondemandSlots').innerHTML = '';
+      provEnvs = [];
+      $('provLatency').textContent = '';
+    };
+
+    // Lifecycle
+    const lcStages = ['lc-init','lc-invoke','lc-frozen','lc-thaw','lc-shutdown'];
+    $('lifecycleBtn').onclick = () => {
+      lcStages.forEach(s => { $(s).classList.remove('active'); $(s).classList.remove('done'); });
+      const msgs = [
+        'INIT: Downloading code, starting runtime...',
+        'INVOKE: Handler executing, processing event...',
+        'FROZEN: Execution complete, environment frozen for reuse...',
+        'THAW: New invocation! Resuming from frozen state... (warm start)',
+        'SHUTDOWN: No invocations for ~15min — environment destroyed'
+      ];
+      lcStages.forEach((s, i) => {
+        setTimeout(() => {
+          if (i > 0) { $(lcStages[i-1]).classList.remove('active'); $(lcStages[i-1]).classList.add('done'); }
+          $(s).classList.add('active');
+          $('lifecycleStatus').textContent = msgs[i];
+        }, i * 1200);
+      });
+    };
+
+    $('resetLifecycleBtn').onclick = () => {
+      lcStages.forEach(s => { $(s).classList.remove('active'); $(s).classList.remove('done'); });
+      $('lifecycleStatus').textContent = 'Click to animate the lifecycle';
+    };
+  </script>
+</BaseLayout>

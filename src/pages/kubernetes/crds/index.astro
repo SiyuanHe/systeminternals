@@ -1,0 +1,788 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Custom Resources & Operators" 
+  description="Interactive visualization of Kubernetes CRDs, custom controllers, reconciliation loops, and the operator pattern"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Custom Resources", href: "/kubernetes/crds/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🧩 Custom Resources & Operators</h1>
+      <p class="subtitle">CRD Definitions, Controller Pattern, Reconciliation Loops & Operator Framework</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Kubernetes is extensible by design. <strong>Custom Resource Definitions (CRDs)</strong> let you
+          teach the API server about new resource types — a <code>Database</code>, a <code>Certificate</code>,
+          a <code>KafkaCluster</code>. But a CRD alone is just data. The magic comes from
+          <strong>controllers</strong> (or <strong>operators</strong>) that <em>watch</em> these custom
+          resources and <strong>reconcile</strong> the actual state of the world with the desired state
+          declared in the resource spec. This is the same pattern Kubernetes itself uses for Deployments,
+          Services, and every built-in resource.
+        </p>
+      </div>
+    </section>
+
+    <!-- CRD Anatomy -->
+    <section class="sim-section">
+      <h2>📝 CRD Anatomy</h2>
+      <p class="section-desc">Click each part of a CustomResourceDefinition to understand its role.</p>
+
+      <div class="crd-anatomy">
+        <div class="crd-yaml">
+          <div class="yaml-line group-line" data-part="group">
+            <span class="yaml-key">apiVersion:</span> apiextensions.k8s.io/v1
+          </div>
+          <div class="yaml-line" data-part="kind">
+            <span class="yaml-key">kind:</span> CustomResourceDefinition
+          </div>
+          <div class="yaml-line" data-part="metadata">
+            <span class="yaml-key">metadata:</span>
+          </div>
+          <div class="yaml-line indent" data-part="metadata">
+            <span class="yaml-key">name:</span> databases.example.com
+          </div>
+          <div class="yaml-line" data-part="spec-group">
+            <span class="yaml-key">spec:</span>
+          </div>
+          <div class="yaml-line indent" data-part="spec-group">
+            <span class="yaml-key">group:</span> example.com
+          </div>
+          <div class="yaml-line indent" data-part="versions">
+            <span class="yaml-key">versions:</span>
+          </div>
+          <div class="yaml-line indent2" data-part="versions">
+            - <span class="yaml-key">name:</span> v1alpha1
+          </div>
+          <div class="yaml-line indent2" data-part="versions">
+            &nbsp;&nbsp;<span class="yaml-key">served:</span> true
+          </div>
+          <div class="yaml-line indent2" data-part="versions">
+            &nbsp;&nbsp;<span class="yaml-key">storage:</span> true
+          </div>
+          <div class="yaml-line indent" data-part="scope">
+            <span class="yaml-key">scope:</span> Namespaced
+          </div>
+          <div class="yaml-line indent" data-part="names">
+            <span class="yaml-key">names:</span>
+          </div>
+          <div class="yaml-line indent2" data-part="names">
+            <span class="yaml-key">plural:</span> databases
+          </div>
+          <div class="yaml-line indent2" data-part="names">
+            <span class="yaml-key">singular:</span> database
+          </div>
+          <div class="yaml-line indent2" data-part="names">
+            <span class="yaml-key">kind:</span> Database
+          </div>
+          <div class="yaml-line indent2" data-part="names">
+            <span class="yaml-key">shortNames:</span> [db]
+          </div>
+          <div class="yaml-line indent" data-part="schema">
+            <span class="yaml-key">schema:</span>
+          </div>
+          <div class="yaml-line indent2" data-part="schema">
+            <span class="yaml-key">openAPIV3Schema:</span>
+          </div>
+          <div class="yaml-line indent3" data-part="schema">
+            <span class="yaml-key">type:</span> object
+          </div>
+          <div class="yaml-line indent3" data-part="schema">
+            <span class="yaml-key">properties:</span>
+          </div>
+          <div class="yaml-line indent4" data-part="schema">
+            <span class="yaml-key">spec:</span>
+          </div>
+          <div class="yaml-line indent5" data-part="schema">
+            <span class="yaml-key">engine:</span> {'{ type: string, enum: [postgres, mysql] }'}
+          </div>
+          <div class="yaml-line indent5" data-part="schema">
+            <span class="yaml-key">replicas:</span> {'{ type: integer, minimum: 1 }'}
+          </div>
+        </div>
+
+        <div class="crd-info-panel" id="crdInfo">
+          <div class="crd-info-title">Click a section</div>
+          <div class="crd-info-desc">Click any line in the CRD definition to learn what it does and why it matters.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Controller Pattern -->
+    <section class="sim-section">
+      <h2>🔄 Controller Pattern</h2>
+      <p class="section-desc">Every Kubernetes controller follows the same pattern: Watch → Compare → Act. This is the <em>reconciliation loop</em>.</p>
+
+      <div class="controller-diagram">
+        <div class="ctrl-loop">
+          <div class="ctrl-step" id="ctrlWatch">
+            <div class="ctrl-icon">👁️</div>
+            <div class="ctrl-label">Watch</div>
+            <div class="ctrl-desc">Informer receives events from API server</div>
+          </div>
+          <div class="ctrl-arrow">→</div>
+          <div class="ctrl-step" id="ctrlQueue">
+            <div class="ctrl-icon">📋</div>
+            <div class="ctrl-label">Work Queue</div>
+            <div class="ctrl-desc">Events deduplicated & rate-limited</div>
+          </div>
+          <div class="ctrl-arrow">→</div>
+          <div class="ctrl-step" id="ctrlReconcile">
+            <div class="ctrl-icon">⚙️</div>
+            <div class="ctrl-label">Reconcile</div>
+            <div class="ctrl-desc">Compare desired vs actual, take action</div>
+          </div>
+          <div class="ctrl-arrow">→</div>
+          <div class="ctrl-step" id="ctrlStatus">
+            <div class="ctrl-icon">📊</div>
+            <div class="ctrl-label">Update Status</div>
+            <div class="ctrl-desc">Write .status back to API server</div>
+          </div>
+        </div>
+        <div class="ctrl-loop-back">↩ Re-queue on error or after requeue delay</div>
+      </div>
+    </section>
+
+    <!-- Reconciliation Simulator -->
+    <section class="sim-section">
+      <h2>🎮 Reconciliation Simulator</h2>
+      <p class="section-desc">Create a Database custom resource and watch the operator reconcile it step by step.</p>
+
+      <div class="reconcile-sim">
+        <div class="reconcile-config">
+          <h3>Database Spec</h3>
+          <div class="config-group">
+            <label>Engine</label>
+            <select id="dbEngine" class="config-select">
+              <option value="postgres">PostgreSQL</option>
+              <option value="mysql">MySQL</option>
+            </select>
+          </div>
+          <div class="config-group">
+            <label>Replicas: <strong id="dbReplicasLabel">3</strong></label>
+            <input type="range" id="dbReplicasSlider" min="1" max="5" value="3" step="1" class="slider">
+          </div>
+          <div class="config-group">
+            <label>Storage: <strong id="dbStorageLabel">10Gi</strong></label>
+            <input type="range" id="dbStorageSlider" min="5" max="100" value="10" step="5" class="slider">
+          </div>
+          <button class="action-btn primary-btn" id="applyDbBtn">📥 kubectl apply</button>
+          <button class="action-btn chaos-btn" id="deleteReplicaBtn" style="margin-top: 8px">💥 Kill a Replica</button>
+          <button class="action-btn reset-btn" id="resetReconcileBtn" style="margin-top: 8px">↺ Reset</button>
+        </div>
+
+        <div class="reconcile-display">
+          <div class="reconcile-status-bar">
+            <div class="rs-phase" id="rsPhase">No resource</div>
+            <div class="rs-generation">Generation: <strong id="rsGen">0</strong></div>
+          </div>
+
+          <div class="reconcile-events" id="reconcileEvents">
+            <div class="event-header">Controller Events</div>
+          </div>
+
+          <div class="reconcile-resources">
+            <div class="resource-group">
+              <div class="rg-label">StatefulSet</div>
+              <div class="rg-pods" id="ssPods"></div>
+            </div>
+            <div class="resource-group">
+              <div class="rg-label">PVCs</div>
+              <div class="rg-items" id="ssPVCs"></div>
+            </div>
+            <div class="resource-group">
+              <div class="rg-label">Services</div>
+              <div class="rg-items" id="ssServices"></div>
+            </div>
+            <div class="resource-group">
+              <div class="rg-label">Secrets</div>
+              <div class="rg-items" id="ssSecrets"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Operator Maturity Model -->
+    <section class="sim-section">
+      <h2>📈 Operator Capability Levels</h2>
+      <p class="section-desc">The Operator Framework defines 5 capability levels. Click each level to see what it entails.</p>
+
+      <div class="maturity-viz">
+        <div class="maturity-levels">
+          <div class="maturity-level active" id="matLevel1" data-level="1">
+            <div class="mat-num">1</div>
+            <div class="mat-name">Basic Install</div>
+          </div>
+          <div class="maturity-level" id="matLevel2" data-level="2">
+            <div class="mat-num">2</div>
+            <div class="mat-name">Seamless Upgrades</div>
+          </div>
+          <div class="maturity-level" id="matLevel3" data-level="3">
+            <div class="mat-num">3</div>
+            <div class="mat-name">Full Lifecycle</div>
+          </div>
+          <div class="maturity-level" id="matLevel4" data-level="4">
+            <div class="mat-num">4</div>
+            <div class="mat-name">Deep Insights</div>
+          </div>
+          <div class="maturity-level" id="matLevel5" data-level="5">
+            <div class="mat-num">5</div>
+            <div class="mat-name">Auto Pilot</div>
+          </div>
+        </div>
+        <div class="maturity-bar">
+          <div class="maturity-fill" id="maturityFill" style="width: 20%"></div>
+        </div>
+        <div class="maturity-detail" id="maturityDetail">
+          <div class="mat-detail-title">Level 1: Basic Install</div>
+          <div class="mat-detail-desc">
+            Automated installation and configuration of the operand. The operator can provision
+            instances from a CR, set up RBAC, create Services, and configure basic parameters.
+            This is the minimum viable operator.
+          </div>
+          <div class="mat-examples">
+            <strong>Examples:</strong> Create a PostgreSQL cluster, deploy a Redis instance,
+            provision a Kafka topic.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Informer Cache -->
+    <section class="sim-section">
+      <h2>📦 Informer & Cache Architecture</h2>
+      <p class="section-desc">Controllers don't hit the API server directly — they use an informer cache with a watch connection for real-time updates.</p>
+
+      <div class="informer-viz">
+        <div class="informer-flow">
+          <div class="inf-component api-server-comp">
+            <div class="inf-icon">🏛️</div>
+            <div class="inf-name">API Server</div>
+            <div class="inf-desc">etcd backing store</div>
+          </div>
+          <div class="inf-arrow-section">
+            <div class="inf-arrow-label">LIST (initial sync)</div>
+            <div class="inf-arrow">⟹</div>
+            <div class="inf-arrow-label">WATCH (streaming)</div>
+            <div class="inf-arrow stream">⟹</div>
+          </div>
+          <div class="inf-component reflector-comp">
+            <div class="inf-icon">🔄</div>
+            <div class="inf-name">Reflector</div>
+            <div class="inf-desc">Watches for changes</div>
+          </div>
+          <div class="inf-arrow">→</div>
+          <div class="inf-component delta-comp">
+            <div class="inf-icon">Δ</div>
+            <div class="inf-name">DeltaFIFO</div>
+            <div class="inf-desc">Ordered event queue</div>
+          </div>
+          <div class="inf-arrow">→</div>
+          <div class="inf-component indexer-comp">
+            <div class="inf-icon">🗄️</div>
+            <div class="inf-name">Indexer (cache)</div>
+            <div class="inf-desc">In-memory store</div>
+          </div>
+          <div class="inf-arrow">→</div>
+          <div class="inf-component handler-comp">
+            <div class="inf-icon">⚡</div>
+            <div class="inf-name">Event Handlers</div>
+            <div class="inf-desc">Add / Update / Delete</div>
+          </div>
+        </div>
+
+        <div class="informer-events" id="informerEvents">
+          <div class="event-header">Event Stream</div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="simAddEvent">+ Add Event</button>
+          <button class="action-btn election-btn" id="simUpdateEvent">↻ Update Event</button>
+          <button class="action-btn chaos-btn" id="simDeleteEvent">✕ Delete Event</button>
+          <button class="action-btn reset-btn" id="resetInformerBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Webhook Conversion -->
+    <section class="sim-section">
+      <h2>🔄 CRD Version Conversion</h2>
+      <p class="section-desc">When a CRD has multiple versions (v1alpha1 → v1beta1 → v1), a conversion webhook transforms between them.</p>
+
+      <div class="conversion-viz">
+        <div class="conv-versions">
+          <div class="conv-version" id="convV1alpha">
+            <div class="conv-ver-label">v1alpha1</div>
+            <div class="conv-ver-fields">
+              <div class="conv-field">spec.engine: "postgres"</div>
+              <div class="conv-field">spec.size: "small"</div>
+              <div class="conv-field deprecated">spec.backupEnabled: true</div>
+            </div>
+          </div>
+          <div class="conv-arrow-section">
+            <div class="conv-arrow" id="convArrowFwd">
+              <span>→ convert →</span>
+            </div>
+            <div class="conv-webhook">
+              <div class="conv-wh-icon">🔧</div>
+              <div class="conv-wh-label">Conversion Webhook</div>
+            </div>
+            <div class="conv-arrow" id="convArrowBack">
+              <span>← convert ←</span>
+            </div>
+          </div>
+          <div class="conv-version" id="convV1">
+            <div class="conv-ver-label">v1</div>
+            <div class="conv-ver-fields">
+              <div class="conv-field">spec.engine: "postgres"</div>
+              <div class="conv-field new-field">spec.tier: "small"</div>
+              <div class="conv-field new-field">spec.backup.enabled: true</div>
+              <div class="conv-field new-field">spec.backup.schedule: "0 2 * * *"</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="runConversionBtn">🔄 Run Conversion</button>
+          <button class="action-btn reset-btn" id="resetConversionBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Popular Operators -->
+    <section class="sim-section">
+      <h2>🏆 Popular Operators</h2>
+      <p class="section-desc">Real-world operators that demonstrate the pattern at scale.</p>
+
+      <div class="operators-grid">
+        <div class="operator-card">
+          <div class="op-icon">🐘</div>
+          <h3>CloudNativePG</h3>
+          <p>Manages PostgreSQL clusters — failover, backups, point-in-time recovery, connection pooling. The operator handles primary election and replica streaming.</p>
+          <div class="op-crd">CRDs: Cluster, Backup, ScheduledBackup, Pooler</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">📨</div>
+          <h3>Strimzi</h3>
+          <p>Runs Apache Kafka on Kubernetes — brokers, ZooKeeper/KRaft, topics, users, MirrorMaker. Handles rolling upgrades and rack awareness.</p>
+          <div class="op-crd">CRDs: Kafka, KafkaTopic, KafkaUser, KafkaConnect</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">🔐</div>
+          <h3>cert-manager</h3>
+          <p>Automates TLS certificate lifecycle — issuance from Let's Encrypt, Vault, or self-signed CAs. Auto-renewal before expiry.</p>
+          <div class="op-crd">CRDs: Certificate, Issuer, ClusterIssuer, CertificateRequest</div>
+        </div>
+        <div class="operator-card">
+          <div class="op-icon">📊</div>
+          <h3>Prometheus Operator</h3>
+          <p>Manages Prometheus, Alertmanager, and ServiceMonitor resources. Dynamically configures scrape targets from CRDs.</p>
+          <div class="op-crd">CRDs: Prometheus, ServiceMonitor, PodMonitor, AlertmanagerConfig</div>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { font-size: 1.1rem; color: #888; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; }
+  .overview-card p { color: #ccc; line-height: 1.8; font-size: 1.05rem; }
+  .overview-card strong { color: #60a5fa; }
+  .overview-card em { color: #fbbf24; }
+  .overview-card code { background: rgba(96,165,250,0.15); padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; color: #60a5fa; }
+
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 0.95rem; }
+  .sim-section { margin-bottom: 50px; }
+
+  /* CRD Anatomy */
+  .crd-anatomy { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .crd-yaml { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.82rem; line-height: 1.8; }
+  .yaml-line { padding: 2px 8px; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: #ccc; }
+  .yaml-line:hover { background: rgba(96,165,250,0.1); }
+  .yaml-line.highlight { background: rgba(96,165,250,0.15); border-left: 3px solid #60a5fa; }
+  .yaml-key { color: #60a5fa; }
+  .indent { padding-left: 28px; }
+  .indent2 { padding-left: 48px; }
+  .indent3 { padding-left: 68px; }
+  .indent4 { padding-left: 88px; }
+  .indent5 { padding-left: 108px; }
+
+  .crd-info-panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .crd-info-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 8px; }
+  .crd-info-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+
+  /* Controller Pattern */
+  .controller-diagram { margin-top: 16px; }
+  .ctrl-loop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .ctrl-step { background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; text-align: center; min-width: 130px; transition: all 0.4s; }
+  .ctrl-step.active { border-color: rgba(96,165,250,0.6); background: rgba(96,165,250,0.1); transform: scale(1.05); }
+  .ctrl-step.done { border-color: rgba(74,222,128,0.5); }
+  .ctrl-icon { font-size: 1.8rem; margin-bottom: 6px; }
+  .ctrl-label { font-weight: 700; color: #fff; font-size: 0.95rem; }
+  .ctrl-desc { font-size: 0.75rem; color: #888; margin-top: 4px; }
+  .ctrl-arrow { font-size: 1.3rem; color: #555; font-weight: bold; }
+  .ctrl-loop-back { text-align: center; color: #f59e0b; font-size: 0.85rem; margin-top: 12px; font-weight: 600; }
+
+  /* Reconciliation Sim */
+  .reconcile-sim { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+  .reconcile-config { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .reconcile-config h3 { font-size: 1rem; color: #fff; margin-bottom: 16px; }
+  .reconcile-display { display: flex; flex-direction: column; gap: 16px; }
+  .reconcile-status-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.03); border-radius: 10px; }
+  .rs-phase { font-weight: 700; font-size: 0.9rem; color: #888; }
+  .rs-phase.creating { color: #fbbf24; }
+  .rs-phase.ready { color: #4ade80; }
+  .rs-phase.reconciling { color: #60a5fa; }
+  .rs-generation { font-size: 0.85rem; color: #888; }
+  .rs-generation strong { color: #fff; }
+
+  .reconcile-events { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; max-height: 200px; overflow-y: auto; font-family: 'SF Mono',monospace; font-size: 0.75rem; }
+  .event-header { color: #888; font-weight: 600; margin-bottom: 8px; }
+  .event-entry { padding: 2px 0; }
+  .event-entry.info { color: #60a5fa; }
+  .event-entry.success { color: #4ade80; }
+  .event-entry.warning { color: #fbbf24; }
+  .event-entry.error { color: #f87171; }
+
+  .reconcile-resources { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .resource-group { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; }
+  .rg-label { font-size: 0.8rem; font-weight: 600; color: #aaa; margin-bottom: 8px; }
+  .rg-pods { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rg-items { display: flex; flex-direction: column; gap: 4px; }
+  .pod-indicator { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; transition: all 0.3s; }
+  .pod-indicator.pending { background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); }
+  .pod-indicator.running { background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3); }
+  .pod-indicator.terminated { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); }
+  .resource-item { font-size: 0.75rem; color: #aaa; padding: 4px 8px; background: rgba(255,255,255,0.04); border-radius: 6px; }
+  .resource-item.active { color: #4ade80; border-left: 2px solid #4ade80; }
+
+  /* Maturity */
+  .maturity-viz { margin-top: 16px; }
+  .maturity-levels { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .maturity-level { padding: 12px 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.3s; flex: 1; min-width: 100px; }
+  .maturity-level:hover, .maturity-level.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.1); }
+  .mat-num { font-size: 1.5rem; font-weight: 700; color: #60a5fa; }
+  .mat-name { font-size: 0.8rem; color: #ccc; margin-top: 4px; }
+  .maturity-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-bottom: 20px; }
+  .maturity-fill { height: 100%; background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6); border-radius: 4px; transition: width 0.5s; }
+  .maturity-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .mat-detail-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 8px; }
+  .mat-detail-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; margin-bottom: 12px; }
+  .mat-examples { font-size: 0.9rem; color: #888; line-height: 1.6; }
+  .mat-examples strong { color: #fbbf24; }
+
+  /* Informer */
+  .informer-viz { margin-top: 16px; }
+  .informer-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+  .inf-component { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; text-align: center; min-width: 90px; transition: all 0.3s; }
+  .inf-component.pulse { border-color: rgba(96,165,250,0.6); background: rgba(96,165,250,0.1); }
+  .inf-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .inf-name { font-weight: 700; color: #fff; font-size: 0.85rem; }
+  .inf-desc { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .inf-arrow { font-size: 1.2rem; color: #555; }
+  .inf-arrow-section { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .inf-arrow-label { font-size: 0.65rem; color: #888; }
+  .inf-arrow.stream { color: #4ade80; animation: streamPulse 1.5s infinite; }
+  @keyframes streamPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  .informer-events { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; max-height: 180px; overflow-y: auto; font-family: 'SF Mono',monospace; font-size: 0.75rem; margin-bottom: 16px; }
+
+  /* Conversion */
+  .conversion-viz { margin-top: 16px; }
+  .conv-versions { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: start; margin-bottom: 20px; }
+  .conv-version { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; }
+  .conv-ver-label { font-weight: 700; color: #60a5fa; font-size: 1rem; margin-bottom: 12px; }
+  .conv-ver-fields { display: flex; flex-direction: column; gap: 6px; }
+  .conv-field { font-size: 0.8rem; font-family: 'SF Mono',monospace; color: #ccc; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.03); }
+  .conv-field.deprecated { color: #f87171; text-decoration: line-through; }
+  .conv-field.new-field { color: #4ade80; }
+  .conv-field.highlight { background: rgba(96,165,250,0.15); }
+  .conv-arrow-section { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 30px; }
+  .conv-arrow { font-size: 0.85rem; color: #888; transition: color 0.3s; }
+  .conv-arrow.active { color: #60a5fa; }
+  .conv-webhook { text-align: center; padding: 10px; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 10px; }
+  .conv-wh-icon { font-size: 1.2rem; }
+  .conv-wh-label { font-size: 0.7rem; color: #fbbf24; font-weight: 600; }
+
+  /* Operators Grid */
+  .operators-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .operator-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; transition: all 0.3s; }
+  .operator-card:hover { border-color: rgba(96,165,250,0.3); transform: translateY(-2px); }
+  .op-icon { font-size: 1.8rem; margin-bottom: 8px; }
+  .operator-card h3 { font-size: 1.05rem; color: #fff; margin-bottom: 8px; }
+  .operator-card p { font-size: 0.85rem; color: #888; line-height: 1.6; margin-bottom: 10px; }
+  .op-crd { font-size: 0.75rem; color: #60a5fa; font-family: 'SF Mono',monospace; }
+
+  /* Shared */
+  .action-bar { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59,130,246,0.4); }
+  .election-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; }
+  .election-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .chaos-btn { background: linear-gradient(135deg, #f472b6, #ef4444); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .config-group { margin-bottom: 16px; }
+  .config-group label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .config-group label strong { color: #60a5fa; }
+  .slider { width: 100%; height: 6px; -webkit-appearance: none; background: rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; }
+  .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+  .config-select { width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #ddd; font-size: 0.85rem; }
+
+  @media (max-width: 768px) {
+    .crd-anatomy, .reconcile-sim { grid-template-columns: 1fr; }
+    .conv-versions { grid-template-columns: 1fr; }
+    .ctrl-loop { flex-direction: column; }
+  }
+</style>
+
+<script>
+  // CRD Anatomy interactivity
+  const crdInfoData = {
+    group: { title: 'API Version & Group', desc: 'CRDs are themselves resources in the apiextensions.k8s.io group. This tells the API server you\'re defining a new resource type, not creating an instance of one.' },
+    kind: { title: 'Kind: CustomResourceDefinition', desc: 'This is a meta-resource — a resource that defines other resources. Once applied, the API server dynamically creates new REST endpoints for your custom kind.' },
+    metadata: { title: 'Metadata & Name', desc: 'The CRD name must be <plural>.<group> — here "databases.example.com". This becomes the REST path: /apis/example.com/v1alpha1/namespaces/*/databases' },
+    'spec-group': { title: 'API Group', desc: 'Your custom resource lives under this API group. Choose a domain you own (e.g., example.com) to avoid conflicts with other CRDs in the cluster.' },
+    versions: { title: 'Versions', desc: 'CRDs support multiple versions with conversion webhooks between them. "served: true" means the API accepts this version. "storage: true" means this is what etcd stores. Only one version can be the storage version.' },
+    scope: { title: 'Scope', desc: 'Namespaced means each instance lives in a namespace. Cluster-scoped resources (like Nodes) are visible across all namespaces. Most custom resources are Namespaced.' },
+    names: { title: 'Resource Names', desc: 'The API server uses these for REST paths and kubectl. shortNames let you type "kubectl get db" instead of "kubectl get databases". The kind appears in YAML manifests.' },
+    schema: { title: 'OpenAPI V3 Schema', desc: 'Defines the structure and validation for your custom resource. The API server rejects resources that don\'t match this schema. You can define types, enums, minimum/maximum values, required fields, and more.' }
+  };
+
+  document.querySelectorAll('.yaml-line').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.yaml-line').forEach(l => l.classList.remove('highlight'));
+      const part = el.dataset.part;
+      document.querySelectorAll(`[data-part="${part}"]`).forEach(l => l.classList.add('highlight'));
+      const info = crdInfoData[part];
+      if (info) {
+        document.getElementById('crdInfo').innerHTML = `<div class="crd-info-title">${info.title}</div><div class="crd-info-desc">${info.desc}</div>`;
+      }
+    });
+  });
+
+  // Sliders
+  const dbReplicasSlider = document.getElementById('dbReplicasSlider');
+  const dbStorageSlider = document.getElementById('dbStorageSlider');
+  dbReplicasSlider.addEventListener('input', () => document.getElementById('dbReplicasLabel').textContent = dbReplicasSlider.value);
+  dbStorageSlider.addEventListener('input', () => document.getElementById('dbStorageLabel').textContent = dbStorageSlider.value + 'Gi');
+
+  // Reconciliation Simulator
+  let generation = 0;
+  let currentReplicas = 0;
+
+  function addEvent(container, text, cls) {
+    const el = document.createElement('div');
+    el.className = 'event-entry ' + cls;
+    el.textContent = `[${new Date().toISOString().slice(11,23)}] ${text}`;
+    container.appendChild(el);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function renderPods(count, container) {
+    container.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+      const pod = document.createElement('div');
+      pod.className = 'pod-indicator running';
+      pod.textContent = '●';
+      pod.title = `db-${i}`;
+      container.appendChild(pod);
+    }
+  }
+
+  function renderResources(replicas, engine, storage) {
+    renderPods(replicas, document.getElementById('ssPods'));
+    const pvcs = document.getElementById('ssPVCs');
+    pvcs.innerHTML = '';
+    for (let i = 0; i < replicas; i++) {
+      const el = document.createElement('div');
+      el.className = 'resource-item active';
+      el.textContent = `data-db-${i} (${storage}Gi)`;
+      pvcs.appendChild(el);
+    }
+    document.getElementById('ssServices').innerHTML = `<div class="resource-item active">db-primary</div><div class="resource-item active">db-replicas</div><div class="resource-item active">db-headless</div>`;
+    document.getElementById('ssSecrets').innerHTML = `<div class="resource-item active">db-credentials</div><div class="resource-item active">db-tls</div>`;
+  }
+
+  async function animateCtrlLoop() {
+    const steps = ['ctrlWatch','ctrlQueue','ctrlReconcile','ctrlStatus'];
+    for (const id of steps) {
+      const el = document.getElementById(id);
+      el.classList.add('active');
+      await new Promise(r => setTimeout(r, 500));
+      el.classList.remove('active');
+      el.classList.add('done');
+    }
+    await new Promise(r => setTimeout(r, 300));
+    steps.forEach(id => document.getElementById(id).classList.remove('done'));
+  }
+
+  document.getElementById('applyDbBtn').addEventListener('click', async () => {
+    generation++;
+    const engine = document.getElementById('dbEngine').value;
+    const replicas = parseInt(dbReplicasSlider.value);
+    const storage = parseInt(dbStorageSlider.value);
+    const events = document.getElementById('reconcileEvents');
+    const phase = document.getElementById('rsPhase');
+
+    document.getElementById('rsGen').textContent = generation;
+    phase.textContent = 'Reconciling';
+    phase.className = 'rs-phase reconciling';
+
+    addEvent(events, `Database CR applied (gen ${generation}): engine=${engine}, replicas=${replicas}, storage=${storage}Gi`, 'info');
+
+    await animateCtrlLoop();
+
+    addEvent(events, 'Creating StatefulSet...', 'info');
+    await new Promise(r => setTimeout(r, 400));
+
+    for (let i = currentReplicas; i < replicas; i++) {
+      addEvent(events, `Pod db-${i} → Pending`, 'warning');
+      renderPods(i + 1, document.getElementById('ssPods'));
+      await new Promise(r => setTimeout(r, 300));
+      addEvent(events, `Pod db-${i} → Running`, 'success');
+    }
+    if (replicas < currentReplicas) {
+      for (let i = currentReplicas - 1; i >= replicas; i--) {
+        addEvent(events, `Pod db-${i} → Terminating`, 'warning');
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    currentReplicas = replicas;
+
+    renderResources(replicas, engine, storage);
+    addEvent(events, 'All sub-resources reconciled ✓', 'success');
+
+    phase.textContent = 'Ready';
+    phase.className = 'rs-phase ready';
+  });
+
+  document.getElementById('deleteReplicaBtn').addEventListener('click', async () => {
+    if (currentReplicas <= 0) return;
+    const events = document.getElementById('reconcileEvents');
+    const phase = document.getElementById('rsPhase');
+    const i = currentReplicas - 1;
+
+    addEvent(events, `💥 Pod db-${i} killed externally!`, 'error');
+    phase.textContent = 'Degraded';
+    phase.className = 'rs-phase reconciling';
+
+    const pods = document.getElementById('ssPods');
+    if (pods.lastChild) {
+      pods.lastChild.className = 'pod-indicator terminated';
+      pods.lastChild.textContent = '✕';
+    }
+
+    await new Promise(r => setTimeout(r, 800));
+    addEvent(events, 'Controller detected drift — reconciling...', 'info');
+    await animateCtrlLoop();
+    addEvent(events, `Pod db-${i} → Pending (recreated)`, 'warning');
+    await new Promise(r => setTimeout(r, 400));
+    addEvent(events, `Pod db-${i} → Running`, 'success');
+
+    renderPods(currentReplicas, pods);
+    phase.textContent = 'Ready';
+    phase.className = 'rs-phase ready';
+  });
+
+  document.getElementById('resetReconcileBtn').addEventListener('click', () => {
+    generation = 0;
+    currentReplicas = 0;
+    document.getElementById('rsGen').textContent = '0';
+    document.getElementById('rsPhase').textContent = 'No resource';
+    document.getElementById('rsPhase').className = 'rs-phase';
+    document.getElementById('reconcileEvents').innerHTML = '<div class="event-header">Controller Events</div>';
+    ['ssPods','ssPVCs','ssServices','ssSecrets'].forEach(id => document.getElementById(id).innerHTML = '');
+    ['ctrlWatch','ctrlQueue','ctrlReconcile','ctrlStatus'].forEach(id => {
+      document.getElementById(id).classList.remove('active','done');
+    });
+  });
+
+  // Maturity Levels
+  const maturityData = {
+    1: { title: 'Level 1: Basic Install', desc: 'Automated installation and configuration. The operator provisions instances from a CR, creates Services, sets up RBAC. This is the minimum viable operator.', examples: 'Create a PostgreSQL cluster, deploy a Redis instance, provision a Kafka topic.' },
+    2: { title: 'Level 2: Seamless Upgrades', desc: 'The operator handles version upgrades of the operand, including rolling updates, migration scripts, and backward compatibility.', examples: 'Upgrade PostgreSQL 14 → 15, rolling restart Kafka brokers for config change.' },
+    3: { title: 'Level 3: Full Lifecycle', desc: 'Backup, restore, and disaster recovery. The operator can snapshot state, restore from backup, and handle data migration.', examples: 'Automated daily backups, point-in-time recovery, cross-region replication setup.' },
+    4: { title: 'Level 4: Deep Insights', desc: 'The operator exposes metrics, dashboards, and alerts. It integrates with Prometheus, creates ServiceMonitors, and provides operational visibility.', examples: 'Auto-generated Grafana dashboards, SLO-based alerting, query performance analysis.' },
+    5: { title: 'Level 5: Auto Pilot', desc: 'The operator auto-tunes performance, auto-scales based on load, auto-heals from failures, and makes autonomous operational decisions.', examples: 'Auto-vacuum tuning, automatic shard rebalancing, predictive scaling, self-healing quorum.' }
+  };
+
+  document.querySelectorAll('.maturity-level').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.maturity-level').forEach(l => l.classList.remove('active'));
+      el.classList.add('active');
+      const level = parseInt(el.dataset.level);
+      document.getElementById('maturityFill').style.width = (level * 20) + '%';
+      const d = maturityData[level];
+      document.getElementById('maturityDetail').innerHTML = `<div class="mat-detail-title">${d.title}</div><div class="mat-detail-desc">${d.desc}</div><div class="mat-examples"><strong>Examples:</strong> ${d.examples}</div>`;
+    });
+  });
+
+  // Informer Events
+  let eventCounter = 0;
+  function addInformerEvent(type) {
+    eventCounter++;
+    const events = document.getElementById('informerEvents');
+    const names = ['my-db-primary', 'my-db-replica-0', 'cache-redis', 'queue-kafka'];
+    const name = names[Math.floor(Math.random() * names.length)];
+    const cls = type === 'Add' ? 'success' : type === 'Update' ? 'info' : 'error';
+    addEvent(events, `${type}: ${name} (resourceVersion: ${1000 + eventCounter})`, cls);
+
+    // Pulse components
+    const comps = document.querySelectorAll('.inf-component');
+    comps.forEach((c, i) => {
+      setTimeout(() => { c.classList.add('pulse'); setTimeout(() => c.classList.remove('pulse'), 400); }, i * 200);
+    });
+  }
+
+  document.getElementById('simAddEvent').addEventListener('click', () => addInformerEvent('Add'));
+  document.getElementById('simUpdateEvent').addEventListener('click', () => addInformerEvent('Update'));
+  document.getElementById('simDeleteEvent').addEventListener('click', () => addInformerEvent('Delete'));
+  document.getElementById('resetInformerBtn').addEventListener('click', () => {
+    eventCounter = 0;
+    document.getElementById('informerEvents').innerHTML = '<div class="event-header">Event Stream</div>';
+  });
+
+  // Conversion
+  document.getElementById('runConversionBtn').addEventListener('click', async () => {
+    const fwd = document.getElementById('convArrowFwd');
+    const back = document.getElementById('convArrowBack');
+    const webhook = document.querySelector('.conv-webhook');
+    const fields = document.querySelectorAll('.conv-field');
+
+    fwd.classList.add('active');
+    await new Promise(r => setTimeout(r, 500));
+    webhook.style.background = 'rgba(251,191,36,0.2)';
+    webhook.style.borderColor = 'rgba(251,191,36,0.6)';
+    await new Promise(r => setTimeout(r, 600));
+    fields.forEach(f => f.classList.add('highlight'));
+    back.classList.add('active');
+    await new Promise(r => setTimeout(r, 500));
+    webhook.style.background = '';
+    webhook.style.borderColor = '';
+  });
+
+  document.getElementById('resetConversionBtn').addEventListener('click', () => {
+    document.getElementById('convArrowFwd').classList.remove('active');
+    document.getElementById('convArrowBack').classList.remove('active');
+    document.querySelectorAll('.conv-field').forEach(f => f.classList.remove('highlight'));
+  });
+</script>

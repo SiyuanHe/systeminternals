@@ -1,0 +1,750 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Amazon ECS Internals — Interactive Visualization"
+  description="Explore ECS task scheduling, Fargate vs EC2 launch types, service discovery, and container placement strategies."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "AWS", href: "/aws/" },
+    { label: "ECS", href: "/aws/ecs/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐳 Amazon ECS Internals</h1>
+      <p class="subtitle">Task scheduling, container placement, Fargate vs EC2, and service discovery</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Amazon ECS is a container orchestration service that manages the lifecycle of Docker containers.
+          It uses a <strong>cluster → service → task</strong> hierarchy. The <strong>ECS Agent</strong> runs on each EC2 instance,
+          reporting capacity and managing containers. With <strong>Fargate</strong>, AWS manages the underlying infrastructure entirely.
+          The <strong>Scheduler</strong> places tasks using configurable strategies: binpack, spread, or random.
+        </p>
+      </div>
+    </section>
+
+    <!-- Task Scheduling Flow -->
+    <section class="sim-section">
+      <h2>📋 Task Scheduling Flow</h2>
+      <p class="section-desc">Follow a task from RunTask API call through the ECS scheduler to a running container.</p>
+      <div class="sim-controls">
+        <button id="runTaskBtn" class="action-btn primary-btn">🚀 RunTask</button>
+        <button id="runServiceBtn" class="action-btn primary-btn-secondary">🔄 CreateService</button>
+        <button id="resetSchedBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="arch-viz">
+        <div class="arch-col">
+          <div class="arch-node" id="ecs-client">
+            <div class="arch-icon">💻</div>
+            <div class="arch-label">Client</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ecs-a1">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ecs-api">
+            <div class="arch-icon">🌐</div>
+            <div class="arch-label">ECS API</div>
+            <div class="arch-detail">RunTask / CreateService</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ecs-a2">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ecs-scheduler">
+            <div class="arch-icon">📋</div>
+            <div class="arch-label">Scheduler</div>
+            <div class="arch-detail">Placement engine</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ecs-a3">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ecs-agent">
+            <div class="arch-icon">🤖</div>
+            <div class="arch-label">ECS Agent</div>
+            <div class="arch-detail">On instance</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ecs-a4">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ecs-docker">
+            <div class="arch-icon">🐳</div>
+            <div class="arch-label">Docker</div>
+            <div class="arch-detail">Container running</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="schedStatus">Ready — run a task or create a service</div>
+    </section>
+
+    <!-- Placement Strategy -->
+    <section class="sim-section">
+      <h2>🎯 Placement Strategy Simulator</h2>
+      <p class="section-desc">Choose a placement strategy and watch where ECS puts new tasks across instances.</p>
+      <div class="sim-controls">
+        <button id="placeBinpackBtn" class="action-btn primary-btn">📦 Binpack</button>
+        <button id="placeSpreadBtn" class="action-btn primary-btn-secondary">↔️ Spread</button>
+        <button id="placeRandomBtn" class="action-btn primary-btn-secondary">🎲 Random</button>
+        <button id="addTaskBtn" class="action-btn primary-btn">➕ Add Task</button>
+        <button id="resetPlaceBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="placement-viz">
+        <div class="placement-strategy" id="strategyLabel">Select a strategy, then click "Add Task"</div>
+        <div class="instances-row" id="instancesRow">
+          <div class="instance" id="inst-0" data-az="us-east-1a">
+            <div class="inst-header">
+              <span class="inst-name">Instance A</span>
+              <span class="inst-az">us-east-1a</span>
+            </div>
+            <div class="inst-capacity">
+              <div class="cap-bar"><div class="cap-fill" id="cap-0"></div></div>
+              <span class="cap-text" id="capText-0">0/4 CPU</span>
+            </div>
+            <div class="inst-tasks" id="tasks-0"></div>
+          </div>
+          <div class="instance" id="inst-1" data-az="us-east-1b">
+            <div class="inst-header">
+              <span class="inst-name">Instance B</span>
+              <span class="inst-az">us-east-1b</span>
+            </div>
+            <div class="inst-capacity">
+              <div class="cap-bar"><div class="cap-fill" id="cap-1"></div></div>
+              <span class="cap-text" id="capText-1">0/4 CPU</span>
+            </div>
+            <div class="inst-tasks" id="tasks-1"></div>
+          </div>
+          <div class="instance" id="inst-2" data-az="us-east-1a">
+            <div class="inst-header">
+              <span class="inst-name">Instance C</span>
+              <span class="inst-az">us-east-1a</span>
+            </div>
+            <div class="inst-capacity">
+              <div class="cap-bar"><div class="cap-fill" id="cap-2"></div></div>
+              <span class="cap-text" id="capText-2">0/4 CPU</span>
+            </div>
+            <div class="inst-tasks" id="tasks-2"></div>
+          </div>
+          <div class="instance" id="inst-3" data-az="us-east-1b">
+            <div class="inst-header">
+              <span class="inst-name">Instance D</span>
+              <span class="inst-az">us-east-1b</span>
+            </div>
+            <div class="inst-capacity">
+              <div class="cap-bar"><div class="cap-fill" id="cap-3"></div></div>
+              <span class="cap-text" id="capText-3">0/4 CPU</span>
+            </div>
+            <div class="inst-tasks" id="tasks-3"></div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="placeStatus">Pick a strategy, then add tasks</div>
+    </section>
+
+    <!-- Fargate vs EC2 -->
+    <section class="sim-section">
+      <h2>⚖️ Fargate vs EC2 Launch Types</h2>
+      <p class="section-desc">Compare how tasks run on Fargate (serverless) vs EC2 (self-managed instances).</p>
+      <div class="sim-controls">
+        <button id="fargateBtn" class="action-btn primary-btn">☁️ Launch on Fargate</button>
+        <button id="ec2Btn" class="action-btn primary-btn-secondary">🖥️ Launch on EC2</button>
+        <button id="resetLaunchBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="launch-compare">
+        <div class="launch-col" id="fargate-col">
+          <h3>☁️ Fargate</h3>
+          <div class="launch-layers">
+            <div class="launch-layer" id="fg-task">
+              <span>Your Task</span>
+            </div>
+            <div class="launch-layer managed" id="fg-runtime">
+              <span>Container Runtime</span>
+            </div>
+            <div class="launch-layer managed" id="fg-os">
+              <span>Operating System</span>
+            </div>
+            <div class="launch-layer managed" id="fg-vm">
+              <span>Firecracker microVM</span>
+            </div>
+            <div class="launch-layer managed" id="fg-hw">
+              <span>AWS Hardware</span>
+            </div>
+          </div>
+          <div class="launch-note">AWS manages everything below your task</div>
+          <div class="launch-props" id="fg-props"></div>
+        </div>
+        <div class="launch-col" id="ec2-col">
+          <h3>🖥️ EC2</h3>
+          <div class="launch-layers">
+            <div class="launch-layer" id="ec2-task">
+              <span>Your Task</span>
+            </div>
+            <div class="launch-layer yours" id="ec2-agent">
+              <span>ECS Agent + Docker</span>
+            </div>
+            <div class="launch-layer yours" id="ec2-os">
+              <span>EC2 Instance OS</span>
+            </div>
+            <div class="launch-layer managed" id="ec2-hw">
+              <span>AWS Hardware</span>
+            </div>
+          </div>
+          <div class="launch-note">You manage the instance, ECS agent, and OS</div>
+          <div class="launch-props" id="ec2-props"></div>
+        </div>
+      </div>
+      <div class="arch-status" id="launchStatus">Click a launch type to explore</div>
+    </section>
+
+    <!-- Service Discovery -->
+    <section class="sim-section">
+      <h2>🔍 Service Discovery & Load Balancing</h2>
+      <p class="section-desc">See how ECS services register with Cloud Map and route traffic through load balancers.</p>
+      <div class="sim-controls">
+        <button id="discoverBtn" class="action-btn primary-btn">🔍 Register Service</button>
+        <button id="routeReqBtn" class="action-btn primary-btn-secondary">📨 Route Request</button>
+        <button id="healthCheckBtn" class="action-btn primary-btn-secondary">💚 Health Check</button>
+        <button id="resetDiscBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="disc-viz">
+        <div class="disc-row">
+          <div class="disc-node" id="disc-client">
+            <div class="disc-icon">💻</div>
+            <div class="disc-label">Client</div>
+          </div>
+          <div class="disc-arrow" id="disc-a1">→</div>
+          <div class="disc-node" id="disc-alb">
+            <div class="disc-icon">⚖️</div>
+            <div class="disc-label">ALB</div>
+            <div class="disc-detail">Application Load Balancer</div>
+          </div>
+          <div class="disc-arrow" id="disc-a2">→</div>
+          <div class="disc-targets">
+            <div class="disc-target" id="disc-t1">
+              <span class="target-icon">🐳</span>
+              <span class="target-label">Task 1</span>
+              <span class="target-health" id="health-1">●</span>
+            </div>
+            <div class="disc-target" id="disc-t2">
+              <span class="target-icon">🐳</span>
+              <span class="target-label">Task 2</span>
+              <span class="target-health" id="health-2">●</span>
+            </div>
+            <div class="disc-target" id="disc-t3">
+              <span class="target-icon">🐳</span>
+              <span class="target-label">Task 3</span>
+              <span class="target-health" id="health-3">●</span>
+            </div>
+          </div>
+        </div>
+        <div class="disc-cloudmap">
+          <div class="disc-node" id="disc-cloudmap">
+            <div class="disc-icon">🗺️</div>
+            <div class="disc-label">Cloud Map</div>
+            <div class="disc-detail">DNS: api.local → task IPs</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="discStatus">Explore service discovery and load balancing</div>
+    </section>
+
+    <!-- Task Lifecycle -->
+    <section class="sim-section">
+      <h2>♻️ Task Lifecycle</h2>
+      <p class="section-desc">Follow a task through its lifecycle stages from provisioning to stopped.</p>
+      <div class="sim-controls">
+        <button id="taskLifeBtn" class="action-btn primary-btn">▶️ Start Lifecycle</button>
+        <button id="taskFailBtn" class="action-btn primary-btn-secondary">💥 Simulate Failure</button>
+        <button id="resetTaskLifeBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="lifecycle-viz">
+        <div class="lc-stage" id="tl-provision">
+          <div class="lc-icon">📋</div>
+          <div class="lc-name">PROVISIONING</div>
+          <div class="lc-desc">Acquiring resources</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="tl-pending">
+          <div class="lc-icon">⏳</div>
+          <div class="lc-name">PENDING</div>
+          <div class="lc-desc">Pulling image, starting</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="tl-running">
+          <div class="lc-icon">✅</div>
+          <div class="lc-name">RUNNING</div>
+          <div class="lc-desc">Container executing</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="tl-deactivating">
+          <div class="lc-icon">⏹️</div>
+          <div class="lc-name">DEACTIVATING</div>
+          <div class="lc-desc">Draining connections</div>
+        </div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-stage" id="tl-stopped">
+          <div class="lc-icon">🔴</div>
+          <div class="lc-name">STOPPED</div>
+          <div class="lc-desc">Container exited</div>
+        </div>
+      </div>
+      <div class="arch-status" id="taskLifeStatus">Click to animate the task lifecycle</div>
+    </section>
+
+    <!-- Capacity Providers -->
+    <section class="sim-section">
+      <h2>📊 Capacity Providers & Auto Scaling</h2>
+      <p class="section-desc">ECS capacity providers manage the scaling of underlying infrastructure. Watch how tasks trigger scaling.</p>
+      <div class="sim-controls">
+        <button id="cpAddBtn" class="action-btn primary-btn">➕ Add 5 Tasks</button>
+        <button id="cpScaleBtn" class="action-btn primary-btn-secondary">📈 Scale Out</button>
+        <button id="cpRemoveBtn" class="action-btn primary-btn-secondary">➖ Remove Tasks</button>
+        <button id="resetCpBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="cp-viz">
+        <div class="cp-row">
+          <div class="cp-label">Desired Tasks:</div>
+          <div class="cp-bar"><div class="cp-fill desired" id="cpDesired"></div></div>
+          <span class="cp-count" id="cpDesiredCount">0</span>
+        </div>
+        <div class="cp-row">
+          <div class="cp-label">Running Tasks:</div>
+          <div class="cp-bar"><div class="cp-fill running" id="cpRunning"></div></div>
+          <span class="cp-count" id="cpRunningCount">0</span>
+        </div>
+        <div class="cp-row">
+          <div class="cp-label">Instance Capacity:</div>
+          <div class="cp-bar"><div class="cp-fill capacity" id="cpCapacity"></div></div>
+          <span class="cp-count" id="cpCapacityCount">4</span>
+        </div>
+        <div class="cp-pending" id="cpPending"></div>
+      </div>
+      <div class="arch-status" id="cpStatus">Add tasks to see capacity provider behavior</div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>📋 Task Definition</h4>
+          <p>A blueprint specifying containers, CPU/memory, networking mode, volumes, IAM role, and logging. Versioned — each revision creates a new definition. Think of it as a Docker Compose file for ECS.</p>
+        </div>
+        <div class="concept">
+          <h4>🤖 ECS Agent</h4>
+          <p>Open-source Go program on each EC2 instance. Polls the ECS control plane for task assignments, manages Docker daemon, reports container health, and handles task lifecycle. Not needed with Fargate.</p>
+        </div>
+        <div class="concept">
+          <h4>🔗 awsvpc Network Mode</h4>
+          <p>Each task gets its own Elastic Network Interface (ENI) with a private IP. Required for Fargate. Enables security groups per-task and direct VPC networking. Limited by ENI density per instance type.</p>
+        </div>
+        <div class="concept">
+          <h4>📍 Placement Constraints</h4>
+          <p>Rules that filter valid instances: distinctInstance (one task per instance), memberOf (attribute expressions like instance type or AZ). Combined with strategies for fine-grained control.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f97316; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #f97316; }
+    .primary-btn:hover { background: #ea580c; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    .arch-viz { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .arch-col { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+    .arch-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; min-width: 90px; transition: all 0.4s; }
+    .arch-node.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .arch-icon { font-size: 1.5rem; }
+    .arch-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .arch-detail { color: #64748b; font-size: 0.7rem; }
+    .arch-arrow { color: #475569; font-size: 1.5rem; transition: color 0.3s; }
+    .arch-arrow.active { color: #f97316; }
+    .arch-status { text-align: center; color: #94a3b8; margin-top: 0.5rem; font-family: monospace; font-size: 0.85rem; }
+
+    /* Placement */
+    .placement-viz { margin: 1rem 0; }
+    .placement-strategy { text-align: center; color: #f97316; font-weight: 600; font-size: 0.9rem; margin-bottom: 1rem; }
+    .instances-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+    .instance { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem; transition: all 0.3s; }
+    .instance.targeted { border-color: #f97316; box-shadow: 0 0 12px rgba(249,115,22,0.2); }
+    .inst-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+    .inst-name { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; }
+    .inst-az { color: #64748b; font-size: 0.7rem; font-family: monospace; }
+    .inst-capacity { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .cap-bar { flex: 1; height: 8px; background: #334155; border-radius: 4px; overflow: hidden; }
+    .cap-fill { height: 100%; background: #22c55e; border-radius: 4px; transition: width 0.3s; }
+    .cap-fill.warning { background: #eab308; }
+    .cap-fill.full { background: #ef4444; }
+    .cap-text { color: #94a3b8; font-size: 0.7rem; font-family: monospace; white-space: nowrap; }
+    .inst-tasks { display: flex; flex-wrap: wrap; gap: 3px; min-height: 24px; }
+    .task-box { width: 20px; height: 20px; background: #6366f1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: white; animation: taskIn 0.3s; }
+    @keyframes taskIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+
+    /* Launch Type Compare */
+    .launch-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+    .launch-col { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; transition: all 0.4s; }
+    .launch-col.active { border-color: #f97316; }
+    .launch-col h3 { color: #f1f5f9; margin: 0 0 0.75rem; font-size: 1rem; text-align: center; }
+    .launch-layers { display: flex; flex-direction: column; gap: 3px; }
+    .launch-layer { padding: 0.5rem; border-radius: 6px; text-align: center; font-size: 0.8rem; font-weight: 600; transition: all 0.3s; }
+    .launch-layer span { color: #f1f5f9; }
+    .launch-layer { background: #334155; border: 1px solid #475569; }
+    .launch-layer.managed { background: #1a3a2a; border-color: #22c55e40; }
+    .launch-layer.managed span { color: #22c55e; }
+    .launch-layer.yours { background: #3a2a1a; border-color: #f9731640; }
+    .launch-layer.yours span { color: #f97316; }
+    .launch-layer.highlight { transform: scale(1.03); box-shadow: 0 0 12px rgba(249,115,22,0.3); }
+    .launch-note { text-align: center; color: #64748b; font-size: 0.75rem; margin-top: 0.5rem; }
+    .launch-props { margin-top: 0.75rem; font-size: 0.8rem; color: #94a3b8; line-height: 1.6; }
+
+    /* Service Discovery */
+    .disc-viz { margin: 1rem 0; }
+    .disc-row { display: flex; align-items: center; justify-content: center; gap: 0.75rem; flex-wrap: wrap; }
+    .disc-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem; text-align: center; transition: all 0.4s; min-width: 80px; }
+    .disc-node.active { border-color: #f97316; background: #431407; }
+    .disc-icon { font-size: 1.3rem; }
+    .disc-label { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; }
+    .disc-detail { color: #64748b; font-size: 0.65rem; }
+    .disc-arrow { color: #475569; font-size: 1.3rem; transition: color 0.3s; }
+    .disc-arrow.active { color: #f97316; }
+    .disc-targets { display: flex; gap: 0.5rem; }
+    .disc-target { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 0.5rem; text-align: center; transition: all 0.3s; min-width: 70px; }
+    .disc-target.active { border-color: #22c55e; background: #14532d; }
+    .disc-target.routed { border-color: #f97316; background: #431407; }
+    .target-icon { font-size: 1rem; display: block; }
+    .target-label { color: #f1f5f9; font-size: 0.7rem; display: block; }
+    .target-health { font-size: 0.6rem; }
+    .target-health.healthy { color: #22c55e; }
+    .target-health.unhealthy { color: #ef4444; }
+    .disc-cloudmap { text-align: center; margin-top: 0.75rem; }
+
+    /* Task Lifecycle */
+    .lifecycle-viz { display: flex; align-items: center; justify-content: center; gap: 0.3rem; flex-wrap: wrap; margin: 1rem 0; }
+    .lc-stage { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem; text-align: center; min-width: 90px; transition: all 0.4s; }
+    .lc-stage.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .lc-stage.done { border-color: #22c55e; background: #14532d; }
+    .lc-stage.failed { border-color: #ef4444; background: #450a0a; box-shadow: 0 0 16px rgba(239,68,68,0.3); }
+    .lc-icon { font-size: 1.3rem; }
+    .lc-name { color: #f1f5f9; font-weight: 700; font-size: 0.75rem; }
+    .lc-desc { color: #64748b; font-size: 0.65rem; max-width: 100px; }
+    .lc-arrow { color: #475569; font-size: 1.2rem; }
+
+    /* Capacity Providers */
+    .cp-viz { background: #1e293b; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+    .cp-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+    .cp-label { color: #94a3b8; font-size: 0.85rem; min-width: 130px; }
+    .cp-bar { flex: 1; height: 20px; background: #334155; border-radius: 6px; overflow: hidden; }
+    .cp-fill { height: 100%; border-radius: 6px; transition: width 0.5s; }
+    .cp-fill.desired { background: #6366f1; }
+    .cp-fill.running { background: #22c55e; }
+    .cp-fill.capacity { background: #f97316; }
+    .cp-count { color: #f1f5f9; font-family: monospace; font-size: 0.85rem; min-width: 20px; }
+    .cp-pending { text-align: center; color: #eab308; font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2em; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .instances-row { grid-template-columns: 1fr 1fr; } .launch-compare { grid-template-columns: 1fr; } .lifecycle-viz { flex-direction: column; } .lc-arrow { transform: rotate(90deg); } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // Task Scheduling Flow
+    const schedNodes = ['ecs-client','ecs-api','ecs-scheduler','ecs-agent','ecs-docker'];
+    const schedArrows = ['ecs-a1','ecs-a2','ecs-a3','ecs-a4'];
+
+    function clearSched() {
+      schedNodes.forEach(n => $(n).classList.remove('active'));
+      schedArrows.forEach(a => $(a).classList.remove('active'));
+      $('schedStatus').textContent = 'Ready — run a task or create a service';
+    }
+
+    function animateSched(steps) {
+      clearSched();
+      steps.forEach(([nodeId, arrowId, msg], i) => {
+        setTimeout(() => {
+          if (i > 0) $(steps[i-1][0]).classList.remove('active');
+          $(nodeId).classList.add('active');
+          if (arrowId) $(arrowId).classList.add('active');
+          $('schedStatus').textContent = msg;
+        }, i * 600);
+      });
+    }
+
+    $('runTaskBtn').onclick = () => animateSched([
+      ['ecs-client', null, 'Client calls RunTask API...'],
+      ['ecs-api', 'ecs-a1', 'API validates task definition, IAM permissions...'],
+      ['ecs-scheduler', 'ecs-a2', 'Scheduler evaluates placement constraints & strategies...'],
+      ['ecs-agent', 'ecs-a3', 'ECS Agent on selected instance pulls image...'],
+      ['ecs-docker', 'ecs-a4', '✅ Container running — task in RUNNING state'],
+    ]);
+
+    $('runServiceBtn').onclick = () => animateSched([
+      ['ecs-client', null, 'Client calls CreateService API...'],
+      ['ecs-api', 'ecs-a1', 'API creates service with desired count, LB config...'],
+      ['ecs-scheduler', 'ecs-a2', 'Service scheduler: maintain desired count, spread across AZs...'],
+      ['ecs-agent', 'ecs-a3', 'ECS Agent starts containers on selected instances...'],
+      ['ecs-docker', 'ecs-a4', '✅ Service running — scheduler ensures desired count maintained'],
+    ]);
+
+    $('resetSchedBtn').onclick = clearSched;
+
+    // Placement Strategy
+    let strategy = null;
+    const instCap = [0, 0, 0, 0];
+    const maxCap = 4;
+
+    function renderInstances() {
+      for (let i = 0; i < 4; i++) {
+        const pct = (instCap[i] / maxCap) * 100;
+        const fill = $('cap-' + i);
+        fill.style.width = pct + '%';
+        fill.className = 'cap-fill' + (pct > 75 ? ' full' : pct > 50 ? ' warning' : '');
+        $('capText-' + i).textContent = instCap[i] + '/' + maxCap + ' CPU';
+        const tasks = $('tasks-' + i);
+        tasks.innerHTML = '';
+        for (let t = 0; t < instCap[i]; t++) {
+          const box = document.createElement('div');
+          box.className = 'task-box';
+          box.textContent = '🐳';
+          tasks.appendChild(box);
+        }
+      }
+    }
+
+    $('placeBinpackBtn').onclick = () => { strategy = 'binpack'; $('strategyLabel').textContent = '📦 Binpack: Fill instances to maximize utilization'; };
+    $('placeSpreadBtn').onclick = () => { strategy = 'spread'; $('strategyLabel').textContent = '↔️ Spread: Distribute evenly across AZs'; };
+    $('placeRandomBtn').onclick = () => { strategy = 'random'; $('strategyLabel').textContent = '🎲 Random: Place on any available instance'; };
+
+    $('addTaskBtn').onclick = () => {
+      if (!strategy) { $('placeStatus').textContent = 'Select a strategy first!'; return; }
+      let target = -1;
+      if (strategy === 'binpack') {
+        let maxUsed = -1;
+        for (let i = 0; i < 4; i++) { if (instCap[i] < maxCap && instCap[i] > maxUsed) { maxUsed = instCap[i]; target = i; } }
+      } else if (strategy === 'spread') {
+        let minUsed = Infinity;
+        for (let i = 0; i < 4; i++) { if (instCap[i] < maxCap && instCap[i] < minUsed) { minUsed = instCap[i]; target = i; } }
+      } else {
+        const avail = [];
+        for (let i = 0; i < 4; i++) { if (instCap[i] < maxCap) avail.push(i); }
+        if (avail.length) target = avail[Math.floor(Math.random() * avail.length)];
+      }
+      if (target < 0) { $('placeStatus').textContent = '❌ No capacity — all instances full!'; return; }
+      instCap[target]++;
+      document.querySelectorAll('.instance').forEach(el => el.classList.remove('targeted'));
+      $('inst-' + target).classList.add('targeted');
+      renderInstances();
+      $('placeStatus').textContent = `✅ Task placed on Instance ${['A','B','C','D'][target]} (${strategy})`;
+      setTimeout(() => $('inst-' + target).classList.remove('targeted'), 1000);
+    };
+
+    $('resetPlaceBtn').onclick = () => {
+      strategy = null;
+      instCap.fill(0);
+      renderInstances();
+      document.querySelectorAll('.instance').forEach(el => el.classList.remove('targeted'));
+      $('strategyLabel').textContent = 'Select a strategy, then click "Add Task"';
+      $('placeStatus').textContent = 'Pick a strategy, then add tasks';
+    };
+
+    // Fargate vs EC2
+    $('fargateBtn').onclick = () => {
+      document.querySelectorAll('.launch-layer').forEach(l => l.classList.remove('highlight'));
+      $('fargate-col').classList.add('active');
+      $('ec2-col').classList.remove('active');
+      ['fg-runtime','fg-os','fg-vm','fg-hw'].forEach((id, i) => {
+        setTimeout(() => $(id).classList.add('highlight'), i * 200);
+      });
+      $('fg-props').innerHTML = '<strong>Pros:</strong> No instance management, per-second billing, auto-patching<br><strong>Cons:</strong> Higher per-vCPU cost, no GPU, limited to 4 vCPU / 30GB';
+      $('ec2-props').innerHTML = '';
+      $('launchStatus').textContent = 'Fargate: AWS manages all infrastructure — you define CPU/memory per task';
+    };
+
+    $('ec2Btn').onclick = () => {
+      document.querySelectorAll('.launch-layer').forEach(l => l.classList.remove('highlight'));
+      $('ec2-col').classList.add('active');
+      $('fargate-col').classList.remove('active');
+      ['ec2-agent','ec2-os'].forEach((id, i) => {
+        setTimeout(() => $(id).classList.add('highlight'), i * 200);
+      });
+      $('ec2-props').innerHTML = '<strong>Pros:</strong> GPU support, spot instances, full OS control, cheaper at scale<br><strong>Cons:</strong> Must manage AMI, patching, scaling, ECS agent updates';
+      $('fg-props').innerHTML = '';
+      $('launchStatus').textContent = 'EC2: You manage instances — ECS agent reports capacity and runs containers';
+    };
+
+    $('resetLaunchBtn').onclick = () => {
+      document.querySelectorAll('.launch-layer').forEach(l => l.classList.remove('highlight'));
+      ['fargate-col','ec2-col'].forEach(c => $(c).classList.remove('active'));
+      $('fg-props').innerHTML = '';
+      $('ec2-props').innerHTML = '';
+      $('launchStatus').textContent = 'Click a launch type to explore';
+    };
+
+    // Service Discovery
+    $('discoverBtn').onclick = () => {
+      const targets = ['disc-t1','disc-t2','disc-t3'];
+      targets.forEach((t, i) => {
+        setTimeout(() => {
+          $(t).classList.add('active');
+          $('health-' + (i+1)).className = 'target-health healthy';
+          $('health-' + (i+1)).textContent = '● healthy';
+        }, i * 300);
+      });
+      setTimeout(() => {
+        $('disc-cloudmap').classList.add('active');
+        $('discStatus').textContent = '✅ 3 tasks registered with Cloud Map — DNS: api.local resolves to task IPs';
+      }, 1200);
+    };
+
+    $('routeReqBtn').onclick = () => {
+      const targets = ['disc-t1','disc-t2','disc-t3'];
+      targets.forEach(t => $(t).classList.remove('routed'));
+      $('disc-client').classList.add('active');
+      $('disc-a1').classList.add('active');
+      setTimeout(() => {
+        $('disc-alb').classList.add('active');
+        $('disc-a2').classList.add('active');
+      }, 400);
+      const pick = targets[Math.floor(Math.random() * 3)];
+      setTimeout(() => {
+        $(pick).classList.add('routed');
+        $('discStatus').textContent = '📨 Request routed to ' + pick.replace('disc-', 'Task ').replace('t', '') + ' via ALB (round-robin)';
+      }, 800);
+      setTimeout(() => {
+        ['disc-client','disc-alb'].forEach(n => $(n).classList.remove('active'));
+        ['disc-a1','disc-a2'].forEach(a => $(a).classList.remove('active'));
+        $(pick).classList.remove('routed');
+      }, 2000);
+    };
+
+    $('healthCheckBtn').onclick = () => {
+      const fail = Math.floor(Math.random() * 3) + 1;
+      $('health-' + fail).className = 'target-health unhealthy';
+      $('health-' + fail).textContent = '● unhealthy';
+      $('disc-t' + fail).classList.remove('active');
+      $('discStatus').textContent = '💔 Task ' + fail + ' failed health check — ALB stops routing traffic to it. ECS will replace it.';
+    };
+
+    $('resetDiscBtn').onclick = () => {
+      ['disc-client','disc-alb','disc-cloudmap'].forEach(n => $(n).classList.remove('active'));
+      ['disc-a1','disc-a2'].forEach(a => $(a).classList.remove('active'));
+      ['disc-t1','disc-t2','disc-t3'].forEach(t => { $(t).classList.remove('active'); $(t).classList.remove('routed'); });
+      [1,2,3].forEach(i => { $('health-' + i).className = 'target-health'; $('health-' + i).textContent = '●'; });
+      $('discStatus').textContent = 'Explore service discovery and load balancing';
+    };
+
+    // Task Lifecycle
+    const tlStages = ['tl-provision','tl-pending','tl-running','tl-deactivating','tl-stopped'];
+    $('taskLifeBtn').onclick = () => {
+      tlStages.forEach(s => { $(s).classList.remove('active','done','failed'); });
+      const msgs = [
+        'PROVISIONING: Acquiring ENI, pulling image layers...',
+        'PENDING: Starting container, running health checks...',
+        'RUNNING: Container healthy, serving traffic ✅',
+        'DEACTIVATING: Stop signal sent, draining connections (deregistrationDelay)...',
+        'STOPPED: Container exited with code 0 — task complete'
+      ];
+      tlStages.forEach((s, i) => {
+        setTimeout(() => {
+          if (i > 0) { $(tlStages[i-1]).classList.remove('active'); $(tlStages[i-1]).classList.add('done'); }
+          $(s).classList.add('active');
+          $('taskLifeStatus').textContent = msgs[i];
+        }, i * 1000);
+      });
+    };
+
+    $('taskFailBtn').onclick = () => {
+      tlStages.forEach(s => { $(s).classList.remove('active','done','failed'); });
+      ['tl-provision','tl-pending'].forEach((s, i) => {
+        setTimeout(() => {
+          if (i > 0) { $(tlStages[i-1]).classList.remove('active'); $(tlStages[i-1]).classList.add('done'); }
+          $(s).classList.add('active');
+        }, i * 800);
+      });
+      setTimeout(() => {
+        $('tl-pending').classList.remove('active');
+        $('tl-pending').classList.add('done');
+        $('tl-running').classList.add('failed');
+        $('taskLifeStatus').textContent = '💥 Container crashed (exit code 137 OOM) — ECS service scheduler will launch replacement';
+      }, 2400);
+    };
+
+    $('resetTaskLifeBtn').onclick = () => {
+      tlStages.forEach(s => { $(s).classList.remove('active','done','failed'); });
+      $('taskLifeStatus').textContent = 'Click to animate the task lifecycle';
+    };
+
+    // Capacity Providers
+    let cpState = { desired: 0, running: 0, capacity: 4 };
+
+    function renderCp() {
+      const maxViz = 20;
+      $('cpDesired').style.width = (cpState.desired / maxViz * 100) + '%';
+      $('cpRunning').style.width = (cpState.running / maxViz * 100) + '%';
+      $('cpCapacity').style.width = (cpState.capacity / maxViz * 100) + '%';
+      $('cpDesiredCount').textContent = cpState.desired;
+      $('cpRunningCount').textContent = cpState.running;
+      $('cpCapacityCount').textContent = cpState.capacity;
+      if (cpState.desired > cpState.capacity) {
+        $('cpPending').textContent = '⚠️ ' + (cpState.desired - cpState.capacity) + ' tasks pending — need more capacity!';
+      } else {
+        $('cpPending').textContent = '';
+      }
+    }
+
+    $('cpAddBtn').onclick = () => {
+      cpState.desired += 5;
+      cpState.running = Math.min(cpState.desired, cpState.capacity);
+      renderCp();
+      $('cpStatus').textContent = cpState.desired > cpState.capacity
+        ? '⚠️ Desired exceeds capacity — tasks pending. Click "Scale Out" to add instances.'
+        : '✅ All tasks placed within current capacity';
+    };
+
+    $('cpScaleBtn').onclick = () => {
+      cpState.capacity += 4;
+      setTimeout(() => {
+        cpState.running = Math.min(cpState.desired, cpState.capacity);
+        renderCp();
+        $('cpStatus').textContent = '📈 Capacity provider added new instance (+4 capacity). Pending tasks now running.';
+      }, 500);
+      renderCp();
+    };
+
+    $('cpRemoveBtn').onclick = () => {
+      cpState.desired = Math.max(0, cpState.desired - 5);
+      cpState.running = Math.min(cpState.desired, cpState.capacity);
+      renderCp();
+      $('cpStatus').textContent = '➖ Reduced desired count. Capacity provider may scale in after cooldown.';
+    };
+
+    $('resetCpBtn').onclick = () => {
+      cpState = { desired: 0, running: 0, capacity: 4 };
+      renderCp();
+      $('cpStatus').textContent = 'Add tasks to see capacity provider behavior';
+    };
+
+    renderInstances();
+    renderCp();
+  </script>
+</BaseLayout>

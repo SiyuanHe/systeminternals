@@ -1,0 +1,881 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Service Mesh & Istio Internals" 
+  description="Interactive visualization of service mesh architecture — sidecar proxies, Envoy data plane, Istio control plane, mTLS, and traffic management"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Service Mesh", href: "/kubernetes/service-mesh/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🕸️ Service Mesh & Istio Internals</h1>
+      <p class="subtitle">Sidecar Proxies, Envoy Data Plane, mTLS & Traffic Management</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A <strong>service mesh</strong> is an infrastructure layer that handles service-to-service
+          communication. Instead of each microservice implementing retries, mTLS, and observability,
+          a <strong>sidecar proxy</strong> (typically <em>Envoy</em>) is injected alongside every pod.
+          The <strong>control plane</strong> (Istio's <em>istiod</em>) pushes configuration to all
+          sidecars via xDS APIs — routing rules, certificates, rate limits. The result: zero-trust
+          networking, fine-grained traffic control, and deep telemetry without changing application code.
+        </p>
+      </div>
+    </section>
+
+    <!-- Architecture Diagram -->
+    <section class="arch-section">
+      <h2>🏗️ Mesh Architecture</h2>
+      <p class="section-desc">Click each component to learn how the control plane and data plane interact.</p>
+
+      <div class="mesh-diagram">
+        <div class="control-plane-box">
+          <div class="plane-label">Control Plane (istiod)</div>
+          <div class="cp-components">
+            <div class="cp-comp" id="cpPilot" data-info="pilot">
+              <div class="cp-icon">🧭</div>
+              <div class="cp-name">Pilot</div>
+              <div class="cp-desc">xDS config push</div>
+            </div>
+            <div class="cp-comp" id="cpCitadel" data-info="citadel">
+              <div class="cp-icon">🔐</div>
+              <div class="cp-name">Citadel</div>
+              <div class="cp-desc">Certificate authority</div>
+            </div>
+            <div class="cp-comp" id="cpGalley" data-info="galley">
+              <div class="cp-icon">📋</div>
+              <div class="cp-name">Galley</div>
+              <div class="cp-desc">Config validation</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="xds-arrows">
+          <div class="xds-arrow" id="xdsArrow1">⬇ xDS</div>
+          <div class="xds-arrow" id="xdsArrow2">⬇ xDS</div>
+          <div class="xds-arrow" id="xdsArrow3">⬇ xDS</div>
+        </div>
+
+        <div class="data-plane-box">
+          <div class="plane-label">Data Plane (Envoy Sidecars)</div>
+          <div class="dp-services">
+            <div class="dp-service" id="svcA">
+              <div class="svc-box">
+                <div class="svc-name">Service A</div>
+                <div class="svc-app">app container</div>
+              </div>
+              <div class="sidecar-box">
+                <div class="sidecar-label">envoy</div>
+              </div>
+            </div>
+            <div class="dp-service" id="svcB">
+              <div class="svc-box">
+                <div class="svc-name">Service B</div>
+                <div class="svc-app">app container</div>
+              </div>
+              <div class="sidecar-box">
+                <div class="sidecar-label">envoy</div>
+              </div>
+            </div>
+            <div class="dp-service" id="svcC">
+              <div class="svc-box">
+                <div class="svc-name">Service C</div>
+                <div class="svc-app">app container</div>
+              </div>
+              <div class="sidecar-box">
+                <div class="sidecar-label">envoy</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-panel" id="archInfo">
+        <strong>Pilot</strong> translates high-level routing rules (VirtualService, DestinationRule) into Envoy-native xDS configuration and pushes it to every sidecar in the mesh. It watches Kubernetes service endpoints and updates routes in real time.
+      </div>
+    </section>
+
+    <!-- Sidecar Injection -->
+    <section class="sim-section">
+      <h2>💉 Sidecar Injection</h2>
+      <p class="section-desc">Watch how Istio injects an Envoy sidecar into a pod via a mutating admission webhook.</p>
+
+      <div class="injection-viz">
+        <div class="inject-timeline" id="injectTimeline">
+          <div class="inject-step" id="injectStep1">
+            <div class="inject-num">1</div>
+            <div class="inject-content">
+              <strong>kubectl apply</strong>
+              <span>User submits Deployment YAML</span>
+            </div>
+          </div>
+          <div class="inject-step" id="injectStep2">
+            <div class="inject-num">2</div>
+            <div class="inject-content">
+              <strong>API Server receives request</strong>
+              <span>Pod spec hits admission pipeline</span>
+            </div>
+          </div>
+          <div class="inject-step" id="injectStep3">
+            <div class="inject-num">3</div>
+            <div class="inject-content">
+              <strong>Mutating Webhook fires</strong>
+              <span>istio-sidecar-injector patches the pod</span>
+            </div>
+          </div>
+          <div class="inject-step" id="injectStep4">
+            <div class="inject-num">4</div>
+            <div class="inject-content">
+              <strong>Sidecar container added</strong>
+              <span>envoy-proxy + istio-init (iptables rules)</span>
+            </div>
+          </div>
+          <div class="inject-step" id="injectStep5">
+            <div class="inject-num">5</div>
+            <div class="inject-content">
+              <strong>Pod scheduled & running</strong>
+              <span>All traffic now flows through Envoy</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="inject-pod-viz" id="injectPodViz">
+          <div class="inject-pod">
+            <div class="inject-pod-label">Pod: my-app-xyz</div>
+            <div class="inject-containers" id="injectContainers">
+              <div class="inject-container app-cont">
+                <div class="cont-icon">📦</div>
+                <div class="cont-name">my-app</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="runInjectionBtn">▶ Run Injection</button>
+          <button class="action-btn reset-btn" id="resetInjectionBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- mTLS Handshake -->
+    <section class="sim-section">
+      <h2>🔐 mTLS Handshake</h2>
+      <p class="section-desc">Visualize how two sidecars establish a mutual TLS connection. Every service gets an identity certificate (SPIFFE).</p>
+
+      <div class="mtls-viz">
+        <div class="mtls-parties">
+          <div class="mtls-party" id="mtlsClient">
+            <div class="party-label">Service A (client)</div>
+            <div class="party-envoy">Envoy Sidecar</div>
+            <div class="party-cert" id="clientCert">🔒 cert: spiffe://cluster.local/ns/default/sa/svc-a</div>
+          </div>
+          <div class="mtls-channel" id="mtlsChannel">
+            <div class="channel-status" id="channelStatus">No connection</div>
+            <div class="channel-packets" id="channelPackets"></div>
+          </div>
+          <div class="mtls-party" id="mtlsServer">
+            <div class="party-label">Service B (server)</div>
+            <div class="party-envoy">Envoy Sidecar</div>
+            <div class="party-cert" id="serverCert">🔒 cert: spiffe://cluster.local/ns/default/sa/svc-b</div>
+          </div>
+        </div>
+
+        <div class="mtls-steps" id="mtlsSteps">
+          <div class="mtls-step" id="mtlsStep1">
+            <span class="step-arrow">→</span>
+            <span>ClientHello + supported ciphers</span>
+          </div>
+          <div class="mtls-step" id="mtlsStep2">
+            <span class="step-arrow">←</span>
+            <span>ServerHello + server certificate</span>
+          </div>
+          <div class="mtls-step" id="mtlsStep3">
+            <span class="step-arrow">→</span>
+            <span>Client certificate + key exchange</span>
+          </div>
+          <div class="mtls-step" id="mtlsStep4">
+            <span class="step-arrow">↔</span>
+            <span>Encrypted application data flows</span>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn election-btn" id="runMtlsBtn">🔐 Establish mTLS</button>
+          <button class="action-btn reset-btn" id="resetMtlsBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Traffic Management -->
+    <section class="sim-section">
+      <h2>🚦 Traffic Management</h2>
+      <p class="section-desc">Configure canary deployments, traffic splitting, and fault injection with VirtualService rules.</p>
+
+      <div class="traffic-viz">
+        <div class="traffic-config">
+          <h3>VirtualService Rule</h3>
+          <div class="config-group">
+            <label>Traffic to v2: <strong id="v2WeightLabel">20%</strong></label>
+            <input type="range" id="v2WeightSlider" min="0" max="100" value="20" step="5" class="slider">
+          </div>
+          <div class="config-group">
+            <label>Fault Injection</label>
+            <select id="faultSelect" class="config-select">
+              <option value="none">None</option>
+              <option value="delay">500ms delay (50%)</option>
+              <option value="abort">HTTP 503 (10%)</option>
+            </select>
+          </div>
+          <div class="config-group">
+            <label>Retry Policy</label>
+            <select id="retrySelect" class="config-select">
+              <option value="none">None</option>
+              <option value="3">3 retries, 1s timeout</option>
+              <option value="5">5 retries, 2s timeout</option>
+            </select>
+          </div>
+          <button class="action-btn primary-btn" id="sendTrafficBtn">📡 Send 20 Requests</button>
+        </div>
+
+        <div class="traffic-display">
+          <div class="traffic-source">
+            <div class="source-label">Ingress Gateway</div>
+            <div class="source-icon">🌐</div>
+          </div>
+          <div class="traffic-targets">
+            <div class="traffic-target" id="targetV1">
+              <div class="target-header">
+                <span class="target-name">v1 (stable)</span>
+                <span class="target-weight" id="v1Weight">80%</span>
+              </div>
+              <div class="target-pods">
+                <div class="target-pod active">●</div>
+                <div class="target-pod active">●</div>
+                <div class="target-pod active">●</div>
+              </div>
+              <div class="target-stats">
+                <span>Received: <strong id="v1Count">0</strong></span>
+                <span>Errors: <strong id="v1Errors">0</strong></span>
+              </div>
+            </div>
+            <div class="traffic-target" id="targetV2">
+              <div class="target-header">
+                <span class="target-name">v2 (canary)</span>
+                <span class="target-weight" id="v2Weight">20%</span>
+              </div>
+              <div class="target-pods">
+                <div class="target-pod active">●</div>
+              </div>
+              <div class="target-stats">
+                <span>Received: <strong id="v2Count">0</strong></span>
+                <span>Errors: <strong id="v2Errors">0</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="traffic-log" id="trafficLog">
+          <div class="log-header">Request Log</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Observability -->
+    <section class="sim-section">
+      <h2>📊 Mesh Observability</h2>
+      <p class="section-desc">The mesh automatically collects metrics, traces, and access logs from every sidecar.</p>
+
+      <div class="obs-grid">
+        <div class="obs-card">
+          <div class="obs-icon">📈</div>
+          <h3>Metrics (Prometheus)</h3>
+          <p>Request rate, error rate, latency percentiles (RED metrics) — exported by every Envoy sidecar automatically.</p>
+          <div class="obs-metric">
+            <div class="metric-label">istio_requests_total</div>
+            <div class="metric-bar">
+              <div class="metric-fill" id="metricReq" style="width: 0%"></div>
+            </div>
+            <div class="metric-value" id="metricReqVal">0 req/s</div>
+          </div>
+          <div class="obs-metric">
+            <div class="metric-label">istio_request_duration_ms (p99)</div>
+            <div class="metric-bar">
+              <div class="metric-fill latency" id="metricLat" style="width: 0%"></div>
+            </div>
+            <div class="metric-value" id="metricLatVal">0 ms</div>
+          </div>
+        </div>
+        <div class="obs-card">
+          <div class="obs-icon">🔗</div>
+          <h3>Distributed Tracing (Jaeger)</h3>
+          <p>Envoy propagates trace headers (b3, w3c traceparent). Each hop becomes a span — full request waterfall across services.</p>
+          <div class="trace-waterfall" id="traceWaterfall">
+            <div class="trace-span root">
+              <div class="span-label">ingress-gateway</div>
+              <div class="span-bar" style="width: 100%; left: 0%"></div>
+              <div class="span-time">120ms</div>
+            </div>
+            <div class="trace-span child1">
+              <div class="span-label">  svc-a</div>
+              <div class="span-bar" style="width: 70%; left: 5%"></div>
+              <div class="span-time">85ms</div>
+            </div>
+            <div class="trace-span child2">
+              <div class="span-label">    svc-b</div>
+              <div class="span-bar" style="width: 40%; left: 15%"></div>
+              <div class="span-time">48ms</div>
+            </div>
+            <div class="trace-span child3">
+              <div class="span-label">    svc-c</div>
+              <div class="span-bar" style="width: 25%; left: 60%"></div>
+              <div class="span-time">30ms</div>
+            </div>
+          </div>
+        </div>
+        <div class="obs-card">
+          <div class="obs-icon">📝</div>
+          <h3>Access Logs</h3>
+          <p>Every request is logged with source/destination identity, response code, latency, and upstream info — even for failed mTLS.</p>
+          <div class="access-log" id="accessLog">
+            <code>[2024-01-15T10:23:45Z] "GET /api/users HTTP/1.1" 200 - via_upstream - 12ms</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <button class="action-btn primary-btn" id="simulateTrafficBtn">📡 Generate Traffic</button>
+      </div>
+    </section>
+
+    <!-- xDS Deep Dive -->
+    <section class="sim-section">
+      <h2>📡 xDS Protocol Deep Dive</h2>
+      <p class="section-desc">Envoy discovers configuration through xDS: Listener (LDS), Route (RDS), Cluster (CDS), Endpoint (EDS), Secret (SDS).</p>
+
+      <div class="xds-viz">
+        <div class="xds-types">
+          <div class="xds-type active" id="xdsLDS" data-type="lds">
+            <div class="xds-abbr">LDS</div>
+            <div class="xds-full">Listener Discovery</div>
+          </div>
+          <div class="xds-type" id="xdsRDS" data-type="rds">
+            <div class="xds-abbr">RDS</div>
+            <div class="xds-full">Route Discovery</div>
+          </div>
+          <div class="xds-type" id="xdsCDS" data-type="cds">
+            <div class="xds-abbr">CDS</div>
+            <div class="xds-full">Cluster Discovery</div>
+          </div>
+          <div class="xds-type" id="xdsEDS" data-type="eds">
+            <div class="xds-abbr">EDS</div>
+            <div class="xds-full">Endpoint Discovery</div>
+          </div>
+          <div class="xds-type" id="xdsSDS" data-type="sds">
+            <div class="xds-abbr">SDS</div>
+            <div class="xds-full">Secret Discovery</div>
+          </div>
+        </div>
+
+        <div class="xds-detail" id="xdsDetail">
+          <div class="xds-detail-title">Listener Discovery Service (LDS)</div>
+          <div class="xds-detail-desc">
+            Defines what ports Envoy listens on and which filter chains process incoming connections.
+            Each listener binds to an address:port and contains filters (HTTP connection manager, TCP proxy, etc).
+          </div>
+          <div class="xds-config-preview">
+            <pre><code>{`{
+  "name": "0.0.0.0_8080",
+  "address": { "socket_address": { "address": "0.0.0.0", "port_value": 8080 } },
+  "filter_chains": [{
+    "filters": [{
+      "name": "envoy.filters.network.http_connection_manager",
+      "typed_config": {
+        "route_config_name": "inbound|8080||",
+        "http_filters": [
+          { "name": "envoy.filters.http.jwt_authn" },
+          { "name": "envoy.filters.http.router" }
+        ]
+      }
+    }]
+  }]
+}`}</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Circuit Breaking -->
+    <section class="sim-section">
+      <h2>⚡ Circuit Breaking</h2>
+      <p class="section-desc">Envoy implements circuit breaking to prevent cascading failures. Watch what happens when a downstream service becomes unhealthy.</p>
+
+      <div class="circuit-viz">
+        <div class="circuit-config">
+          <h3>DestinationRule Settings</h3>
+          <div class="config-group">
+            <label>Max Connections: <strong id="maxConnLabel">10</strong></label>
+            <input type="range" id="maxConnSlider" min="1" max="50" value="10" step="1" class="slider">
+          </div>
+          <div class="config-group">
+            <label>Max Pending: <strong id="maxPendLabel">5</strong></label>
+            <input type="range" id="maxPendSlider" min="1" max="20" value="5" step="1" class="slider">
+          </div>
+          <div class="config-group">
+            <label>Outlier Detection (consecutive errors): <strong id="outlierLabel">5</strong></label>
+            <input type="range" id="outlierSlider" min="1" max="20" value="5" step="1" class="slider">
+          </div>
+        </div>
+
+        <div class="circuit-display">
+          <div class="circuit-breaker-icon" id="circuitState">
+            <div class="breaker-symbol" id="breakerSymbol">✓</div>
+            <div class="breaker-label" id="breakerLabel">CLOSED (healthy)</div>
+          </div>
+          <div class="circuit-stats">
+            <div class="circuit-stat">
+              <span class="stat-label">Active connections</span>
+              <span class="stat-value" id="activeConns">0</span>
+            </div>
+            <div class="circuit-stat">
+              <span class="stat-label">Pending requests</span>
+              <span class="stat-value" id="pendingReqs">0</span>
+            </div>
+            <div class="circuit-stat">
+              <span class="stat-label">Consecutive errors</span>
+              <span class="stat-value" id="consErrors">0</span>
+            </div>
+            <div class="circuit-stat">
+              <span class="stat-label">Overflow (rejected)</span>
+              <span class="stat-value" id="overflowCount">0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="sendNormalBtn">📡 Normal Traffic</button>
+          <button class="action-btn chaos-btn" id="sendOverloadBtn">💥 Overload</button>
+          <button class="action-btn reset-btn" id="resetCircuitBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { font-size: 1.1rem; color: #888; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; }
+  .overview-card p { color: #ccc; line-height: 1.8; font-size: 1.05rem; }
+  .overview-card strong { color: #60a5fa; }
+  .overview-card em { color: #fbbf24; }
+
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 0.95rem; }
+  .sim-section, .arch-section { margin-bottom: 50px; }
+
+  /* Architecture Diagram */
+  .mesh-diagram { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+  .control-plane-box, .data-plane-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; }
+  .plane-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin-bottom: 16px; }
+  .cp-components { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .cp-comp { background: rgba(96,165,250,0.08); border: 1px solid rgba(96,165,250,0.2); border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .cp-comp:hover, .cp-comp.active { border-color: rgba(96,165,250,0.6); background: rgba(96,165,250,0.15); transform: translateY(-2px); }
+  .cp-icon { font-size: 1.8rem; margin-bottom: 8px; }
+  .cp-name { font-weight: 700; color: #fff; font-size: 0.95rem; }
+  .cp-desc { font-size: 0.8rem; color: #888; margin-top: 4px; }
+
+  .xds-arrows { display: flex; justify-content: space-around; color: #60a5fa; font-size: 0.9rem; font-weight: 600; }
+  .xds-arrow { animation: xdsPulse 2s infinite; }
+  @keyframes xdsPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  .dp-services { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .dp-service { display: flex; flex-direction: column; gap: 6px; }
+  .svc-box { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); border-radius: 10px; padding: 12px; text-align: center; }
+  .svc-name { font-weight: 700; color: #fff; font-size: 0.9rem; }
+  .svc-app { font-size: 0.75rem; color: #888; }
+  .sidecar-box { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 8px; padding: 8px; text-align: center; }
+  .sidecar-label { font-size: 0.8rem; font-weight: 600; color: #fbbf24; }
+
+  .info-panel { background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.2); border-radius: 12px; padding: 16px; color: #ccc; line-height: 1.7; font-size: 0.95rem; }
+  .info-panel strong { color: #60a5fa; }
+
+  /* Injection Viz */
+  .injection-viz { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .inject-timeline { display: flex; flex-direction: column; gap: 8px; }
+  .inject-step { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.4s; opacity: 0.4; }
+  .inject-step.active { opacity: 1; border-color: rgba(96,165,250,0.4); background: rgba(96,165,250,0.06); }
+  .inject-step.done { opacity: 0.7; border-color: rgba(74,222,128,0.3); }
+  .inject-num { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; color: #888; flex-shrink: 0; }
+  .inject-step.active .inject-num { background: rgba(96,165,250,0.3); color: #60a5fa; }
+  .inject-step.done .inject-num { background: rgba(74,222,128,0.3); color: #4ade80; }
+  .inject-content { display: flex; flex-direction: column; gap: 2px; }
+  .inject-content strong { color: #fff; font-size: 0.9rem; }
+  .inject-content span { color: #888; font-size: 0.8rem; }
+
+  .inject-pod-viz { display: flex; align-items: center; justify-content: center; }
+  .inject-pod { background: rgba(255,255,255,0.03); border: 2px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; min-width: 240px; transition: all 0.5s; }
+  .inject-pod.mutated { border-color: rgba(251,191,36,0.4); }
+  .inject-pod.running { border-color: rgba(74,222,128,0.5); background: rgba(74,222,128,0.05); }
+  .inject-pod-label { font-size: 0.85rem; font-weight: 600; color: #aaa; margin-bottom: 12px; }
+  .inject-containers { display: flex; flex-direction: column; gap: 8px; }
+  .inject-container { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+  .inject-container.sidecar-cont { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.3); animation: fadeIn 0.5s; }
+  .inject-container.init-cont { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.3); animation: fadeIn 0.5s; }
+  .cont-icon { font-size: 1.2rem; }
+  .cont-name { font-size: 0.85rem; font-weight: 600; color: #ddd; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* mTLS */
+  .mtls-viz { margin-top: 16px; }
+  .mtls-parties { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 20px; }
+  .mtls-party { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; text-align: center; }
+  .party-label { font-weight: 700; color: #fff; font-size: 0.95rem; margin-bottom: 4px; }
+  .party-envoy { font-size: 0.8rem; color: #fbbf24; margin-bottom: 8px; }
+  .party-cert { font-size: 0.7rem; color: #888; word-break: break-all; }
+  .mtls-channel { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 80px; }
+  .channel-status { font-size: 0.8rem; font-weight: 600; color: #888; }
+  .channel-status.connected { color: #4ade80; }
+  .mtls-steps { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+  .mtls-step { display: flex; gap: 12px; padding: 8px 12px; border-radius: 8px; opacity: 0.3; transition: all 0.4s; }
+  .mtls-step.active { opacity: 1; background: rgba(96,165,250,0.08); }
+  .mtls-step.done { opacity: 0.7; }
+  .step-arrow { font-weight: 700; color: #60a5fa; min-width: 24px; }
+  .mtls-step span:last-child { color: #ccc; font-size: 0.9rem; }
+
+  /* Traffic Management */
+  .traffic-viz { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+  .traffic-config { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .traffic-config h3 { font-size: 1rem; color: #fff; margin-bottom: 16px; }
+  .traffic-display { display: flex; flex-direction: column; gap: 16px; }
+  .traffic-source { text-align: center; padding: 12px; }
+  .source-label { font-size: 0.85rem; color: #aaa; margin-bottom: 4px; }
+  .source-icon { font-size: 2rem; }
+  .traffic-targets { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .traffic-target { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; transition: all 0.3s; }
+  .traffic-target.receiving { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.05); }
+  .target-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .target-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+  .target-weight { color: #60a5fa; font-weight: 700; }
+  .target-pods { display: flex; gap: 6px; margin-bottom: 8px; }
+  .target-pod { font-size: 1.2rem; color: #4ade80; }
+  .target-stats { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; }
+  .target-stats strong { color: #fff; }
+  .traffic-log { grid-column: 1 / -1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; max-height: 200px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.75rem; }
+  .log-header { color: #888; font-weight: 600; margin-bottom: 8px; }
+  .log-entry { padding: 2px 0; color: #aaa; }
+  .log-entry.error { color: #f87171; }
+  .log-entry.success { color: #4ade80; }
+
+  /* Observability */
+  .obs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .obs-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .obs-icon { font-size: 1.5rem; margin-bottom: 8px; }
+  .obs-card h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .obs-card > p { font-size: 0.85rem; color: #888; line-height: 1.6; margin-bottom: 12px; }
+  .obs-metric { margin-bottom: 10px; }
+  .metric-label { font-size: 0.75rem; color: #aaa; font-family: 'SF Mono', monospace; margin-bottom: 4px; }
+  .metric-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; }
+  .metric-fill { height: 100%; background: linear-gradient(90deg, #60a5fa, #3b82f6); border-radius: 4px; transition: width 0.5s; }
+  .metric-fill.latency { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  .metric-value { font-size: 0.8rem; color: #fff; margin-top: 4px; font-weight: 600; }
+
+  .trace-waterfall { display: flex; flex-direction: column; gap: 6px; }
+  .trace-span { display: grid; grid-template-columns: 120px 1fr 50px; align-items: center; gap: 8px; }
+  .span-label { font-size: 0.75rem; color: #aaa; font-family: 'SF Mono', monospace; white-space: pre; }
+  .span-bar { height: 12px; border-radius: 3px; position: relative; }
+  .trace-span.root .span-bar { background: #60a5fa; }
+  .trace-span.child1 .span-bar { background: #4ade80; }
+  .trace-span.child2 .span-bar { background: #fbbf24; }
+  .trace-span.child3 .span-bar { background: #f472b6; }
+  .span-time { font-size: 0.75rem; color: #888; }
+  .access-log { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px; overflow-x: auto; }
+  .access-log code { font-size: 0.7rem; color: #4ade80; white-space: pre; }
+
+  /* xDS */
+  .xds-viz { margin-top: 16px; }
+  .xds-types { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .xds-type { padding: 12px 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.3s; min-width: 90px; }
+  .xds-type:hover, .xds-type.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.1); }
+  .xds-abbr { font-weight: 700; color: #fff; font-size: 1.1rem; }
+  .xds-full { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .xds-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .xds-detail-title { font-weight: 700; color: #60a5fa; font-size: 1.05rem; margin-bottom: 8px; }
+  .xds-detail-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; margin-bottom: 16px; }
+  .xds-config-preview { background: rgba(0,0,0,0.4); border-radius: 10px; padding: 16px; overflow-x: auto; }
+  .xds-config-preview pre { margin: 0; }
+  .xds-config-preview code { font-size: 0.8rem; color: #4ade80; font-family: 'SF Mono', 'Fira Code', monospace; line-height: 1.5; }
+
+  /* Circuit Breaking */
+  .circuit-viz { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+  .circuit-config { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .circuit-config h3 { font-size: 1rem; color: #fff; margin-bottom: 16px; }
+  .circuit-display { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .circuit-breaker-icon { width: 120px; height: 120px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.5s; border: 3px solid rgba(74,222,128,0.5); background: rgba(74,222,128,0.08); }
+  .circuit-breaker-icon.open { border-color: rgba(239,68,68,0.7); background: rgba(239,68,68,0.1); }
+  .circuit-breaker-icon.half-open { border-color: rgba(251,191,36,0.6); background: rgba(251,191,36,0.08); }
+  .breaker-symbol { font-size: 2rem; }
+  .breaker-label { font-size: 0.7rem; font-weight: 600; color: #aaa; margin-top: 4px; text-align: center; }
+  .circuit-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+  .circuit-stat { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px; text-align: center; }
+  .stat-label { display: block; font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+  .stat-value { font-size: 1.2rem; font-weight: 700; color: #fff; }
+
+  /* Action Bars */
+  .action-bar { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59,130,246,0.4); }
+  .election-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; }
+  .election-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .chaos-btn { background: linear-gradient(135deg, #f472b6, #ef4444); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  .config-group { margin-bottom: 16px; }
+  .config-group label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .config-group label strong { color: #60a5fa; }
+  .slider { width: 100%; height: 6px; -webkit-appearance: none; background: rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; }
+  .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #60a5fa; cursor: pointer; }
+  .config-select { width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #ddd; font-size: 0.85rem; }
+
+  @media (max-width: 768px) {
+    .injection-viz, .traffic-viz, .circuit-viz { grid-template-columns: 1fr; }
+    .mtls-parties { grid-template-columns: 1fr; }
+    .cp-components, .dp-services { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  // Architecture Info
+  const archInfoData = {
+    pilot: `<strong>Pilot</strong> translates high-level routing rules (VirtualService, DestinationRule) into Envoy-native xDS configuration and pushes it to every sidecar in the mesh. It watches Kubernetes service endpoints and updates routes in real time.`,
+    citadel: `<strong>Citadel</strong> acts as the certificate authority for the mesh. It issues SPIFFE-based identity certificates to every workload, handles automatic rotation, and enables mutual TLS between services without application changes.`,
+    galley: `<strong>Galley</strong> validates and distributes Istio configuration. It acts as an abstraction layer between the user-facing config (YAML CRDs) and what Pilot consumes, catching misconfigurations before they reach Envoy.`
+  };
+  document.querySelectorAll('.cp-comp').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.cp-comp').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      const info = el.dataset.info;
+      document.getElementById('archInfo').innerHTML = archInfoData[info] || '';
+    });
+  });
+
+  // Sidecar Injection
+  let injectionRunning = false;
+  document.getElementById('runInjectionBtn').addEventListener('click', async () => {
+    if (injectionRunning) return;
+    injectionRunning = true;
+    const steps = document.querySelectorAll('.inject-step');
+    const pod = document.querySelector('.inject-pod');
+    const containers = document.getElementById('injectContainers');
+
+    steps.forEach(s => { s.classList.remove('active', 'done'); });
+    containers.innerHTML = `<div class="inject-container app-cont"><div class="cont-icon">📦</div><div class="cont-name">my-app</div></div>`;
+    pod.className = 'inject-pod';
+
+    for (let i = 0; i < steps.length; i++) {
+      steps[i].classList.add('active');
+      await new Promise(r => setTimeout(r, 800));
+
+      if (i === 2) {
+        pod.classList.add('mutated');
+        containers.innerHTML += `<div class="inject-container init-cont"><div class="cont-icon">🔧</div><div class="cont-name">istio-init</div></div>`;
+        await new Promise(r => setTimeout(r, 400));
+      }
+      if (i === 3) {
+        containers.innerHTML += `<div class="inject-container sidecar-cont"><div class="cont-icon">🛡️</div><div class="cont-name">istio-proxy (envoy)</div></div>`;
+        await new Promise(r => setTimeout(r, 400));
+      }
+      if (i === 4) {
+        pod.classList.remove('mutated');
+        pod.classList.add('running');
+      }
+
+      steps[i].classList.remove('active');
+      steps[i].classList.add('done');
+    }
+    injectionRunning = false;
+  });
+  document.getElementById('resetInjectionBtn').addEventListener('click', () => {
+    document.querySelectorAll('.inject-step').forEach(s => s.classList.remove('active','done'));
+    document.querySelector('.inject-pod').className = 'inject-pod';
+    document.getElementById('injectContainers').innerHTML = `<div class="inject-container app-cont"><div class="cont-icon">📦</div><div class="cont-name">my-app</div></div>`;
+  });
+
+  // mTLS Handshake
+  let mtlsRunning = false;
+  document.getElementById('runMtlsBtn').addEventListener('click', async () => {
+    if (mtlsRunning) return;
+    mtlsRunning = true;
+    const steps = document.querySelectorAll('.mtls-step');
+    const status = document.getElementById('channelStatus');
+    steps.forEach(s => s.classList.remove('active','done'));
+    status.textContent = 'Negotiating...';
+    status.classList.remove('connected');
+
+    for (let i = 0; i < steps.length; i++) {
+      steps[i].classList.add('active');
+      await new Promise(r => setTimeout(r, 700));
+      steps[i].classList.remove('active');
+      steps[i].classList.add('done');
+    }
+    status.textContent = '🔒 mTLS Established';
+    status.classList.add('connected');
+    mtlsRunning = false;
+  });
+  document.getElementById('resetMtlsBtn').addEventListener('click', () => {
+    document.querySelectorAll('.mtls-step').forEach(s => s.classList.remove('active','done'));
+    const status = document.getElementById('channelStatus');
+    status.textContent = 'No connection';
+    status.classList.remove('connected');
+  });
+
+  // Traffic Management
+  const v2Slider = document.getElementById('v2WeightSlider');
+  v2Slider.addEventListener('input', () => {
+    const v = parseInt(v2Slider.value);
+    document.getElementById('v2WeightLabel').textContent = v + '%';
+    document.getElementById('v1Weight').textContent = (100-v) + '%';
+    document.getElementById('v2Weight').textContent = v + '%';
+  });
+
+  document.getElementById('sendTrafficBtn').addEventListener('click', async () => {
+    const v2pct = parseInt(v2Slider.value);
+    const fault = document.getElementById('faultSelect').value;
+    const retries = document.getElementById('retrySelect').value;
+    const log = document.getElementById('trafficLog');
+    let v1c = 0, v2c = 0, v1e = 0, v2e = 0;
+
+    for (let i = 0; i < 20; i++) {
+      const toV2 = Math.random() * 100 < v2pct;
+      const target = toV2 ? 'v2' : 'v1';
+      let isError = false;
+
+      if (fault === 'abort' && Math.random() < 0.1) isError = true;
+      const delayed = fault === 'delay' && Math.random() < 0.5;
+
+      if (toV2) { v2c++; if (isError) v2e++; } else { v1c++; if (isError) v1e++; }
+
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${isError ? 'error' : 'success'}`;
+      entry.textContent = `[${new Date().toISOString().slice(11,23)}] → ${target} ${isError ? '503 Service Unavailable' : '200 OK'}${delayed ? ' (+500ms delay)' : ''}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+
+      document.getElementById('v1Count').textContent = v1c;
+      document.getElementById('v2Count').textContent = v2c;
+      document.getElementById('v1Errors').textContent = v1e;
+      document.getElementById('v2Errors').textContent = v2e;
+
+      await new Promise(r => setTimeout(r, 150));
+    }
+  });
+
+  // Observability Simulation
+  document.getElementById('simulateTrafficBtn').addEventListener('click', async () => {
+    for (let i = 0; i <= 20; i++) {
+      const reqRate = Math.min(100, i * 5 + Math.random() * 10);
+      const latency = 20 + Math.random() * 80;
+      document.getElementById('metricReq').style.width = reqRate + '%';
+      document.getElementById('metricReqVal').textContent = Math.round(reqRate * 5) + ' req/s';
+      document.getElementById('metricLat').style.width = latency + '%';
+      document.getElementById('metricLatVal').textContent = Math.round(latency * 3) + ' ms';
+      await new Promise(r => setTimeout(r, 200));
+    }
+  });
+
+  // xDS tabs
+  const xdsData = {
+    lds: { title: 'Listener Discovery Service (LDS)', desc: 'Defines what ports Envoy listens on and which filter chains process incoming connections. Each listener binds to an address:port and contains filters (HTTP connection manager, TCP proxy, etc).', config: `{\n  "name": "0.0.0.0_8080",\n  "address": { "socket_address": { "address": "0.0.0.0", "port_value": 8080 } },\n  "filter_chains": [{\n    "filters": [{ "name": "envoy.filters.network.http_connection_manager" }]\n  }]\n}` },
+    rds: { title: 'Route Discovery Service (RDS)', desc: 'Maps incoming requests to upstream clusters based on path, headers, and other match criteria. VirtualService configs translate to RDS routes.', config: `{\n  "name": "inbound|8080||",\n  "virtual_hosts": [{\n    "name": "my-svc.default.svc.cluster.local:8080",\n    "routes": [{\n      "match": { "prefix": "/" },\n      "route": { "cluster": "outbound|8080||svc-b.default.svc.cluster.local" }\n    }]\n  }]\n}` },
+    cds: { title: 'Cluster Discovery Service (CDS)', desc: 'Defines upstream clusters (service backends) with load balancing policy, circuit breaker settings, and connection pool limits.', config: `{\n  "name": "outbound|8080||svc-b.default.svc.cluster.local",\n  "type": "EDS",\n  "lb_policy": "ROUND_ROBIN",\n  "circuit_breakers": {\n    "thresholds": [{ "max_connections": 1024, "max_pending_requests": 1024 }]\n  }\n}` },
+    eds: { title: 'Endpoint Discovery Service (EDS)', desc: 'Provides the actual IP:port endpoints for each cluster. Updates in real time as pods scale up/down. Supports locality-aware load balancing.', config: `{\n  "cluster_name": "outbound|8080||svc-b.default.svc.cluster.local",\n  "endpoints": [{\n    "locality": { "region": "us-west-2", "zone": "us-west-2a" },\n    "lb_endpoints": [\n      { "endpoint": { "address": { "socket_address": { "address": "10.244.1.15", "port_value": 8080 } } } },\n      { "endpoint": { "address": { "socket_address": { "address": "10.244.2.22", "port_value": 8080 } } } }\n    ]\n  }]\n}` },
+    sds: { title: 'Secret Discovery Service (SDS)', desc: 'Delivers TLS certificates and CA bundles to Envoy. Citadel rotates certificates automatically — Envoy picks up new certs via SDS without restart.', config: `{\n  "name": "default",\n  "tls_certificate": {\n    "certificate_chain": { "inline_string": "-----BEGIN CERTIFICATE-----\\n..." },\n    "private_key": { "inline_string": "-----BEGIN RSA PRIVATE KEY-----\\n..." }\n  }\n}` }
+  };
+  document.querySelectorAll('.xds-type').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.xds-type').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      const d = xdsData[el.dataset.type];
+      document.getElementById('xdsDetail').innerHTML = `<div class="xds-detail-title">${d.title}</div><div class="xds-detail-desc">${d.desc}</div><div class="xds-config-preview"><pre><code>${d.config}</code></pre></div>`;
+    });
+  });
+
+  // Circuit Breaking
+  const maxConnSlider = document.getElementById('maxConnSlider');
+  const maxPendSlider = document.getElementById('maxPendSlider');
+  const outlierSlider = document.getElementById('outlierSlider');
+  maxConnSlider.addEventListener('input', () => document.getElementById('maxConnLabel').textContent = maxConnSlider.value);
+  maxPendSlider.addEventListener('input', () => document.getElementById('maxPendLabel').textContent = maxPendSlider.value);
+  outlierSlider.addEventListener('input', () => document.getElementById('outlierLabel').textContent = outlierSlider.value);
+
+  let circuitRunning = false;
+  function updateCircuitUI(conns, pending, errors, overflow, state) {
+    document.getElementById('activeConns').textContent = conns;
+    document.getElementById('pendingReqs').textContent = pending;
+    document.getElementById('consErrors').textContent = errors;
+    document.getElementById('overflowCount').textContent = overflow;
+    const icon = document.getElementById('circuitState');
+    const sym = document.getElementById('breakerSymbol');
+    const lbl = document.getElementById('breakerLabel');
+    icon.className = 'circuit-breaker-icon' + (state === 'open' ? ' open' : state === 'half-open' ? ' half-open' : '');
+    sym.textContent = state === 'open' ? '✕' : state === 'half-open' ? '?' : '✓';
+    lbl.textContent = state === 'open' ? 'OPEN (tripped)' : state === 'half-open' ? 'HALF-OPEN (probing)' : 'CLOSED (healthy)';
+  }
+
+  document.getElementById('sendNormalBtn').addEventListener('click', async () => {
+    if (circuitRunning) return;
+    circuitRunning = true;
+    for (let i = 0; i < 10; i++) {
+      const c = Math.min(parseInt(maxConnSlider.value), i + 1);
+      updateCircuitUI(c, 0, 0, 0, 'closed');
+      await new Promise(r => setTimeout(r, 300));
+    }
+    updateCircuitUI(0, 0, 0, 0, 'closed');
+    circuitRunning = false;
+  });
+
+  document.getElementById('sendOverloadBtn').addEventListener('click', async () => {
+    if (circuitRunning) return;
+    circuitRunning = true;
+    const maxC = parseInt(maxConnSlider.value);
+    const maxP = parseInt(maxPendSlider.value);
+    const outlierThresh = parseInt(outlierSlider.value);
+    let conns = 0, pending = 0, errors = 0, overflow = 0;
+
+    for (let i = 0; i < 30; i++) {
+      conns = Math.min(maxC + 5, conns + 3);
+      if (conns > maxC) { pending = Math.min(maxP + 3, pending + 2); }
+      if (pending > maxP) { overflow += 2; errors++; }
+      const state = errors >= outlierThresh ? 'open' : 'closed';
+      updateCircuitUI(Math.min(conns, maxC + 5), Math.min(pending, maxP + 3), errors, overflow, state);
+      if (state === 'open') {
+        await new Promise(r => setTimeout(r, 500));
+        updateCircuitUI(0, 0, errors, overflow, 'half-open');
+        await new Promise(r => setTimeout(r, 800));
+        break;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+    circuitRunning = false;
+  });
+
+  document.getElementById('resetCircuitBtn').addEventListener('click', () => {
+    updateCircuitUI(0, 0, 0, 0, 'closed');
+  });
+</script>

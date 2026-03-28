@@ -1,0 +1,672 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="HTTP/2 Internals — Interactive Visualization"
+  description="Explore HTTP/2 multiplexing, binary framing, HPACK compression, server push, and flow control with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Networking", href: "/networking/" },
+    { label: "HTTP/2", href: "/networking/http2/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ HTTP/2 Internals</h1>
+      <p class="subtitle">Binary framing, multiplexing, header compression, and flow control</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          HTTP/2 replaces HTTP/1.1's text protocol with a <strong>binary framing layer</strong> that enables
+          full <strong>request/response multiplexing</strong> over a single TCP connection. It introduces
+          <strong>HPACK header compression</strong> to reduce overhead, <strong>server push</strong> for proactive
+          resource delivery, <strong>stream prioritization</strong>, and per-stream <strong>flow control</strong>.
+          These features eliminate head-of-line blocking at the HTTP layer (though TCP HOL blocking remains).
+        </p>
+      </div>
+    </section>
+
+    <!-- HTTP/1.1 vs HTTP/2 Comparison -->
+    <section class="sim-section">
+      <h2>🔄 HTTP/1.1 vs HTTP/2 Loading</h2>
+      <p class="section-desc">Compare how resources load: HTTP/1.1 uses sequential requests (or limited parallel connections), while HTTP/2 multiplexes everything on one connection.</p>
+      <div class="sim-controls">
+        <button id="startRace" class="action-btn primary-btn">🏁 Start Race</button>
+        <button id="resetRace" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="race-viz">
+        <div class="race-lane">
+          <div class="race-label">HTTP/1.1 (6 connections max)</div>
+          <div class="race-track" id="h1Track">
+            <div class="race-bar-group" id="h1Bars"></div>
+          </div>
+          <div class="race-time" id="h1Time">—</div>
+        </div>
+        <div class="race-lane">
+          <div class="race-label">HTTP/2 (1 connection, multiplexed)</div>
+          <div class="race-track" id="h2Track">
+            <div class="race-bar-group" id="h2Bars"></div>
+          </div>
+          <div class="race-time" id="h2Time">—</div>
+        </div>
+      </div>
+      <div class="race-resources">
+        Resources: index.html, style.css, app.js, logo.png, font.woff2, api.json, analytics.js, icons.svg, manifest.json, sw.js
+      </div>
+    </section>
+
+    <!-- Binary Framing -->
+    <section class="sim-section">
+      <h2>📦 Binary Framing Layer</h2>
+      <p class="section-desc">Every HTTP/2 message is split into frames. Each frame has a type, stream ID, flags, and payload. Click to construct a frame.</p>
+      <div class="sim-controls">
+        <button id="frameHeaders" class="action-btn primary-btn">📋 HEADERS Frame</button>
+        <button id="frameData" class="action-btn primary-btn-secondary">📄 DATA Frame</button>
+        <button id="framePing" class="action-btn primary-btn-secondary">🏓 PING Frame</button>
+        <button id="frameSettings" class="action-btn primary-btn-secondary">⚙️ SETTINGS Frame</button>
+        <button id="frameRst" class="action-btn warn-btn">🚫 RST_STREAM</button>
+        <button id="resetFrame" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="frame-viz">
+        <div class="frame-box" id="frameBox">
+          <div class="frame-row">
+            <div class="frame-field" id="fLength"><span class="ff-label">Length (24)</span><span class="ff-value">—</span></div>
+            <div class="frame-field" id="fType"><span class="ff-label">Type (8)</span><span class="ff-value">—</span></div>
+            <div class="frame-field" id="fFlags"><span class="ff-label">Flags (8)</span><span class="ff-value">—</span></div>
+          </div>
+          <div class="frame-row">
+            <div class="frame-field wide" id="fStreamId"><span class="ff-label">R + Stream ID (31)</span><span class="ff-value">—</span></div>
+          </div>
+          <div class="frame-row">
+            <div class="frame-field wide payload" id="fPayload"><span class="ff-label">Payload</span><span class="ff-value">Click a frame type above</span></div>
+          </div>
+        </div>
+        <div class="frame-hex" id="frameHex"></div>
+      </div>
+    </section>
+
+    <!-- Stream Multiplexing -->
+    <section class="sim-section">
+      <h2>🔀 Stream Multiplexing</h2>
+      <p class="section-desc">HTTP/2 interleaves frames from different streams on the same connection. Watch how multiple requests share one TCP pipe without blocking each other.</p>
+      <div class="sim-controls">
+        <button id="muxAdd" class="action-btn primary-btn">➕ Add Request</button>
+        <button id="muxStart" class="action-btn primary-btn-secondary">▶️ Send All</button>
+        <button id="muxReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="mux-viz">
+        <div class="mux-streams" id="muxStreams"></div>
+        <div class="mux-pipe-label">Single TCP Connection:</div>
+        <div class="mux-pipe" id="muxPipe"></div>
+      </div>
+      <div class="mux-log" id="muxLog">Add requests, then click "Send All" to see frames interleaved on the wire.</div>
+    </section>
+
+    <!-- HPACK Header Compression -->
+    <section class="sim-section">
+      <h2>🗜️ HPACK Header Compression</h2>
+      <p class="section-desc">HPACK uses a static table (61 common headers), a dynamic table (connection-specific), and Huffman encoding. See the compression in action.</p>
+      <div class="sim-controls">
+        <button id="hpReq1" class="action-btn primary-btn">📨 First Request</button>
+        <button id="hpReq2" class="action-btn primary-btn-secondary">📨 Second Request</button>
+        <button id="hpReq3" class="action-btn primary-btn-secondary">📨 Third Request</button>
+        <button id="hpReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hpack-viz">
+        <div class="hpack-col">
+          <div class="hpack-header">Raw Headers</div>
+          <div class="hpack-content" id="hpRaw"></div>
+          <div class="hpack-size">Size: <strong id="hpRawSize">0</strong> bytes</div>
+        </div>
+        <div class="hpack-arrow">→ HPACK →</div>
+        <div class="hpack-col">
+          <div class="hpack-header">Encoded</div>
+          <div class="hpack-content" id="hpEncoded"></div>
+          <div class="hpack-size">Size: <strong id="hpEncSize">0</strong> bytes</div>
+        </div>
+        <div class="hpack-col">
+          <div class="hpack-header">Dynamic Table</div>
+          <div class="hpack-content hpack-table" id="hpDynTable"></div>
+          <div class="hpack-size">Entries: <strong id="hpDynCount">0</strong></div>
+        </div>
+      </div>
+      <div class="hpack-savings" id="hpSavings"></div>
+    </section>
+
+    <!-- Server Push -->
+    <section class="sim-section">
+      <h2>📡 Server Push</h2>
+      <p class="section-desc">The server can proactively push resources before the client requests them. Watch the PUSH_PROMISE → DATA flow.</p>
+      <div class="sim-controls">
+        <button id="pushStart" class="action-btn primary-btn">🌐 Request Page</button>
+        <button id="pushReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="push-viz">
+        <div class="push-col">
+          <div class="push-node" id="push-client">
+            <div class="hs-icon">💻</div>
+            <div class="hs-label">Client</div>
+          </div>
+          <div class="push-cache" id="pushCache">
+            <div class="pc-title">Push Cache</div>
+            <div class="pc-items" id="pushCacheItems"></div>
+          </div>
+        </div>
+        <div class="push-messages" id="pushMessages">
+          <div class="hs-timeline-line"></div>
+        </div>
+        <div class="push-col">
+          <div class="push-node" id="push-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Server</div>
+          </div>
+        </div>
+      </div>
+      <div class="push-log" id="pushLog">Click "Request Page" to see server push in action.</div>
+    </section>
+
+    <!-- Flow Control -->
+    <section class="sim-section">
+      <h2>🚰 Stream-Level Flow Control</h2>
+      <p class="section-desc">HTTP/2 has per-stream and connection-level flow control using WINDOW_UPDATE frames. This prevents fast streams from starving slow ones.</p>
+      <div class="sim-controls">
+        <button id="fcSend1" class="action-btn primary-btn">📤 Send on Stream 1</button>
+        <button id="fcSend3" class="action-btn primary-btn-secondary">📤 Send on Stream 3</button>
+        <button id="fcWindow" class="action-btn primary-btn-secondary">📬 WINDOW_UPDATE</button>
+        <button id="fcReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="fc-viz">
+        <div class="fc-stream">
+          <div class="fc-label">Stream 1 Window</div>
+          <div class="fc-bar-container">
+            <div class="fc-bar" id="fcBar1" style="width:100%"></div>
+          </div>
+          <div class="fc-value" id="fcVal1">65535 / 65535</div>
+        </div>
+        <div class="fc-stream">
+          <div class="fc-label">Stream 3 Window</div>
+          <div class="fc-bar-container">
+            <div class="fc-bar" id="fcBar3" style="width:100%"></div>
+          </div>
+          <div class="fc-value" id="fcVal3">65535 / 65535</div>
+        </div>
+        <div class="fc-stream">
+          <div class="fc-label">Connection Window</div>
+          <div class="fc-bar-container">
+            <div class="fc-bar fc-conn-bar" id="fcBarConn" style="width:100%"></div>
+          </div>
+          <div class="fc-value" id="fcValConn">65535 / 65535</div>
+        </div>
+      </div>
+      <div class="fc-log" id="fcLog">Both streams start with 65535 bytes of flow control window.</div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔢 Stream IDs</h4>
+          <p>Client-initiated streams use odd IDs (1, 3, 5...), server-initiated (push) use even IDs (2, 4, 6...). Stream 0 is the control stream for connection-level frames.</p>
+        </div>
+        <div class="concept">
+          <h4>🎯 Stream Priority</h4>
+          <p>Streams can declare dependencies and weights (1-256). The server uses this tree to allocate bandwidth. Chrome removed priority trees in favor of extensible priorities (RFC 9218).</p>
+        </div>
+        <div class="concept">
+          <h4>🔌 Connection Preface</h4>
+          <p>Clients send a magic 24-byte string "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" followed by a SETTINGS frame. This ensures HTTP/2-unaware servers reject gracefully.</p>
+        </div>
+        <div class="concept">
+          <h4>⚠️ TCP HOL Blocking</h4>
+          <p>While HTTP/2 eliminates HTTP-level HOL blocking, a single lost TCP packet stalls ALL streams. This is the primary motivation for QUIC (HTTP/3).</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #8b5cf6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #8b5cf6; }
+    .primary-btn:hover { background: #7c3aed; }
+    .primary-btn-secondary { background: #6366f1; }
+    .warn-btn { background: #ef4444; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    /* Race */
+    .race-viz { display: flex; flex-direction: column; gap: 1rem; }
+    .race-lane { display: flex; align-items: center; gap: 0.75rem; }
+    .race-label { min-width: 220px; color: #94a3b8; font-size: 0.8rem; }
+    .race-track { flex: 1; background: #0c1322; border-radius: 6px; height: 36px; position: relative; overflow: hidden; }
+    .race-bar-group { height: 100%; display: flex; }
+    .race-bar { height: 100%; transition: width 0.1s linear; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: white; font-weight: 600; white-space: nowrap; overflow: hidden; }
+    .race-time { min-width: 60px; color: #f1f5f9; font-family: monospace; font-weight: 700; font-size: 0.9rem; }
+    .race-resources { color: #64748b; font-size: 0.75rem; margin-top: 0.5rem; }
+
+    /* Frame */
+    .frame-viz { margin-top: 1rem; }
+    .frame-box { background: #0c1322; border: 2px solid #334155; border-radius: 10px; overflow: hidden; }
+    .frame-row { display: flex; }
+    .frame-field { flex: 1; border: 1px solid #1e293b; padding: 0.75rem; text-align: center; transition: all 0.3s; }
+    .frame-field.wide { flex: 3; }
+    .frame-field.payload { min-height: 60px; }
+    .frame-field.active { background: #1e1b4b; border-color: #8b5cf6; }
+    .ff-label { display: block; color: #64748b; font-size: 0.7rem; }
+    .ff-value { display: block; color: #f1f5f9; font-family: monospace; font-size: 0.85rem; margin-top: 0.2rem; }
+    .frame-hex { margin-top: 0.5rem; background: #1e293b; border-radius: 6px; padding: 0.5rem; font-family: monospace; color: #a78bfa; font-size: 0.8rem; word-break: break-all; min-height: 1.5rem; }
+
+    /* Multiplexing */
+    .mux-viz { margin-top: 1rem; }
+    .mux-streams { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .mux-stream { background: #1e293b; border-radius: 8px; padding: 0.5rem 0.75rem; display: flex; align-items: center; gap: 0.4rem; }
+    .mux-stream .ms-color { width: 12px; height: 12px; border-radius: 3px; }
+    .mux-stream .ms-label { color: #f1f5f9; font-size: 0.8rem; font-family: monospace; }
+    .mux-pipe-label { color: #64748b; font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .mux-pipe { background: #0c1322; border-radius: 8px; padding: 0.5rem; min-height: 50px; display: flex; flex-wrap: wrap; gap: 3px; }
+    .mux-frame { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.2rem 0.4rem; border-radius: 4px; font-family: monospace; font-size: 0.7rem; color: white; animation: msgFade 0.3s ease-out; }
+    @keyframes msgFade { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+    .mux-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    /* HPACK */
+    .hpack-viz { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .hpack-col { flex: 1; min-width: 180px; }
+    .hpack-header { color: #94a3b8; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .hpack-content { background: #0c1322; border-radius: 8px; padding: 0.5rem; min-height: 120px; font-family: monospace; font-size: 0.75rem; color: #cbd5e1; white-space: pre-wrap; word-break: break-all; }
+    .hpack-table { color: #a78bfa; }
+    .hpack-size { color: #64748b; font-size: 0.8rem; margin-top: 0.3rem; }
+    .hpack-arrow { color: #8b5cf6; font-weight: 700; margin-top: 4rem; font-size: 0.9rem; }
+    .hpack-savings { margin-top: 0.5rem; color: #22c55e; font-size: 0.85rem; font-weight: 600; min-height: 1.5rem; }
+    .hp-entry { padding: 0.15rem 0; border-bottom: 1px solid #1e293b; }
+    .hp-static { color: #22c55e; }
+    .hp-dynamic { color: #fbbf24; }
+    .hp-literal { color: #f87171; }
+
+    /* Server Push */
+    .push-viz { display: flex; align-items: flex-start; justify-content: center; gap: 1rem; margin: 1rem 0; min-height: 280px; }
+    .push-col { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; min-width: 120px; }
+    .push-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; }
+    .push-node.active { border-color: #8b5cf6; background: #1e1b4b; box-shadow: 0 0 16px rgba(139,92,246,0.3); }
+    .push-messages { flex: 1; position: relative; min-height: 260px; min-width: 220px; }
+    .push-cache { background: #1e293b; border-radius: 8px; padding: 0.5rem; min-width: 140px; }
+    .pc-title { color: #64748b; font-size: 0.7rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .pc-item { color: #a78bfa; font-family: monospace; font-size: 0.75rem; padding: 0.1rem 0; animation: msgFade 0.3s ease-out; }
+    .push-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+    .hs-msg { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 0.3rem; animation: msgFade 0.5s ease-out; }
+    .hs-msg.right { flex-direction: row; }
+    .hs-msg.left { flex-direction: row-reverse; }
+    .hs-msg .msg-arrow { color: #8b5cf6; font-size: 1.2rem; flex-shrink: 0; }
+    .hs-msg .msg-text { background: #1e1b4b; color: #c4b5fd; font-family: monospace; font-size: 0.7rem; padding: 0.25rem 0.5rem; border-radius: 6px; white-space: nowrap; }
+    .hs-timeline-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+    .hs-icon { font-size: 1.5rem; }
+    .hs-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+
+    /* Flow Control */
+    .fc-viz { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+    .fc-stream { display: flex; align-items: center; gap: 0.75rem; }
+    .fc-label { min-width: 140px; color: #94a3b8; font-size: 0.8rem; }
+    .fc-bar-container { flex: 1; background: #0c1322; border-radius: 6px; height: 24px; overflow: hidden; }
+    .fc-bar { height: 100%; background: #8b5cf6; border-radius: 6px; transition: width 0.3s; }
+    .fc-conn-bar { background: #22c55e; }
+    .fc-bar.low { background: #ef4444; }
+    .fc-value { min-width: 120px; color: #f1f5f9; font-family: monospace; font-size: 0.8rem; }
+    .fc-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .hpack-viz { flex-direction: column; } .race-lane { flex-direction: column; align-items: flex-start; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function addMsg(container, dir, text, topPx) {
+      const div = document.createElement('div');
+      div.className = 'hs-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="msg-arrow">${dir === 'right' ? '→→→' : '←←←'}</span><span class="msg-text">${text}</span>`;
+      container.appendChild(div);
+    }
+
+    // === HTTP/1.1 vs HTTP/2 Race ===
+    const resources = ['index.html','style.css','app.js','logo.png','font.woff2','api.json','analytics.js','icons.svg','manifest.json','sw.js'];
+    const colors = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899','#f43f5e','#14b8a6'];
+
+    $('startRace').onclick = () => {
+      const h1 = $('h1Bars'); const h2 = $('h2Bars');
+      h1.innerHTML = ''; h2.innerHTML = '';
+      $('h1Time').textContent = '...'; $('h2Time').textContent = '...';
+
+      // Simulate sizes (50-300ms each)
+      const sizes = resources.map(() => 50 + Math.random() * 250);
+      const maxConn = 6; // HTTP/1.1 max parallel
+
+      // HTTP/1.1: 6 connections, queue the rest
+      let h1Total = 0;
+      const slots = Array(maxConn).fill(0);
+      sizes.forEach((s, i) => {
+        const minSlot = slots.indexOf(Math.min(...slots));
+        slots[minSlot] += s;
+      });
+      h1Total = Math.max(...slots);
+
+      // HTTP/2: all parallel (+ small framing overhead)
+      const h2Total = Math.max(...sizes) * 1.05;
+
+      // Animate H1
+      let h1Elapsed = 0;
+      const h1Slots = Array(maxConn).fill(0);
+      resources.forEach((r, i) => {
+        const bar = document.createElement('div');
+        bar.className = 'race-bar';
+        bar.style.background = colors[i];
+        bar.style.width = '0%';
+        bar.textContent = r;
+        h1.appendChild(bar);
+
+        const minSlot = h1Slots.indexOf(Math.min(...h1Slots));
+        const start = h1Slots[minSlot];
+        h1Slots[minSlot] += sizes[i];
+
+        setTimeout(() => {
+          bar.style.width = (sizes[i] / h1Total * 100) + '%';
+        }, (start / h1Total) * 2000);
+      });
+      setTimeout(() => { $('h1Time').textContent = Math.round(h1Total) + 'ms'; }, 2100);
+
+      // Animate H2
+      resources.forEach((r, i) => {
+        const bar = document.createElement('div');
+        bar.className = 'race-bar';
+        bar.style.background = colors[i];
+        bar.style.width = '0%';
+        bar.textContent = r;
+        h2.appendChild(bar);
+        setTimeout(() => {
+          bar.style.width = (sizes[i] / h2Total * 100) + '%';
+        }, 100);
+      });
+      setTimeout(() => { $('h2Time').textContent = Math.round(h2Total) + 'ms'; }, 1500);
+    };
+    $('resetRace').onclick = () => {
+      $('h1Bars').innerHTML = ''; $('h2Bars').innerHTML = '';
+      $('h1Time').textContent = '—'; $('h2Time').textContent = '—';
+    };
+
+    // === Binary Framing ===
+    const frameTypes = {
+      headers: { type: '0x01 HEADERS', flags: 'END_HEADERS (0x04)', streamId: 1, payload: ':method: GET\n:path: /index.html\n:scheme: https\nhost: example.com', color: '#8b5cf6' },
+      data: { type: '0x00 DATA', flags: 'END_STREAM (0x01)', streamId: 1, payload: '<html><body>Hello HTTP/2!</body></html>', color: '#3b82f6' },
+      ping: { type: '0x06 PING', flags: '0x00', streamId: 0, payload: '0x0000000000000001 (opaque data, 8 bytes)', color: '#22c55e' },
+      settings: { type: '0x04 SETTINGS', flags: '0x00', streamId: 0, payload: 'HEADER_TABLE_SIZE=4096\nMAX_CONCURRENT_STREAMS=100\nINITIAL_WINDOW_SIZE=65535', color: '#f97316' },
+      rst: { type: '0x03 RST_STREAM', flags: '0x00', streamId: 3, payload: 'Error Code: CANCEL (0x08)', color: '#ef4444' },
+    };
+
+    function showFrame(key) {
+      const f = frameTypes[key];
+      const payloadBytes = new TextEncoder().encode(f.payload).length;
+      $('fLength').querySelector('.ff-value').textContent = payloadBytes;
+      $('fType').querySelector('.ff-value').textContent = f.type;
+      $('fFlags').querySelector('.ff-value').textContent = f.flags;
+      $('fStreamId').querySelector('.ff-value').textContent = 'Stream ' + f.streamId;
+      $('fPayload').querySelector('.ff-value').textContent = f.payload;
+      document.querySelectorAll('.frame-field').forEach(el => { el.classList.add('active'); el.style.borderColor = f.color; });
+      // Fake hex
+      const hex = Array.from({ length: Math.min(payloadBytes + 9, 40) }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join(' ');
+      $('frameHex').textContent = '0x ' + hex + (payloadBytes > 31 ? ' ...' : '');
+    }
+
+    $('frameHeaders').onclick = () => showFrame('headers');
+    $('frameData').onclick = () => showFrame('data');
+    $('framePing').onclick = () => showFrame('ping');
+    $('frameSettings').onclick = () => showFrame('settings');
+    $('frameRst').onclick = () => showFrame('rst');
+    $('resetFrame').onclick = () => {
+      document.querySelectorAll('.frame-field').forEach(el => { el.classList.remove('active'); el.style.borderColor = ''; });
+      document.querySelectorAll('.ff-value').forEach(el => el.textContent = '—');
+      $('fPayload').querySelector('.ff-value').textContent = 'Click a frame type above';
+      $('frameHex').textContent = '';
+    };
+
+    // === Stream Multiplexing ===
+    let muxStreamId = 1;
+    let muxStreams = [];
+
+    $('muxAdd').onclick = () => {
+      const id = muxStreamId; muxStreamId += 2;
+      const color = colors[(muxStreams.length) % colors.length];
+      const paths = ['/index.html','/style.css','/app.js','/logo.png','/api/data','/font.woff2'];
+      const path = paths[muxStreams.length % paths.length];
+      muxStreams.push({ id, color, path, frames: Math.floor(2 + Math.random() * 5) });
+
+      const div = document.createElement('div');
+      div.className = 'mux-stream';
+      div.innerHTML = `<span class="ms-color" style="background:${color}"></span><span class="ms-label">Stream ${id}: ${path}</span>`;
+      $('muxStreams').appendChild(div);
+      $('muxLog').textContent = `Added Stream ${id} (${path}). ${muxStreams.length} streams queued.`;
+    };
+
+    $('muxStart').onclick = () => {
+      if (muxStreams.length === 0) { $('muxLog').textContent = 'Add some requests first!'; return; }
+      $('muxPipe').innerHTML = '';
+      // Interleave frames
+      let allFrames = [];
+      muxStreams.forEach(s => {
+        for (let i = 0; i < s.frames; i++) {
+          const type = i === 0 ? 'H' : (i === s.frames - 1 ? 'D*' : 'D');
+          allFrames.push({ id: s.id, color: s.color, type, path: s.path });
+        }
+      });
+      // Shuffle (simple interleave by round-robin)
+      const interleaved = [];
+      const queues = muxStreams.map(s => allFrames.filter(f => f.id === s.id));
+      let round = 0;
+      while (interleaved.length < allFrames.length) {
+        queues.forEach(q => {
+          if (q.length > 0) interleaved.push(q.shift());
+        });
+        round++;
+      }
+
+      interleaved.forEach((f, i) => {
+        setTimeout(() => {
+          const el = document.createElement('span');
+          el.className = 'mux-frame';
+          el.style.background = f.color;
+          el.textContent = `S${f.id}:${f.type}`;
+          $('muxPipe').appendChild(el);
+          $('muxLog').textContent = `Frame ${i + 1}/${interleaved.length}: Stream ${f.id} ${f.type === 'H' ? 'HEADERS' : 'DATA'}${f.type === 'D*' ? ' (END_STREAM)' : ''}`;
+        }, i * 150);
+      });
+    };
+
+    $('muxReset').onclick = () => {
+      muxStreamId = 1; muxStreams = [];
+      $('muxStreams').innerHTML = ''; $('muxPipe').innerHTML = '';
+      $('muxLog').textContent = 'Add requests, then click "Send All" to see frames interleaved on the wire.';
+    };
+
+    // === HPACK ===
+    const dynTable = [];
+    let hpReqNum = 0;
+    const hpRequests = [
+      { headers: [':method: GET',':path: /index.html',':scheme: https','host: example.com','accept: text/html','user-agent: Chrome/120'] },
+      { headers: [':method: GET',':path: /style.css',':scheme: https','host: example.com','accept: text/css','user-agent: Chrome/120'] },
+      { headers: [':method: GET',':path: /api/data',':scheme: https','host: example.com','accept: application/json','user-agent: Chrome/120','authorization: Bearer tok123'] },
+    ];
+    const staticTable = [':method: GET',':method: POST',':path: /',':scheme: https',':scheme: http','accept: text/html'];
+
+    function renderHPACK(reqIdx) {
+      const req = hpRequests[reqIdx];
+      const raw = req.headers.join('\n');
+      $('hpRaw').textContent = raw;
+      $('hpRawSize').textContent = new TextEncoder().encode(raw).length;
+
+      let encoded = '';
+      let encSize = 0;
+      req.headers.forEach(h => {
+        if (staticTable.includes(h)) {
+          encoded += `<span class="hp-static">[S] ${h}</span>\n`;
+          encSize += 1; // index reference
+        } else if (dynTable.includes(h)) {
+          encoded += `<span class="hp-dynamic">[D] ${h}</span>\n`;
+          encSize += 1;
+        } else {
+          // Check partial match (name only)
+          const name = h.split(':')[0] + ':';
+          const partial = dynTable.find(d => d.startsWith(name)) || staticTable.find(s => s.startsWith(name));
+          if (partial) {
+            encoded += `<span class="hp-dynamic">[D+] ${h}</span>\n`;
+            encSize += Math.ceil(h.length * 0.6);
+          } else {
+            encoded += `<span class="hp-literal">[L] ${h}</span>\n`;
+            encSize += Math.ceil(h.length * 0.7); // Huffman
+          }
+          if (!dynTable.includes(h)) dynTable.unshift(h);
+        }
+      });
+
+      $('hpEncoded').innerHTML = encoded;
+      $('hpEncSize').textContent = encSize;
+
+      $('hpDynTable').innerHTML = dynTable.map((e, i) => `<div class="hp-entry">[${62 + i}] ${e}</div>`).join('');
+      $('hpDynCount').textContent = dynTable.length;
+
+      const rawSize = new TextEncoder().encode(raw).length;
+      const pct = Math.round((1 - encSize / rawSize) * 100);
+      $('hpSavings').textContent = `🗜️ Compression: ${rawSize} → ${encSize} bytes (${pct}% reduction)`;
+    }
+
+    $('hpReq1').onclick = () => renderHPACK(0);
+    $('hpReq2').onclick = () => renderHPACK(1);
+    $('hpReq3').onclick = () => renderHPACK(2);
+    $('hpReset').onclick = () => {
+      dynTable.length = 0;
+      $('hpRaw').textContent = ''; $('hpEncoded').innerHTML = ''; $('hpDynTable').innerHTML = '';
+      $('hpRawSize').textContent = '0'; $('hpEncSize').textContent = '0'; $('hpDynCount').textContent = '0';
+      $('hpSavings').textContent = '';
+    };
+
+    // === Server Push ===
+    $('pushStart').onclick = () => {
+      const msgs = $('pushMessages');
+      msgs.querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('pushCacheItems').innerHTML = '';
+      $('push-client').classList.add('active');
+      $('push-server').classList.add('active');
+
+      setTimeout(() => {
+        addMsg(msgs, 'right', 'HEADERS: GET /index.html (stream 1)', 5);
+        $('pushLog').textContent = 'Client requests /index.html on stream 1';
+      }, 200);
+
+      setTimeout(() => {
+        addMsg(msgs, 'left', 'PUSH_PROMISE: /style.css (stream 2)', 35);
+        $('pushLog').textContent = 'Server sends PUSH_PROMISE for /style.css (reserved stream 2)';
+      }, 800);
+
+      setTimeout(() => {
+        addMsg(msgs, 'left', 'PUSH_PROMISE: /app.js (stream 4)', 65);
+        $('pushLog').textContent = 'Server sends PUSH_PROMISE for /app.js (reserved stream 4)';
+      }, 1200);
+
+      setTimeout(() => {
+        addMsg(msgs, 'left', 'HEADERS+DATA: /index.html (stream 1) ✅', 95);
+        $('pushLog').textContent = 'Server responds with /index.html on stream 1';
+      }, 1600);
+
+      setTimeout(() => {
+        addMsg(msgs, 'left', 'DATA: /style.css (stream 2) ✅', 125);
+        const item1 = document.createElement('div');
+        item1.className = 'pc-item'; item1.textContent = '✅ /style.css';
+        $('pushCacheItems').appendChild(item1);
+        $('pushLog').textContent = 'Pushed /style.css arrives → stored in push cache';
+      }, 2000);
+
+      setTimeout(() => {
+        addMsg(msgs, 'left', 'DATA: /app.js (stream 4) ✅', 155);
+        const item2 = document.createElement('div');
+        item2.className = 'pc-item'; item2.textContent = '✅ /app.js';
+        $('pushCacheItems').appendChild(item2);
+        $('pushLog').textContent = '✅ All pushed resources cached. Client can use them without extra round trips!';
+      }, 2400);
+    };
+
+    $('pushReset').onclick = () => {
+      $('pushMessages').querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('pushCacheItems').innerHTML = '';
+      $('push-client').classList.remove('active');
+      $('push-server').classList.remove('active');
+      $('pushLog').textContent = 'Click "Request Page" to see server push in action.';
+    };
+
+    // === Flow Control ===
+    const fcMax = 65535;
+    let fc1 = fcMax, fc3 = fcMax, fcConn = fcMax;
+
+    function updateFC() {
+      const pct1 = (fc1 / fcMax * 100); const pct3 = (fc3 / fcMax * 100); const pctC = (fcConn / fcMax * 100);
+      $('fcBar1').style.width = pct1 + '%';
+      $('fcBar3').style.width = pct3 + '%';
+      $('fcBarConn').style.width = pctC + '%';
+      if (pct1 < 20) $('fcBar1').classList.add('low'); else $('fcBar1').classList.remove('low');
+      if (pct3 < 20) $('fcBar3').classList.add('low'); else $('fcBar3').classList.remove('low');
+      if (pctC < 20) $('fcBarConn').classList.add('low'); else $('fcBarConn').classList.remove('low');
+      $('fcVal1').textContent = `${fc1} / ${fcMax}`;
+      $('fcVal3').textContent = `${fc3} / ${fcMax}`;
+      $('fcValConn').textContent = `${fcConn} / ${fcMax}`;
+    }
+
+    $('fcSend1').onclick = () => {
+      const amt = 8192;
+      if (fc1 < amt || fcConn < amt) { $('fcLog').textContent = '⚠️ Flow control blocked! Need WINDOW_UPDATE.'; return; }
+      fc1 -= amt; fcConn -= amt;
+      updateFC();
+      $('fcLog').textContent = `Sent ${amt} bytes on Stream 1. Stream window: ${fc1}, Connection window: ${fcConn}`;
+    };
+
+    $('fcSend3').onclick = () => {
+      const amt = 8192;
+      if (fc3 < amt || fcConn < amt) { $('fcLog').textContent = '⚠️ Flow control blocked! Need WINDOW_UPDATE.'; return; }
+      fc3 -= amt; fcConn -= amt;
+      updateFC();
+      $('fcLog').textContent = `Sent ${amt} bytes on Stream 3. Stream window: ${fc3}, Connection window: ${fcConn}`;
+    };
+
+    $('fcWindow').onclick = () => {
+      const inc = 32768;
+      fc1 = Math.min(fc1 + inc, fcMax);
+      fc3 = Math.min(fc3 + inc, fcMax);
+      fcConn = Math.min(fcConn + inc, fcMax);
+      updateFC();
+      $('fcLog').textContent = `WINDOW_UPDATE +${inc} bytes on all streams and connection.`;
+    };
+
+    $('fcReset').onclick = () => {
+      fc1 = fcMax; fc3 = fcMax; fcConn = fcMax;
+      updateFC();
+      $('fcLog').textContent = 'Both streams start with 65535 bytes of flow control window.';
+    };
+    updateFC();
+  </script>
+</BaseLayout>

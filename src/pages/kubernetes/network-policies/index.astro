@@ -1,0 +1,694 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Kubernetes Network Policies" 
+  description="Interactive visualization of Kubernetes network policies — ingress/egress rules, CNI enforcement, Calico & Cilium, microsegmentation"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Kubernetes", href: "/kubernetes/" },
+    { label: "Network Policies", href: "/kubernetes/network-policies/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🛡️ Network Policies</h1>
+      <p class="subtitle">Ingress/Egress Rules, CNI Enforcement, Microsegmentation</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          By default, every pod in Kubernetes can talk to every other pod — a <strong>flat network</strong>
+          with no restrictions. <strong>Network Policies</strong> are the firewall rules of Kubernetes:
+          they select pods by label and define which <em>ingress</em> (incoming) and <em>egress</em>
+          (outgoing) traffic is allowed. But the API server doesn't enforce them — your
+          <strong>CNI plugin</strong> (Calico, Cilium, Weave) programs the actual iptables/eBPF rules.
+          Without a CNI that supports NetworkPolicy, the rules are silently ignored.
+        </p>
+      </div>
+    </section>
+
+    <!-- Default Behavior -->
+    <section class="sim-section">
+      <h2>🌐 Default: Allow All</h2>
+      <p class="section-desc">Without any NetworkPolicy, all pods can freely communicate. Click pods to see connections.</p>
+
+      <div class="cluster-viz" id="defaultCluster">
+        <div class="ns-box" id="nsDefault">
+          <div class="ns-label">namespace: default</div>
+          <div class="ns-pods">
+            <div class="viz-pod" id="podFrontend" data-name="frontend">
+              <div class="pod-icon">🌐</div>
+              <div class="pod-name">frontend</div>
+              <div class="pod-labels">app=web</div>
+            </div>
+            <div class="viz-pod" id="podApi" data-name="api">
+              <div class="pod-icon">⚙️</div>
+              <div class="pod-name">api</div>
+              <div class="pod-labels">app=api</div>
+            </div>
+            <div class="viz-pod" id="podDb" data-name="db">
+              <div class="pod-icon">🗄️</div>
+              <div class="pod-name">database</div>
+              <div class="pod-labels">app=db</div>
+            </div>
+            <div class="viz-pod" id="podCache" data-name="cache">
+              <div class="pod-icon">⚡</div>
+              <div class="pod-name">cache</div>
+              <div class="pod-labels">app=cache</div>
+            </div>
+          </div>
+        </div>
+        <div class="ns-box" id="nsMonitoring">
+          <div class="ns-label">namespace: monitoring</div>
+          <div class="ns-pods">
+            <div class="viz-pod" id="podProm" data-name="prometheus">
+              <div class="pod-icon">📊</div>
+              <div class="pod-name">prometheus</div>
+              <div class="pod-labels">app=prom</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connection-status" id="connStatus">
+        All pods can communicate freely — no network policies applied.
+      </div>
+    </section>
+
+    <!-- Policy Builder -->
+    <section class="sim-section">
+      <h2>🔧 Policy Builder</h2>
+      <p class="section-desc">Build a NetworkPolicy interactively. Select a target pod, configure rules, and apply it.</p>
+
+      <div class="policy-builder">
+        <div class="builder-config">
+          <h3>NetworkPolicy</h3>
+          <div class="config-group">
+            <label>Target Pod (podSelector)</label>
+            <select id="policyTarget" class="config-select">
+              <option value="db">app=db (database)</option>
+              <option value="api">app=api (api)</option>
+              <option value="cache">app=cache (cache)</option>
+              <option value="web">app=web (frontend)</option>
+            </select>
+          </div>
+          <div class="config-group">
+            <label>Policy Type</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="policyIngress" checked> Ingress
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="policyEgress"> Egress
+              </label>
+            </div>
+          </div>
+          <div class="config-group">
+            <label>Allow Ingress From</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowApi" checked> app=api
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowWeb"> app=web
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowProm"> app=prom (monitoring ns)
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowCache"> app=cache
+              </label>
+            </div>
+          </div>
+          <div class="config-group">
+            <label>Port</label>
+            <select id="policyPort" class="config-select">
+              <option value="any">Any</option>
+              <option value="5432">5432 (PostgreSQL)</option>
+              <option value="3306">3306 (MySQL)</option>
+              <option value="6379">6379 (Redis)</option>
+              <option value="80">80 (HTTP)</option>
+            </select>
+          </div>
+          <button class="action-btn primary-btn" id="applyPolicyBtn">🛡️ Apply Policy</button>
+          <button class="action-btn reset-btn" id="resetPolicyBtn" style="margin-top:8px">↺ Remove All Policies</button>
+        </div>
+
+        <div class="builder-preview">
+          <div class="yaml-preview" id="yamlPreview">
+            <div class="yaml-title">Generated YAML</div>
+            <pre id="yamlOutput"><code>apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-policy
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api
+      ports:
+        - port: 5432</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Traffic Simulation -->
+    <section class="sim-section">
+      <h2>🚦 Traffic Simulation</h2>
+      <p class="section-desc">Test connectivity between pods after applying policies. See which connections are allowed or denied.</p>
+
+      <div class="traffic-sim">
+        <div class="traffic-matrix" id="trafficMatrix">
+          <div class="matrix-header">
+            <div class="matrix-corner">From ↓ To →</div>
+            <div class="matrix-col-header">frontend</div>
+            <div class="matrix-col-header">api</div>
+            <div class="matrix-col-header">database</div>
+            <div class="matrix-col-header">cache</div>
+            <div class="matrix-col-header">prometheus</div>
+          </div>
+          <div class="matrix-row" data-from="frontend">
+            <div class="matrix-row-header">frontend</div>
+            <div class="matrix-cell self">—</div>
+            <div class="matrix-cell allowed" data-to="api">✓</div>
+            <div class="matrix-cell allowed" data-to="db">✓</div>
+            <div class="matrix-cell allowed" data-to="cache">✓</div>
+            <div class="matrix-cell allowed" data-to="prom">✓</div>
+          </div>
+          <div class="matrix-row" data-from="api">
+            <div class="matrix-row-header">api</div>
+            <div class="matrix-cell allowed" data-to="frontend">✓</div>
+            <div class="matrix-cell self">—</div>
+            <div class="matrix-cell allowed" data-to="db">✓</div>
+            <div class="matrix-cell allowed" data-to="cache">✓</div>
+            <div class="matrix-cell allowed" data-to="prom">✓</div>
+          </div>
+          <div class="matrix-row" data-from="db">
+            <div class="matrix-row-header">database</div>
+            <div class="matrix-cell allowed" data-to="frontend">✓</div>
+            <div class="matrix-cell allowed" data-to="api">✓</div>
+            <div class="matrix-cell self">—</div>
+            <div class="matrix-cell allowed" data-to="cache">✓</div>
+            <div class="matrix-cell allowed" data-to="prom">✓</div>
+          </div>
+          <div class="matrix-row" data-from="cache">
+            <div class="matrix-row-header">cache</div>
+            <div class="matrix-cell allowed" data-to="frontend">✓</div>
+            <div class="matrix-cell allowed" data-to="api">✓</div>
+            <div class="matrix-cell allowed" data-to="db">✓</div>
+            <div class="matrix-cell self">—</div>
+            <div class="matrix-cell allowed" data-to="prom">✓</div>
+          </div>
+          <div class="matrix-row" data-from="prom">
+            <div class="matrix-row-header">prometheus</div>
+            <div class="matrix-cell allowed" data-to="frontend">✓</div>
+            <div class="matrix-cell allowed" data-to="api">✓</div>
+            <div class="matrix-cell allowed" data-to="db">✓</div>
+            <div class="matrix-cell allowed" data-to="cache">✓</div>
+            <div class="matrix-cell self">—</div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn primary-btn" id="testAllBtn">🧪 Test All Connections</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CNI Comparison -->
+    <section class="sim-section">
+      <h2>🔌 CNI Plugin Comparison</h2>
+      <p class="section-desc">Network Policies are only enforced by CNI plugins that support them. Click each to compare.</p>
+
+      <div class="cni-grid">
+        <div class="cni-card active" id="cniCalico" data-cni="calico">
+          <div class="cni-icon">🐯</div>
+          <h3>Calico</h3>
+          <div class="cni-tags">
+            <span class="cni-tag">iptables</span>
+            <span class="cni-tag">eBPF</span>
+            <span class="cni-tag">BGP</span>
+          </div>
+        </div>
+        <div class="cni-card" id="cniCilium" data-cni="cilium">
+          <div class="cni-icon">🐝</div>
+          <h3>Cilium</h3>
+          <div class="cni-tags">
+            <span class="cni-tag">eBPF</span>
+            <span class="cni-tag">L7</span>
+            <span class="cni-tag">Hubble</span>
+          </div>
+        </div>
+        <div class="cni-card" id="cniWeave" data-cni="weave">
+          <div class="cni-icon">🕸️</div>
+          <h3>Weave Net</h3>
+          <div class="cni-tags">
+            <span class="cni-tag">VXLAN</span>
+            <span class="cni-tag">encryption</span>
+          </div>
+        </div>
+        <div class="cni-card" id="cniFlannel" data-cni="flannel">
+          <div class="cni-icon">🔰</div>
+          <h3>Flannel</h3>
+          <div class="cni-tags">
+            <span class="cni-tag">VXLAN</span>
+            <span class="cni-tag">simple</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cni-detail" id="cniDetail">
+        <div class="cni-detail-title">Calico</div>
+        <div class="cni-detail-desc">
+          Calico uses iptables or eBPF to enforce network policies. It supports the full Kubernetes
+          NetworkPolicy spec plus its own <strong>GlobalNetworkPolicy</strong> CRD for cluster-wide rules,
+          DNS-based policies, and application-layer (L7) rules. Calico can run in overlay (VXLAN/IPIP) or
+          native BGP mode for high performance.
+        </div>
+        <div class="cni-features">
+          <div class="cni-feature supported">✅ Kubernetes NetworkPolicy</div>
+          <div class="cni-feature supported">✅ Global (cluster-wide) policies</div>
+          <div class="cni-feature supported">✅ DNS-based egress rules</div>
+          <div class="cni-feature supported">✅ Application layer (L7) rules</div>
+          <div class="cni-feature supported">✅ HostEndpoint policies</div>
+          <div class="cni-feature supported">✅ Policy ordering/priority</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- eBPF Deep Dive -->
+    <section class="sim-section">
+      <h2>🐝 eBPF Enforcement (Cilium)</h2>
+      <p class="section-desc">Cilium uses eBPF programs attached to network interfaces for high-performance policy enforcement without iptables overhead.</p>
+
+      <div class="ebpf-viz">
+        <div class="ebpf-flow">
+          <div class="ebpf-step">
+            <div class="ebpf-icon">📦</div>
+            <div class="ebpf-label">Pod sends packet</div>
+          </div>
+          <div class="ebpf-arrow">→</div>
+          <div class="ebpf-step highlight-step">
+            <div class="ebpf-icon">🔍</div>
+            <div class="ebpf-label">eBPF program (tc ingress)</div>
+            <div class="ebpf-detail">Checks identity → policy map</div>
+          </div>
+          <div class="ebpf-arrow">→</div>
+          <div class="ebpf-step">
+            <div class="ebpf-icon" id="ebpfDecision">❓</div>
+            <div class="ebpf-label" id="ebpfDecisionLabel">Decision</div>
+          </div>
+          <div class="ebpf-arrow">→</div>
+          <div class="ebpf-step">
+            <div class="ebpf-icon">📊</div>
+            <div class="ebpf-label">Hubble observability</div>
+            <div class="ebpf-detail">Flow logs + metrics</div>
+          </div>
+        </div>
+
+        <div class="ebpf-maps">
+          <h3>eBPF Maps</h3>
+          <div class="ebpf-map-grid">
+            <div class="ebpf-map">
+              <div class="map-name">Identity Map</div>
+              <div class="map-desc">Pod IP → Security Identity (label-based)</div>
+              <div class="map-entries" id="identityMap">
+                <div class="map-entry">10.244.1.5 → id:4821 (app=web)</div>
+                <div class="map-entry">10.244.1.12 → id:9923 (app=api)</div>
+                <div class="map-entry">10.244.2.3 → id:1547 (app=db)</div>
+              </div>
+            </div>
+            <div class="ebpf-map">
+              <div class="map-name">Policy Map</div>
+              <div class="map-desc">Identity → Allowed Identities + Ports</div>
+              <div class="map-entries" id="policyMap">
+                <div class="map-entry">id:1547 (db) ← allow id:9923 (api) port 5432</div>
+                <div class="map-entry">id:9923 (api) ← allow id:4821 (web) port 8080</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="action-btn election-btn" id="ebpfAllowBtn">✅ Simulate Allow</button>
+          <button class="action-btn chaos-btn" id="ebpfDenyBtn">❌ Simulate Deny</button>
+          <button class="action-btn reset-btn" id="ebpfResetBtn">↺ Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Best Practices -->
+    <section class="sim-section">
+      <h2>📋 Best Practices</h2>
+      <p class="section-desc">Common patterns for production network policy configurations.</p>
+
+      <div class="practices-grid">
+        <div class="practice-card">
+          <div class="practice-icon">🔒</div>
+          <h3>Default Deny</h3>
+          <p>Start with a default-deny policy for each namespace, then explicitly allow needed traffic. This is the zero-trust foundation.</p>
+          <div class="practice-yaml">
+            <code>spec:<br>&nbsp;&nbsp;podSelector: {'{ }'}<br>&nbsp;&nbsp;policyTypes: [Ingress, Egress]</code>
+          </div>
+        </div>
+        <div class="practice-card">
+          <div class="practice-icon">🏷️</div>
+          <h3>Label Everything</h3>
+          <p>Network policies select by labels. Consistent labeling (app, tier, environment) makes policies readable and maintainable.</p>
+        </div>
+        <div class="practice-card">
+          <div class="practice-icon">📡</div>
+          <h3>Allow DNS</h3>
+          <p>Don't forget to allow egress to kube-dns (port 53 UDP/TCP) — most policies accidentally break DNS resolution.</p>
+          <div class="practice-yaml">
+            <code>egress:<br>&nbsp;&nbsp;- to:<br>&nbsp;&nbsp;&nbsp;&nbsp;- namespaceSelector: {'{ }'}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;podSelector:<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;k8s-app: kube-dns<br>&nbsp;&nbsp;&nbsp;&nbsp;ports: [{'{ port: 53, protocol: UDP }'}]</code>
+          </div>
+        </div>
+        <div class="practice-card">
+          <div class="practice-icon">🧪</div>
+          <h3>Test in Staging</h3>
+          <p>Use Cilium's policy audit mode or Calico's staged policies to test before enforcing. Wrong rules = production outage.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { margin-bottom: 40px; }
+  .viz-header h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { font-size: 1.1rem; color: #888; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; }
+  .overview-card p { color: #ccc; line-height: 1.8; font-size: 1.05rem; }
+  .overview-card strong { color: #60a5fa; }
+  .overview-card em { color: #fbbf24; }
+
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 24px; font-size: 0.95rem; }
+  .sim-section { margin-bottom: 50px; }
+
+  /* Cluster Viz */
+  .cluster-viz { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .ns-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .ns-label { font-size: 0.8rem; font-weight: 700; color: #60a5fa; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+  .ns-pods { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; }
+  .viz-pod { background: rgba(255,255,255,0.04); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .viz-pod:hover { border-color: rgba(96,165,250,0.4); transform: translateY(-2px); }
+  .viz-pod.selected { border-color: rgba(96,165,250,0.7); background: rgba(96,165,250,0.1); }
+  .viz-pod.blocked { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.05); }
+  .viz-pod.allowed { border-color: rgba(74,222,128,0.5); background: rgba(74,222,128,0.05); }
+  .pod-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .pod-name { font-weight: 600; color: #fff; font-size: 0.85rem; }
+  .pod-labels { font-size: 0.7rem; color: #888; margin-top: 4px; }
+  .connection-status { padding: 12px 16px; background: rgba(255,255,255,0.03); border-radius: 10px; color: #aaa; font-size: 0.9rem; }
+
+  /* Policy Builder */
+  .policy-builder { display: grid; grid-template-columns: 300px 1fr; gap: 24px; }
+  .builder-config { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; }
+  .builder-config h3 { font-size: 1rem; color: #fff; margin-bottom: 16px; }
+  .checkbox-group { display: flex; flex-direction: column; gap: 6px; }
+  .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #ccc; cursor: pointer; }
+  .checkbox-label input { accent-color: #60a5fa; }
+  .yaml-preview { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .yaml-title { font-size: 0.85rem; font-weight: 600; color: #888; margin-bottom: 12px; }
+  .yaml-preview pre { margin: 0; overflow-x: auto; }
+  .yaml-preview code { font-size: 0.8rem; color: #4ade80; font-family: 'SF Mono','Fira Code',monospace; line-height: 1.6; }
+
+  /* Traffic Matrix */
+  .traffic-matrix { display: grid; grid-template-columns: auto repeat(5, 1fr); gap: 2px; margin-bottom: 16px; }
+  .matrix-header { display: contents; }
+  .matrix-corner { padding: 10px; font-size: 0.75rem; color: #888; font-weight: 600; }
+  .matrix-col-header { padding: 10px; text-align: center; font-size: 0.8rem; font-weight: 600; color: #ccc; background: rgba(255,255,255,0.03); border-radius: 6px; }
+  .matrix-row { display: contents; }
+  .matrix-row-header { padding: 10px; font-size: 0.8rem; font-weight: 600; color: #ccc; background: rgba(255,255,255,0.03); border-radius: 6px; display: flex; align-items: center; }
+  .matrix-cell { padding: 10px; text-align: center; border-radius: 6px; font-weight: 700; font-size: 0.9rem; transition: all 0.3s; }
+  .matrix-cell.allowed { background: rgba(74,222,128,0.1); color: #4ade80; }
+  .matrix-cell.denied { background: rgba(239,68,68,0.1); color: #f87171; }
+  .matrix-cell.self { background: rgba(255,255,255,0.02); color: #555; }
+  .matrix-cell.testing { animation: cellPulse 0.5s; }
+  @keyframes cellPulse { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+  /* CNI */
+  .cni-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .cni-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.3s; }
+  .cni-card:hover, .cni-card.active { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.08); transform: translateY(-2px); }
+  .cni-icon { font-size: 2rem; margin-bottom: 8px; }
+  .cni-card h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .cni-tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  .cni-tag { font-size: 0.65rem; padding: 2px 8px; background: rgba(96,165,250,0.15); color: #60a5fa; border-radius: 20px; }
+  .cni-detail { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .cni-detail-title { font-weight: 700; color: #60a5fa; font-size: 1.1rem; margin-bottom: 8px; }
+  .cni-detail-desc { color: #ccc; line-height: 1.7; font-size: 0.95rem; margin-bottom: 16px; }
+  .cni-detail-desc strong { color: #fbbf24; }
+  .cni-features { display: flex; flex-direction: column; gap: 6px; }
+  .cni-feature { font-size: 0.85rem; padding: 4px 0; }
+  .cni-feature.supported { color: #4ade80; }
+  .cni-feature.unsupported { color: #f87171; }
+
+  /* eBPF */
+  .ebpf-viz { margin-top: 16px; }
+  .ebpf-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 24px; }
+  .ebpf-step { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 14px; text-align: center; min-width: 110px; transition: all 0.3s; }
+  .ebpf-step.highlight-step { border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.06); }
+  .ebpf-step.allow { border-color: rgba(74,222,128,0.6); background: rgba(74,222,128,0.1); }
+  .ebpf-step.deny { border-color: rgba(239,68,68,0.6); background: rgba(239,68,68,0.1); }
+  .ebpf-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .ebpf-label { font-weight: 600; color: #fff; font-size: 0.85rem; }
+  .ebpf-detail { font-size: 0.7rem; color: #888; margin-top: 4px; }
+  .ebpf-arrow { font-size: 1.2rem; color: #555; }
+  .ebpf-maps { margin-bottom: 20px; }
+  .ebpf-maps h3 { font-size: 1rem; color: #fff; margin-bottom: 12px; }
+  .ebpf-map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .ebpf-map { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px; }
+  .map-name { font-weight: 700; color: #60a5fa; font-size: 0.9rem; margin-bottom: 4px; }
+  .map-desc { font-size: 0.75rem; color: #888; margin-bottom: 8px; }
+  .map-entries { display: flex; flex-direction: column; gap: 4px; }
+  .map-entry { font-size: 0.75rem; font-family: 'SF Mono',monospace; color: #aaa; padding: 2px 0; }
+
+  /* Best Practices */
+  .practices-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .practice-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
+  .practice-icon { font-size: 1.5rem; margin-bottom: 8px; }
+  .practice-card h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .practice-card p { font-size: 0.85rem; color: #888; line-height: 1.6; margin-bottom: 10px; }
+  .practice-yaml { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px; }
+  .practice-yaml code { font-size: 0.75rem; color: #4ade80; font-family: 'SF Mono',monospace; line-height: 1.5; }
+
+  /* Shared */
+  .action-bar { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .action-btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn { background: linear-gradient(135deg, #60a5fa, #3b82f6); color: white; }
+  .primary-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(59,130,246,0.4); }
+  .election-btn { background: linear-gradient(135deg, #4ade80, #22c55e); color: white; }
+  .election-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(34,197,94,0.4); }
+  .chaos-btn { background: linear-gradient(135deg, #f472b6, #ef4444); color: white; }
+  .chaos-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #aaa; }
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .config-group { margin-bottom: 16px; }
+  .config-group label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  .config-group label strong { color: #60a5fa; }
+  .config-select { width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #ddd; font-size: 0.85rem; }
+
+  @media (max-width: 768px) {
+    .cluster-viz, .policy-builder, .ebpf-map-grid { grid-template-columns: 1fr; }
+    .traffic-matrix { font-size: 0.7rem; }
+  }
+</style>
+
+<script>
+  // Policies state
+  let appliedPolicies = [];
+
+  // Policy Builder - YAML generation
+  function generateYAML() {
+    const target = document.getElementById('policyTarget').value;
+    const hasIngress = document.getElementById('policyIngress').checked;
+    const hasEgress = document.getElementById('policyEgress').checked;
+    const port = document.getElementById('policyPort').value;
+    const allowedPods = [];
+    if (document.getElementById('allowApi').checked) allowedPods.push('api');
+    if (document.getElementById('allowWeb').checked) allowedPods.push('web');
+    if (document.getElementById('allowProm').checked) allowedPods.push('prom');
+    if (document.getElementById('allowCache').checked) allowedPods.push('cache');
+
+    let yaml = `apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: ${target}-policy\n  namespace: default\nspec:\n  podSelector:\n    matchLabels:\n      app: ${target}\n  policyTypes:`;
+    if (hasIngress) yaml += `\n    - Ingress`;
+    if (hasEgress) yaml += `\n    - Egress`;
+
+    if (hasIngress && allowedPods.length > 0) {
+      yaml += `\n  ingress:`;
+      for (const pod of allowedPods) {
+        yaml += `\n    - from:\n        - podSelector:\n            matchLabels:\n              app: ${pod}`;
+        if (pod === 'prom') {
+          yaml += `\n          namespaceSelector:\n            matchLabels:\n              name: monitoring`;
+        }
+      }
+      if (port !== 'any') {
+        yaml += `\n      ports:\n        - port: ${port}`;
+      }
+    }
+
+    document.getElementById('yamlOutput').querySelector('code').textContent = yaml;
+    return { target, hasIngress, hasEgress, allowedPods, port };
+  }
+
+  ['policyTarget','policyPort'].forEach(id => document.getElementById(id).addEventListener('change', generateYAML));
+  ['policyIngress','policyEgress','allowApi','allowWeb','allowProm','allowCache'].forEach(id => document.getElementById(id).addEventListener('change', generateYAML));
+
+  // Apply policy
+  document.getElementById('applyPolicyBtn').addEventListener('click', () => {
+    const policy = generateYAML();
+    appliedPolicies.push(policy);
+    updateMatrix();
+    document.getElementById('connStatus').textContent = `Policy applied to app=${policy.target}. ${policy.allowedPods.length} sources allowed for ingress.`;
+    document.getElementById('connStatus').style.color = '#4ade80';
+  });
+
+  document.getElementById('resetPolicyBtn').addEventListener('click', () => {
+    appliedPolicies = [];
+    updateMatrix();
+    document.getElementById('connStatus').textContent = 'All pods can communicate freely — no network policies applied.';
+    document.getElementById('connStatus').style.color = '#aaa';
+  });
+
+  const podNameMap = { frontend: 'web', api: 'api', db: 'db', cache: 'cache', prom: 'prom' };
+  const labelMap = { web: 'frontend', api: 'api', db: 'db', cache: 'cache', prom: 'prom' };
+
+  function updateMatrix() {
+    const cells = document.querySelectorAll('.matrix-cell:not(.self)');
+    cells.forEach(cell => {
+      cell.className = 'matrix-cell allowed';
+      cell.textContent = '✓';
+    });
+
+    for (const policy of appliedPolicies) {
+      if (!policy.hasIngress) continue;
+      // Find all cells where "to" matches the target
+      const targetLabel = policy.target;
+      document.querySelectorAll('.matrix-row').forEach(row => {
+        const fromPod = row.dataset.from;
+        const fromLabel = podNameMap[fromPod];
+        row.querySelectorAll('.matrix-cell').forEach(cell => {
+          if (cell.classList.contains('self')) return;
+          const toPod = cell.dataset.to;
+          if (toPod === targetLabel || (targetLabel === 'db' && toPod === 'db') || (targetLabel === 'web' && toPod === 'frontend')) {
+            // Check actual target match
+            const toLabel = toPod;
+            if (toLabel === targetLabel) {
+              if (!policy.allowedPods.includes(fromLabel)) {
+                cell.className = 'matrix-cell denied';
+                cell.textContent = '✕';
+              }
+            }
+          }
+        });
+      });
+    }
+  }
+
+  // Test all connections animation
+  document.getElementById('testAllBtn').addEventListener('click', async () => {
+    const cells = document.querySelectorAll('.matrix-cell:not(.self)');
+    for (const cell of cells) {
+      cell.classList.add('testing');
+      await new Promise(r => setTimeout(r, 80));
+      cell.classList.remove('testing');
+    }
+  });
+
+  // CNI Comparison
+  const cniData = {
+    calico: {
+      title: 'Calico',
+      desc: 'Calico uses iptables or eBPF to enforce network policies. It supports the full Kubernetes NetworkPolicy spec plus its own <strong>GlobalNetworkPolicy</strong> CRD for cluster-wide rules, DNS-based policies, and application-layer (L7) rules.',
+      features: [
+        { text: 'Kubernetes NetworkPolicy', supported: true },
+        { text: 'Global (cluster-wide) policies', supported: true },
+        { text: 'DNS-based egress rules', supported: true },
+        { text: 'Application layer (L7) rules', supported: true },
+        { text: 'HostEndpoint policies', supported: true },
+        { text: 'Policy ordering/priority', supported: true }
+      ]
+    },
+    cilium: {
+      title: 'Cilium',
+      desc: 'Cilium is eBPF-native, providing <strong>identity-based</strong> enforcement instead of IP-based. It supports L3/L4/L7 policies, transparent encryption, and comes with <strong>Hubble</strong> for deep network observability.',
+      features: [
+        { text: 'Kubernetes NetworkPolicy', supported: true },
+        { text: 'L7 HTTP/gRPC/Kafka policies', supported: true },
+        { text: 'Identity-based (not IP-based)', supported: true },
+        { text: 'Transparent encryption (WireGuard)', supported: true },
+        { text: 'Hubble flow observability', supported: true },
+        { text: 'Cluster mesh (multi-cluster)', supported: true }
+      ]
+    },
+    weave: {
+      title: 'Weave Net',
+      desc: 'Weave Net provides simple overlay networking with built-in encryption. It supports basic Kubernetes NetworkPolicy but lacks advanced features like L7 rules or DNS policies.',
+      features: [
+        { text: 'Kubernetes NetworkPolicy', supported: true },
+        { text: 'Built-in encryption', supported: true },
+        { text: 'Global policies', supported: false },
+        { text: 'L7 policies', supported: false },
+        { text: 'DNS-based rules', supported: false },
+        { text: 'eBPF dataplane', supported: false }
+      ]
+    },
+    flannel: {
+      title: 'Flannel',
+      desc: 'Flannel is a simple overlay network. It does <strong>NOT</strong> support NetworkPolicy at all. If you apply a NetworkPolicy with Flannel, it will be silently ignored. Use Calico or Cilium alongside Flannel for policy enforcement.',
+      features: [
+        { text: 'Kubernetes NetworkPolicy', supported: false },
+        { text: 'Simple VXLAN overlay', supported: true },
+        { text: 'Lightweight & easy setup', supported: true },
+        { text: 'L7 policies', supported: false },
+        { text: 'eBPF dataplane', supported: false },
+        { text: 'Network observability', supported: false }
+      ]
+    }
+  };
+
+  document.querySelectorAll('.cni-card').forEach(card => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.cni-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      const d = cniData[card.dataset.cni];
+      let featuresHtml = d.features.map(f =>
+        `<div class="cni-feature ${f.supported ? 'supported' : 'unsupported'}">${f.supported ? '✅' : '❌'} ${f.text}</div>`
+      ).join('');
+      document.getElementById('cniDetail').innerHTML = `<div class="cni-detail-title">${d.title}</div><div class="cni-detail-desc">${d.desc}</div><div class="cni-features">${featuresHtml}</div>`;
+    });
+  });
+
+  // eBPF simulation
+  document.getElementById('ebpfAllowBtn').addEventListener('click', () => {
+    document.getElementById('ebpfDecision').textContent = '✅';
+    document.getElementById('ebpfDecisionLabel').textContent = 'ALLOW';
+    document.querySelectorAll('.ebpf-step')[2].className = 'ebpf-step allow';
+  });
+  document.getElementById('ebpfDenyBtn').addEventListener('click', () => {
+    document.getElementById('ebpfDecision').textContent = '❌';
+    document.getElementById('ebpfDecisionLabel').textContent = 'DENY';
+    document.querySelectorAll('.ebpf-step')[2].className = 'ebpf-step deny';
+  });
+  document.getElementById('ebpfResetBtn').addEventListener('click', () => {
+    document.getElementById('ebpfDecision').textContent = '❓';
+    document.getElementById('ebpfDecisionLabel').textContent = 'Decision';
+    document.querySelectorAll('.ebpf-step')[2].className = 'ebpf-step';
+  });
+</script>

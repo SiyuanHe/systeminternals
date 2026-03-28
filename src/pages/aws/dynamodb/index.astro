@@ -1,0 +1,690 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="DynamoDB Internals — Interactive Visualization"
+  description="Explore DynamoDB's partitioning, LSI/GSI, adaptive capacity, request routing, and Paxos-based replication."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "AWS", href: "/aws/" },
+    { label: "DynamoDB", href: "/aws/dynamodb/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🗄️ DynamoDB Internals</h1>
+      <p class="subtitle">Partitioning, indexes, adaptive capacity, request routing, and replication</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          DynamoDB is a fully managed key-value and document database. Data is <strong>partitioned by hash key</strong> across
+          storage nodes. Each partition holds up to <strong>10GB</strong> and supports <strong>3,000 RCU / 1,000 WCU</strong>.
+          All writes replicate to <strong>3 replicas</strong> using a Paxos-based consensus protocol.
+          DynamoDB's <strong>request router</strong> is a stateless fleet that authenticates, resolves partitions, and forwards requests.
+        </p>
+      </div>
+    </section>
+
+    <!-- Partition Mapping -->
+    <section class="sim-section">
+      <h2>🗂️ Partition Key Hashing</h2>
+      <p class="section-desc">Enter a partition key to see which partition stores it. DynamoDB hashes the key to determine placement.</p>
+      <div class="sim-controls">
+        <input type="text" id="pkInput" class="text-input" placeholder="e.g. user-42" value="user-42" />
+        <button id="hashBtn" class="action-btn primary-btn">🔑 Hash & Route</button>
+        <button id="resetHashBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="partition-ring">
+        <div class="ring-label">Hash Space (0 → 2¹²⁸)</div>
+        <div class="ring-viz">
+          <div class="ring-segment" id="seg-0">
+            <div class="seg-label">Partition 1</div>
+            <div class="seg-range">0 — 25%</div>
+            <div class="seg-items" id="segItems-0"></div>
+          </div>
+          <div class="ring-segment" id="seg-1">
+            <div class="seg-label">Partition 2</div>
+            <div class="seg-range">25% — 50%</div>
+            <div class="seg-items" id="segItems-1"></div>
+          </div>
+          <div class="ring-segment" id="seg-2">
+            <div class="seg-label">Partition 3</div>
+            <div class="seg-range">50% — 75%</div>
+            <div class="seg-items" id="segItems-2"></div>
+          </div>
+          <div class="ring-segment" id="seg-3">
+            <div class="seg-label">Partition 4</div>
+            <div class="seg-range">75% — 100%</div>
+            <div class="seg-items" id="segItems-3"></div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="hashStatus">Enter a key and click "Hash & Route"</div>
+    </section>
+
+    <!-- Request Router -->
+    <section class="sim-section">
+      <h2>🌐 Request Router</h2>
+      <p class="section-desc">Trace a GetItem or PutItem request through DynamoDB's internal architecture.</p>
+      <div class="sim-controls">
+        <button id="getItemBtn" class="action-btn primary-btn">📖 GetItem</button>
+        <button id="putItemBtn" class="action-btn primary-btn-secondary">✍️ PutItem</button>
+        <button id="resetRouterBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="arch-viz">
+        <div class="arch-col">
+          <div class="arch-node" id="ddb-client">
+            <div class="arch-icon">💻</div>
+            <div class="arch-label">Client</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ddb-a1">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ddb-router">
+            <div class="arch-icon">🌐</div>
+            <div class="arch-label">Request Router</div>
+            <div class="arch-detail">Auth, routing table</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ddb-a2">→</div>
+        <div class="arch-col">
+          <div class="arch-node" id="ddb-leader">
+            <div class="arch-icon">👑</div>
+            <div class="arch-label">Leader Replica</div>
+            <div class="arch-detail">Accepts writes</div>
+          </div>
+        </div>
+        <div class="arch-arrow" id="ddb-a3">→</div>
+        <div class="arch-col arch-storage">
+          <div class="arch-node az" id="ddb-r1">
+            <div class="arch-icon">💾</div>
+            <div class="arch-label">Replica 1</div>
+          </div>
+          <div class="arch-node az" id="ddb-r2">
+            <div class="arch-icon">💾</div>
+            <div class="arch-label">Replica 2</div>
+          </div>
+          <div class="arch-node az" id="ddb-r3">
+            <div class="arch-icon">💾</div>
+            <div class="arch-label">Replica 3</div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-status" id="routerStatus">Choose an operation</div>
+    </section>
+
+    <!-- Paxos Replication -->
+    <section class="sim-section">
+      <h2>🗳️ Paxos-Based Write Replication</h2>
+      <p class="section-desc">DynamoDB uses Multi-Paxos to replicate writes. A write succeeds when the leader + 1 follower acknowledge (quorum of 2/3).</p>
+      <div class="sim-controls">
+        <button id="paxosWriteBtn" class="action-btn primary-btn">✍️ Write Item</button>
+        <button id="paxosFailBtn" class="action-btn primary-btn-secondary">💥 Write (1 replica down)</button>
+        <button id="resetPaxosBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="paxos-viz">
+        <div class="paxos-leader">
+          <div class="paxos-node" id="px-leader">
+            <div class="px-icon">👑</div>
+            <div class="px-label">Leader</div>
+            <div class="px-state" id="px-leader-state">idle</div>
+          </div>
+        </div>
+        <div class="paxos-arrows">
+          <div class="paxos-arrow" id="px-a1">↙</div>
+          <div class="paxos-arrow" id="px-a2">↓</div>
+          <div class="paxos-arrow" id="px-a3">↘</div>
+        </div>
+        <div class="paxos-followers">
+          <div class="paxos-node" id="px-f1">
+            <div class="px-icon">💾</div>
+            <div class="px-label">Follower A</div>
+            <div class="px-state" id="px-f1-state">idle</div>
+          </div>
+          <div class="paxos-node" id="px-f2">
+            <div class="px-icon">💾</div>
+            <div class="px-label">Follower B</div>
+            <div class="px-state" id="px-f2-state">idle</div>
+          </div>
+          <div class="paxos-node" id="px-f3">
+            <div class="px-icon">💾</div>
+            <div class="px-label">Follower C</div>
+            <div class="px-state" id="px-f3-state">idle</div>
+          </div>
+        </div>
+        <div class="paxos-quorum" id="paxosQuorum"></div>
+      </div>
+      <div class="arch-status" id="paxosStatus">Click to see Paxos replication in action</div>
+    </section>
+
+    <!-- LSI vs GSI -->
+    <section class="sim-section">
+      <h2>📇 Local vs Global Secondary Indexes</h2>
+      <p class="section-desc">See how LSI and GSI differ in storage, partitioning, and consistency.</p>
+      <div class="sim-controls">
+        <button id="lsiBtn" class="action-btn primary-btn">📋 Query LSI</button>
+        <button id="gsiBtn" class="action-btn primary-btn-secondary">🌍 Query GSI</button>
+        <button id="resetIdxBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="idx-compare">
+        <div class="idx-col" id="lsi-col">
+          <h3>📋 Local Secondary Index (LSI)</h3>
+          <div class="idx-diagram">
+            <div class="idx-table">
+              <div class="idx-row header">
+                <span>PK (User)</span><span>SK (Date)</span><span>Data</span>
+              </div>
+              <div class="idx-row" id="lsi-r1"><span>Alice</span><span>2024-01</span><span>...</span></div>
+              <div class="idx-row" id="lsi-r2"><span>Alice</span><span>2024-02</span><span>...</span></div>
+              <div class="idx-row" id="lsi-r3"><span>Alice</span><span>2024-03</span><span>...</span></div>
+            </div>
+            <div class="idx-arrow-down">↓ Same partition</div>
+            <div class="idx-index" id="lsi-index">
+              <div class="idx-row header">
+                <span>PK (User)</span><span>LSI SK (Status)</span>
+              </div>
+              <div class="idx-row"><span>Alice</span><span>active</span></div>
+              <div class="idx-row"><span>Alice</span><span>archived</span></div>
+            </div>
+          </div>
+          <div class="idx-props" id="lsi-props"></div>
+        </div>
+        <div class="idx-col" id="gsi-col">
+          <h3>🌍 Global Secondary Index (GSI)</h3>
+          <div class="idx-diagram">
+            <div class="idx-table">
+              <div class="idx-row header">
+                <span>PK (User)</span><span>SK (Date)</span><span>Data</span>
+              </div>
+              <div class="idx-row" id="gsi-r1"><span>Alice</span><span>2024-01</span><span>...</span></div>
+              <div class="idx-row" id="gsi-r2"><span>Bob</span><span>2024-01</span><span>...</span></div>
+              <div class="idx-row" id="gsi-r3"><span>Carol</span><span>2024-02</span><span>...</span></div>
+            </div>
+            <div class="idx-arrow-down">↓ Re-partitioned</div>
+            <div class="idx-index" id="gsi-index">
+              <div class="idx-row header">
+                <span>GSI PK (Status)</span><span>GSI SK (Date)</span>
+              </div>
+              <div class="idx-row"><span>active</span><span>2024-01</span></div>
+              <div class="idx-row"><span>active</span><span>2024-02</span></div>
+            </div>
+          </div>
+          <div class="idx-props" id="gsi-props"></div>
+        </div>
+      </div>
+      <div class="arch-status" id="idxStatus">Click to compare LSI and GSI behavior</div>
+    </section>
+
+    <!-- Adaptive Capacity -->
+    <section class="sim-section">
+      <h2>📊 Adaptive Capacity & Burst</h2>
+      <p class="section-desc">DynamoDB adapts to uneven access patterns. Watch how hot partitions get extra throughput.</p>
+      <div class="sim-controls">
+        <button id="evenLoadBtn" class="action-btn primary-btn">⚖️ Even Load</button>
+        <button id="hotKeyBtn" class="action-btn primary-btn-secondary">🔥 Hot Partition</button>
+        <button id="adaptBtn" class="action-btn primary-btn-secondary">🧠 Adapt</button>
+        <button id="resetAdaptBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="adapt-viz">
+        <div class="adapt-header">
+          <span>Table: 400 WCU provisioned (100 per partition)</span>
+        </div>
+        <div class="adapt-partitions">
+          <div class="adapt-part" id="ap-0">
+            <div class="adapt-label">P1</div>
+            <div class="adapt-meter">
+              <div class="adapt-used" id="apUsed-0"></div>
+              <div class="adapt-limit" id="apLimit-0"></div>
+            </div>
+            <div class="adapt-numbers">
+              <span class="adapt-rps" id="apRps-0">0</span>
+              <span class="adapt-cap" id="apCap-0">/ 100 WCU</span>
+            </div>
+          </div>
+          <div class="adapt-part" id="ap-1">
+            <div class="adapt-label">P2</div>
+            <div class="adapt-meter">
+              <div class="adapt-used" id="apUsed-1"></div>
+              <div class="adapt-limit" id="apLimit-1"></div>
+            </div>
+            <div class="adapt-numbers">
+              <span class="adapt-rps" id="apRps-1">0</span>
+              <span class="adapt-cap" id="apCap-1">/ 100 WCU</span>
+            </div>
+          </div>
+          <div class="adapt-part" id="ap-2">
+            <div class="adapt-label">P3</div>
+            <div class="adapt-meter">
+              <div class="adapt-used" id="apUsed-2"></div>
+              <div class="adapt-limit" id="apLimit-2"></div>
+            </div>
+            <div class="adapt-numbers">
+              <span class="adapt-rps" id="apRps-2">0</span>
+              <span class="adapt-cap" id="apCap-2">/ 100 WCU</span>
+            </div>
+          </div>
+          <div class="adapt-part" id="ap-3">
+            <div class="adapt-label">P4</div>
+            <div class="adapt-meter">
+              <div class="adapt-used" id="apUsed-3"></div>
+              <div class="adapt-limit" id="apLimit-3"></div>
+            </div>
+            <div class="adapt-numbers">
+              <span class="adapt-rps" id="apRps-3">0</span>
+              <span class="adapt-cap" id="apCap-3">/ 100 WCU</span>
+            </div>
+          </div>
+        </div>
+        <div class="adapt-throttle" id="adaptThrottle"></div>
+      </div>
+      <div class="arch-status" id="adaptStatus">Explore adaptive capacity behavior</div>
+    </section>
+
+    <!-- Consistent vs Eventually Consistent Reads -->
+    <section class="sim-section">
+      <h2>🔄 Read Consistency</h2>
+      <p class="section-desc">Compare strongly consistent reads (from leader) vs eventually consistent reads (from any replica).</p>
+      <div class="sim-controls">
+        <button id="strongReadBtn" class="action-btn primary-btn">🔒 Strongly Consistent</button>
+        <button id="eventualReadBtn" class="action-btn primary-btn-secondary">⚡ Eventually Consistent</button>
+        <button id="resetReadBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="read-viz">
+        <div class="read-replicas">
+          <div class="read-replica" id="rr-leader">
+            <div class="rr-icon">👑</div>
+            <div class="rr-label">Leader</div>
+            <div class="rr-data" id="rr-leader-data">v5 ✓</div>
+          </div>
+          <div class="read-replica" id="rr-f1">
+            <div class="rr-icon">💾</div>
+            <div class="rr-label">Follower 1</div>
+            <div class="rr-data" id="rr-f1-data">v5 ✓</div>
+          </div>
+          <div class="read-replica" id="rr-f2">
+            <div class="rr-icon">💾</div>
+            <div class="rr-label">Follower 2</div>
+            <div class="rr-data" id="rr-f2-data">v4 (stale)</div>
+          </div>
+        </div>
+        <div class="read-result" id="readResult">Choose a consistency level</div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔑 Partition Key Design</h4>
+          <p>The partition key determines data distribution. High-cardinality keys (user IDs, UUIDs) spread load evenly. Low-cardinality keys (status, date) create hot partitions. Composite keys (PK + SK) enable rich query patterns.</p>
+        </div>
+        <div class="concept">
+          <h4>💰 On-Demand vs Provisioned</h4>
+          <p>On-demand mode: pay per request, auto-scales instantly. Provisioned mode: set RCU/WCU, cheaper at steady load. Auto-scaling adjusts provisioned capacity but has a 1-2 minute delay.</p>
+        </div>
+        <div class="concept">
+          <h4>🔄 DynamoDB Streams</h4>
+          <p>Ordered log of item changes (INSERT, MODIFY, REMOVE). Powers Lambda triggers, cross-region replication (Global Tables), and event-driven architectures. 24-hour retention.</p>
+        </div>
+        <div class="concept">
+          <h4>🌍 Global Tables</h4>
+          <p>Multi-region, multi-active replication. Uses DynamoDB Streams under the hood. Last-writer-wins conflict resolution. Sub-second replication latency between regions.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f97316; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #f97316; }
+    .primary-btn:hover { background: #ea580c; }
+    .primary-btn-secondary { background: #6366f1; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+    .text-input { padding: 0.5rem 0.75rem; background: #1e293b; border: 1px solid #334155; border-radius: 8px; color: #f1f5f9; font-family: monospace; font-size: 0.9rem; min-width: 150px; }
+    .arch-status { text-align: center; color: #94a3b8; margin-top: 0.5rem; font-family: monospace; font-size: 0.85rem; }
+
+    .arch-viz { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .arch-col { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+    .arch-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; min-width: 90px; transition: all 0.4s; }
+    .arch-node.active { border-color: #f97316; background: #431407; box-shadow: 0 0 16px rgba(249,115,22,0.3); }
+    .arch-node.az { min-width: 80px; padding: 0.7rem; }
+    .arch-icon { font-size: 1.5rem; }
+    .arch-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .arch-detail { color: #64748b; font-size: 0.7rem; }
+    .arch-arrow { color: #475569; font-size: 1.5rem; transition: color 0.3s; }
+    .arch-arrow.active { color: #f97316; }
+
+    /* Partition Ring */
+    .partition-ring { margin: 1rem 0; }
+    .ring-label { text-align: center; color: #64748b; font-size: 0.8rem; margin-bottom: 0.5rem; }
+    .ring-viz { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+    .ring-segment { background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 0.75rem; text-align: center; transition: all 0.3s; min-height: 80px; }
+    .ring-segment.active { border-color: #22c55e; background: #14532d; box-shadow: 0 0 12px rgba(34,197,94,0.3); }
+    .seg-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; }
+    .seg-range { color: #64748b; font-size: 0.7rem; font-family: monospace; }
+    .seg-items { margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+    .seg-item { background: #6366f1; color: white; font-size: 0.6rem; padding: 0.1rem 0.3rem; border-radius: 3px; animation: taskIn 0.3s; }
+    @keyframes taskIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+
+    /* Paxos */
+    .paxos-viz { margin: 1rem 0; text-align: center; }
+    .paxos-leader { margin-bottom: 0.5rem; }
+    .paxos-node { display: inline-block; background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem 1rem; text-align: center; min-width: 90px; transition: all 0.4s; margin: 0 0.3rem; }
+    .paxos-node.active { border-color: #f97316; background: #431407; }
+    .paxos-node.ack { border-color: #22c55e; background: #14532d; }
+    .paxos-node.down { border-color: #ef4444; background: #450a0a; opacity: 0.5; }
+    .px-icon { font-size: 1.2rem; }
+    .px-label { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; }
+    .px-state { color: #64748b; font-size: 0.7rem; font-family: monospace; }
+    .paxos-arrows { margin: 0.3rem 0; }
+    .paxos-arrow { display: inline-block; color: #475569; font-size: 1.2rem; margin: 0 1.5rem; transition: color 0.3s; }
+    .paxos-arrow.active { color: #f97316; }
+    .paxos-followers { display: flex; justify-content: center; gap: 0.5rem; }
+    .paxos-quorum { margin-top: 0.75rem; font-size: 0.9rem; font-weight: 700; min-height: 1.3em; }
+    .paxos-quorum.success { color: #22c55e; }
+    .paxos-quorum.warning { color: #eab308; }
+
+    /* Index Compare */
+    .idx-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .idx-col { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; transition: all 0.4s; }
+    .idx-col.active { border-color: #f97316; }
+    .idx-col h3 { color: #f1f5f9; font-size: 0.95rem; margin: 0 0 0.75rem; }
+    .idx-table, .idx-index { border-radius: 6px; overflow: hidden; }
+    .idx-row { display: grid; grid-template-columns: repeat(3, 1fr); padding: 0.3rem 0.5rem; font-size: 0.75rem; color: #94a3b8; border-bottom: 1px solid #33415533; }
+    .idx-index .idx-row { grid-template-columns: 1fr 1fr; }
+    .idx-row.header { color: #f97316; font-weight: 700; background: #1a1a2e; }
+    .idx-row.highlight { background: #431407; color: #f1f5f9; }
+    .idx-arrow-down { text-align: center; color: #64748b; font-size: 0.8rem; margin: 0.3rem 0; }
+    .idx-index { background: #0c1222; border: 1px solid #334155; border-radius: 6px; }
+    .idx-props { margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8; line-height: 1.5; }
+
+    /* Adaptive Capacity */
+    .adapt-viz { background: #1e293b; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+    .adapt-header { color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.75rem; text-align: center; }
+    .adapt-partitions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+    .adapt-part { text-align: center; }
+    .adapt-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-bottom: 0.3rem; }
+    .adapt-meter { height: 120px; background: #334155; border-radius: 6px; position: relative; overflow: hidden; display: flex; flex-direction: column-reverse; }
+    .adapt-used { background: #22c55e; transition: height 0.5s; border-radius: 0 0 6px 6px; }
+    .adapt-used.hot { background: #ef4444; }
+    .adapt-used.adapted { background: #f97316; }
+    .adapt-limit { position: absolute; top: 0; left: 0; right: 0; height: 2px; background: #ef4444; transition: top 0.5s; }
+    .adapt-numbers { margin-top: 0.3rem; }
+    .adapt-rps { color: #f1f5f9; font-family: monospace; font-size: 0.8rem; }
+    .adapt-cap { color: #64748b; font-size: 0.7rem; }
+    .adapt-throttle { text-align: center; color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2em; }
+
+    /* Read Consistency */
+    .read-viz { margin: 1rem 0; }
+    .read-replicas { display: flex; justify-content: center; gap: 1rem; margin-bottom: 1rem; }
+    .read-replica { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 0.75rem 1rem; text-align: center; min-width: 100px; transition: all 0.4s; }
+    .read-replica.active { border-color: #f97316; background: #431407; box-shadow: 0 0 12px rgba(249,115,22,0.2); }
+    .read-replica.selected { border-color: #22c55e; background: #14532d; }
+    .rr-icon { font-size: 1.2rem; }
+    .rr-label { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; }
+    .rr-data { color: #94a3b8; font-size: 0.75rem; font-family: monospace; }
+    .read-result { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; text-align: center; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .ring-viz { grid-template-columns: repeat(2, 1fr); } .idx-compare { grid-template-columns: 1fr; } .adapt-partitions { grid-template-columns: repeat(2, 1fr); } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // Hash helper
+    function simpleHash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    }
+
+    // Partition Key Hashing
+    $('hashBtn').onclick = () => {
+      const key = $('pkInput').value.trim();
+      if (!key) return;
+      const hash = simpleHash(key);
+      const seg = hash % 4;
+      document.querySelectorAll('.ring-segment').forEach((s, i) => s.classList.toggle('active', i === seg));
+      const item = document.createElement('span');
+      item.className = 'seg-item';
+      item.textContent = key;
+      $('segItems-' + seg).appendChild(item);
+      $('hashStatus').textContent = `"${key}" → hash 0x${hash.toString(16)} → Partition ${seg + 1}`;
+    };
+
+    $('resetHashBtn').onclick = () => {
+      document.querySelectorAll('.ring-segment').forEach(s => s.classList.remove('active'));
+      for (let i = 0; i < 4; i++) $('segItems-' + i).innerHTML = '';
+      $('hashStatus').textContent = 'Enter a key and click "Hash & Route"';
+    };
+
+    // Request Router
+    const ddbNodes = ['ddb-client','ddb-router','ddb-leader','ddb-r1','ddb-r2','ddb-r3'];
+    const ddbArrows = ['ddb-a1','ddb-a2','ddb-a3'];
+
+    function clearRouter() {
+      ddbNodes.forEach(n => $(n).classList.remove('active'));
+      ddbArrows.forEach(a => $(a).classList.remove('active'));
+      $('routerStatus').textContent = 'Choose an operation';
+    }
+
+    function animateRouter(steps) {
+      clearRouter();
+      steps.forEach(([nodeIds, arrowId, msg], i) => {
+        setTimeout(() => {
+          if (i > 0) steps[i-1][0].forEach(n => $(n).classList.remove('active'));
+          nodeIds.forEach(n => $(n).classList.add('active'));
+          if (arrowId) $(arrowId).classList.add('active');
+          $('routerStatus').textContent = msg;
+        }, i * 700);
+      });
+    }
+
+    $('getItemBtn').onclick = () => animateRouter([
+      [['ddb-client'], null, 'Client sends GetItem(PK="user-42")...'],
+      [['ddb-router'], 'ddb-a1', 'Request router: auth, hash PK → find partition...'],
+      [['ddb-r2'], 'ddb-a2', '✅ Eventually consistent read from any replica — 0.5 RCU'],
+    ]);
+
+    $('putItemBtn').onclick = () => animateRouter([
+      [['ddb-client'], null, 'Client sends PutItem(PK="user-42", ...)...'],
+      [['ddb-router'], 'ddb-a1', 'Request router: auth, hash PK → find leader...'],
+      [['ddb-leader'], 'ddb-a2', 'Leader writes to WAL, proposes to followers (Paxos)...'],
+      [['ddb-r1','ddb-r2','ddb-r3'], 'ddb-a3', '✅ Quorum achieved (2/3) — write committed — 1 WCU'],
+    ]);
+
+    $('resetRouterBtn').onclick = clearRouter;
+
+    // Paxos
+    const pxNodes = ['px-leader','px-f1','px-f2','px-f3'];
+    const pxArrows = ['px-a1','px-a2','px-a3'];
+
+    function clearPaxos() {
+      pxNodes.forEach(n => { $(n).classList.remove('active','ack','down'); });
+      pxArrows.forEach(a => $(a).classList.remove('active'));
+      ['px-leader-state','px-f1-state','px-f2-state','px-f3-state'].forEach(s => $(s).textContent = 'idle');
+      $('paxosQuorum').textContent = '';
+      $('paxosQuorum').className = 'paxos-quorum';
+      $('paxosStatus').textContent = 'Click to see Paxos replication in action';
+    }
+
+    $('paxosWriteBtn').onclick = () => {
+      clearPaxos();
+      setTimeout(() => {
+        $('px-leader').classList.add('active');
+        $('px-leader-state').textContent = 'PROPOSE';
+        $('paxosStatus').textContent = 'Leader receives write, writes to local WAL, sends Accept to followers...';
+      }, 300);
+      setTimeout(() => {
+        pxArrows.forEach(a => $(a).classList.add('active'));
+        ['px-f1','px-f2','px-f3'].forEach(n => { $(n).classList.add('active'); });
+        ['px-f1-state','px-f2-state','px-f3-state'].forEach(s => $(s).textContent = 'ACCEPT');
+        $('paxosStatus').textContent = 'Followers receive proposal, write to WAL...';
+      }, 900);
+      setTimeout(() => {
+        ['px-f1','px-f2','px-f3'].forEach(n => { $(n).classList.remove('active'); $(n).classList.add('ack'); });
+        ['px-f1-state','px-f2-state','px-f3-state'].forEach(s => $(s).textContent = 'ACK ✓');
+        $('px-leader').classList.remove('active');
+        $('px-leader').classList.add('ack');
+        $('px-leader-state').textContent = 'COMMITTED';
+        $('paxosQuorum').textContent = '✅ Quorum: 3/3 acknowledged — write committed';
+        $('paxosQuorum').className = 'paxos-quorum success';
+        $('paxosStatus').textContent = 'All 3 replicas acknowledged — strongly durable write';
+      }, 1600);
+    };
+
+    $('paxosFailBtn').onclick = () => {
+      clearPaxos();
+      setTimeout(() => {
+        $('px-leader').classList.add('active');
+        $('px-leader-state').textContent = 'PROPOSE';
+        $('px-f3').classList.add('down');
+        $('px-f3-state').textContent = 'DOWN ✗';
+      }, 300);
+      setTimeout(() => {
+        ['px-a1','px-a2'].forEach(a => $(a).classList.add('active'));
+        ['px-f1','px-f2'].forEach(n => $(n).classList.add('active'));
+        ['px-f1-state','px-f2-state'].forEach(s => $(s).textContent = 'ACCEPT');
+        $('paxosStatus').textContent = 'Follower C is down — sending to A and B only...';
+      }, 900);
+      setTimeout(() => {
+        ['px-f1','px-f2'].forEach(n => { $(n).classList.remove('active'); $(n).classList.add('ack'); });
+        ['px-f1-state','px-f2-state'].forEach(s => $(s).textContent = 'ACK ✓');
+        $('px-leader').classList.remove('active');
+        $('px-leader').classList.add('ack');
+        $('px-leader-state').textContent = 'COMMITTED';
+        $('paxosQuorum').textContent = '✅ Quorum: 2/3 acknowledged — write committed (C will catch up)';
+        $('paxosQuorum').className = 'paxos-quorum warning';
+        $('paxosStatus').textContent = 'Write succeeded with quorum of 2/3 — Follower C will replicate when back';
+      }, 1600);
+    };
+
+    $('resetPaxosBtn').onclick = clearPaxos;
+
+    // LSI vs GSI
+    $('lsiBtn').onclick = () => {
+      $('lsi-col').classList.add('active');
+      $('gsi-col').classList.remove('active');
+      document.querySelectorAll('#lsi-col .idx-row:not(.header)').forEach(r => r.classList.add('highlight'));
+      document.querySelectorAll('#gsi-col .idx-row:not(.header)').forEach(r => r.classList.remove('highlight'));
+      $('lsi-props').innerHTML = '<strong>LSI:</strong> Same partition key, alternate sort key. Co-located with base table. Strongly consistent reads supported. Must be created at table creation. 10GB limit per partition key value.';
+      $('gsi-props').innerHTML = '';
+      $('idxStatus').textContent = 'LSI: query within same PK using a different sort key — strongly consistent';
+    };
+
+    $('gsiBtn').onclick = () => {
+      $('gsi-col').classList.add('active');
+      $('lsi-col').classList.remove('active');
+      document.querySelectorAll('#gsi-col .idx-row:not(.header)').forEach(r => r.classList.add('highlight'));
+      document.querySelectorAll('#lsi-col .idx-row:not(.header)').forEach(r => r.classList.remove('highlight'));
+      $('gsi-props').innerHTML = '<strong>GSI:</strong> Different partition key entirely. Stored in separate partitions. Eventually consistent only. Can be added/removed anytime. Has its own provisioned throughput. Backfilled asynchronously.';
+      $('lsi-props').innerHTML = '';
+      $('idxStatus').textContent = 'GSI: re-partitioned copy with different PK — eventually consistent only';
+    };
+
+    $('resetIdxBtn').onclick = () => {
+      ['lsi-col','gsi-col'].forEach(c => $(c).classList.remove('active'));
+      document.querySelectorAll('.idx-row').forEach(r => r.classList.remove('highlight'));
+      $('lsi-props').innerHTML = '';
+      $('gsi-props').innerHTML = '';
+      $('idxStatus').textContent = 'Click to compare LSI and GSI behavior';
+    };
+
+    // Adaptive Capacity
+    const apState = [
+      { used: 0, cap: 100 },
+      { used: 0, cap: 100 },
+      { used: 0, cap: 100 },
+      { used: 0, cap: 100 },
+    ];
+
+    function renderAdapt() {
+      apState.forEach((p, i) => {
+        const pct = Math.min(100, (p.used / 200) * 100);
+        const limPct = Math.min(100, 100 - (p.cap / 200) * 100);
+        $('apUsed-' + i).style.height = pct + '%';
+        $('apUsed-' + i).className = 'adapt-used' + (p.used > p.cap ? ' hot' : p.cap > 100 ? ' adapted' : '');
+        $('apLimit-' + i).style.top = limPct + '%';
+        $('apRps-' + i).textContent = p.used;
+        $('apCap-' + i).textContent = '/ ' + p.cap + ' WCU';
+      });
+    }
+
+    $('evenLoadBtn').onclick = () => {
+      apState.forEach(p => { p.used = 80; p.cap = 100; });
+      renderAdapt();
+      $('adaptThrottle').textContent = '';
+      $('adaptStatus').textContent = 'Even load: 80 WCU per partition — all within limits ✅';
+    };
+
+    $('hotKeyBtn').onclick = () => {
+      apState[0].used = 180;
+      apState[1].used = 20;
+      apState[2].used = 15;
+      apState[3].used = 10;
+      renderAdapt();
+      $('adaptThrottle').textContent = '⚠️ Partition 1 throttled! 180 WCU exceeds 100 WCU limit → ProvisionedThroughputExceededException';
+      $('adaptStatus').textContent = 'Hot partition! P1 is getting 80% of traffic — throttling occurs';
+    };
+
+    $('adaptBtn').onclick = () => {
+      apState[0].cap = 200;
+      apState[1].cap = 75;
+      apState[2].cap = 65;
+      apState[3].cap = 60;
+      renderAdapt();
+      $('adaptThrottle').textContent = '';
+      $('adaptStatus').textContent = '🧠 Adaptive capacity: P1 borrows unused capacity from P2-P4. Total stays at 400 WCU.';
+    };
+
+    $('resetAdaptBtn').onclick = () => {
+      apState.forEach(p => { p.used = 0; p.cap = 100; });
+      renderAdapt();
+      $('adaptThrottle').textContent = '';
+      $('adaptStatus').textContent = 'Explore adaptive capacity behavior';
+    };
+
+    renderAdapt();
+
+    // Read Consistency
+    $('strongReadBtn').onclick = () => {
+      document.querySelectorAll('.read-replica').forEach(r => { r.classList.remove('active','selected'); });
+      $('rr-leader').classList.add('selected');
+      $('readResult').innerHTML = '🔒 <strong>Strongly consistent:</strong> Read from leader only. Always returns latest committed value (v5). Costs 1 RCU per 4KB. Higher latency (must go to leader\'s AZ).';
+    };
+
+    $('eventualReadBtn').onclick = () => {
+      document.querySelectorAll('.read-replica').forEach(r => { r.classList.remove('active','selected'); });
+      const pick = ['rr-leader','rr-f1','rr-f2'][Math.floor(Math.random() * 3)];
+      $(pick).classList.add('selected');
+      const isStale = pick === 'rr-f2';
+      $('readResult').innerHTML = isStale
+        ? '⚡ <strong>Eventually consistent:</strong> Routed to Follower 2 — returned <span style="color:#eab308">v4 (stale!)</span>. Replication typically &lt;100ms but not guaranteed. Costs 0.5 RCU per 4KB.'
+        : '⚡ <strong>Eventually consistent:</strong> Routed to ' + (pick === 'rr-leader' ? 'Leader' : 'Follower 1') + ' — returned v5 (fresh). Usually consistent, but no guarantee. Costs 0.5 RCU per 4KB.';
+    };
+
+    $('resetReadBtn').onclick = () => {
+      document.querySelectorAll('.read-replica').forEach(r => { r.classList.remove('active','selected'); });
+      $('readResult').textContent = 'Choose a consistency level';
+    };
+  </script>
+</BaseLayout>

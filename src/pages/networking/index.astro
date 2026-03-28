@@ -1,0 +1,67 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const topics = [
+  { title: "TCP", description: "Transport protocol internals — 3-way handshake, congestion control, flow control, Nagle's algorithm, and TIME_WAIT", href: "/networking/tcp/", status: "live", emoji: "🤝" },
+  { title: "HTTP/2", description: "Binary protocol internals — multiplexing, streams, HPACK header compression, server push, and flow control", href: "/networking/http2/", status: "live", emoji: "⚡" },
+  { title: "QUIC", description: "Next-gen transport — 0-RTT connections, connection migration, loss detection, and streams over UDP", href: "/networking/quic/", status: "live", emoji: "🚀" },
+  { title: "WebSocket", description: "Full-duplex communication — upgrade handshake, frame format, ping/pong, and multiplexing patterns", href: "/networking/websocket/", status: "live", emoji: "🔌" },
+  { title: "DNS", description: "Domain resolution internals — recursive queries, caching, DNSSEC, and anycast routing", href: "/dns/", status: "live", emoji: "🌐" },
+  { title: "TLS", description: "Transport security — certificate chains, handshake protocol, and cipher negotiation", href: "/tls/", status: "live", emoji: "🔒" },
+];
+---
+
+<BaseLayout 
+  title="Networking Internals" 
+  description="Interactive visualizations for understanding network protocol internals — TCP, HTTP/2, QUIC, WebSocket, and more"
+  breadcrumbs={[{ label: "Home", href: "/" }, { label: "Networking", href: "/networking/" }]}
+>
+  <section class="section-header">
+    <h1>🌐 Networking Internals</h1>
+    <p>
+      Network protocols are the backbone of every distributed system. These interactive visualizations
+      let you explore how TCP manages reliable delivery, how HTTP/2 multiplexes streams, how QUIC
+      achieves 0-RTT connections, and how WebSocket enables full-duplex communication.
+    </p>
+  </section>
+
+  <div class="topics-grid">
+    {topics.map(t => (
+      <a href={t.href} class={`topic-card ${t.status}`}>
+        <div class="topic-status">
+          {t.status === "live" ? "✦ Live" : "Coming soon"}
+        </div>
+        <h3>{t.emoji} {t.title}</h3>
+        <p>{t.description}</p>
+      </a>
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .section-header { margin-bottom: 40px; }
+  .section-header h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 16px; color: #fff; }
+  .section-header p { font-size: 1.1rem; color: #888; max-width: 700px; line-height: 1.7; }
+
+  .topics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+
+  .topic-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px; padding: 24px;
+    transition: all 0.3s; display: block; color: inherit;
+  }
+  .topic-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(59, 130, 246, 0.3);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
+  .topic-card.coming { opacity: 0.5; cursor: default; }
+  .topic-card.coming:hover { transform: none; background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.1); box-shadow: none; }
+
+  .topic-status { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; color: #666; }
+  .topic-card.live .topic-status { color: #22c55e; }
+  .topic-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; color: #fff; }
+  .topic-card p { font-size: 0.95rem; color: #888; line-height: 1.5; }
+</style>

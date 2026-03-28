@@ -1,0 +1,713 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="QUIC Protocol Internals — Interactive Visualization"
+  description="Explore QUIC's 0-RTT connections, connection migration, loss detection, and streams over UDP with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Networking", href: "/networking/" },
+    { label: "QUIC", href: "/networking/quic/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🚀 QUIC Protocol Internals</h1>
+      <p class="subtitle">0-RTT connections, connection migration, loss detection, and streams over UDP</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          QUIC is a <strong>UDP-based transport protocol</strong> designed by Google and standardized as RFC 9000.
+          It integrates TLS 1.3 encryption into the transport layer, eliminating the separate TLS handshake.
+          QUIC provides <strong>independent streams</strong> (no head-of-line blocking between streams),
+          <strong>0-RTT resumption</strong> for repeat connections, and <strong>connection migration</strong>
+          via connection IDs rather than IP:port tuples. It powers HTTP/3.
+        </p>
+      </div>
+    </section>
+
+    <!-- TCP+TLS vs QUIC Handshake -->
+    <section class="sim-section">
+      <h2>⚡ Handshake: TCP+TLS vs QUIC</h2>
+      <p class="section-desc">Compare the round trips needed. TCP+TLS 1.3 requires 2 RTTs minimum (TCP handshake + TLS). QUIC merges them into 1 RTT (or 0 for repeat connections).</p>
+      <div class="sim-controls">
+        <button id="hsCompare" class="action-btn primary-btn">🏁 Compare Handshakes</button>
+        <button id="hsReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hs-compare-viz">
+        <div class="hs-lane">
+          <div class="hs-lane-title">TCP + TLS 1.3 (2 RTT)</div>
+          <div class="hs-lane-diagram" id="tcpLane">
+            <div class="hs-lane-line"></div>
+            <div class="hs-lane-labels">
+              <span>Client</span><span>Server</span>
+            </div>
+          </div>
+          <div class="hs-lane-time" id="tcpTime">—</div>
+        </div>
+        <div class="hs-lane">
+          <div class="hs-lane-title">QUIC 1-RTT (Initial)</div>
+          <div class="hs-lane-diagram" id="quicLane">
+            <div class="hs-lane-line"></div>
+            <div class="hs-lane-labels">
+              <span>Client</span><span>Server</span>
+            </div>
+          </div>
+          <div class="hs-lane-time" id="quicTime">—</div>
+        </div>
+        <div class="hs-lane">
+          <div class="hs-lane-title">QUIC 0-RTT (Resumption)</div>
+          <div class="hs-lane-diagram" id="quic0Lane">
+            <div class="hs-lane-line"></div>
+            <div class="hs-lane-labels">
+              <span>Client</span><span>Server</span>
+            </div>
+          </div>
+          <div class="hs-lane-time" id="quic0Time">—</div>
+        </div>
+      </div>
+      <div class="hs-log" id="hsCompLog">Click "Compare" to see how QUIC reduces connection setup time.</div>
+    </section>
+
+    <!-- 0-RTT Deep Dive -->
+    <section class="sim-section">
+      <h2>🔑 0-RTT Resumption</h2>
+      <p class="section-desc">After the first connection, the client caches the server's transport parameters and a resumption token. On reconnect, it can send data immediately — but with replay attack caveats.</p>
+      <div class="sim-controls">
+        <button id="zeroFirst" class="action-btn primary-btn">🔗 First Connection</button>
+        <button id="zeroResume" class="action-btn primary-btn-secondary">⚡ 0-RTT Resume</button>
+        <button id="zeroReplay" class="action-btn warn-btn">🔁 Replay Attack</button>
+        <button id="zeroReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="zero-viz">
+        <div class="zero-col">
+          <div class="zero-node" id="z-client">
+            <div class="z-icon">💻</div>
+            <div class="z-label">Client</div>
+            <div class="z-cache" id="zClientCache">Cache: empty</div>
+          </div>
+        </div>
+        <div class="zero-msgs" id="zeroMsgs">
+          <div class="z-timeline-line"></div>
+        </div>
+        <div class="zero-col">
+          <div class="zero-node" id="z-server">
+            <div class="z-icon">🖥️</div>
+            <div class="z-label">Server</div>
+            <div class="z-cache" id="zServerCache">Cache: empty</div>
+          </div>
+        </div>
+      </div>
+      <div class="zero-log" id="zeroLog">Start with "First Connection" to establish the shared secret.</div>
+    </section>
+
+    <!-- Connection Migration -->
+    <section class="sim-section">
+      <h2>📱 Connection Migration</h2>
+      <p class="section-desc">QUIC connections are identified by Connection IDs, not IP:port tuples. When you switch from WiFi to cellular, the connection survives!</p>
+      <div class="sim-controls">
+        <button id="migStart" class="action-btn primary-btn">📶 Start on WiFi</button>
+        <button id="migSwitch" class="action-btn warn-btn">📱 Switch to Cellular</button>
+        <button id="migBack" class="action-btn primary-btn-secondary">📶 Back to WiFi</button>
+        <button id="migReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="mig-viz">
+        <div class="mig-device" id="migDevice">
+          <div class="mig-device-icon">📱</div>
+          <div class="mig-device-label">Client Device</div>
+          <div class="mig-net" id="migNet">Not connected</div>
+        </div>
+        <div class="mig-pipe" id="migPipe">
+          <div class="mig-pipe-inner" id="migPipeInner"></div>
+        </div>
+        <div class="mig-device" id="migServer">
+          <div class="mig-device-icon">🖥️</div>
+          <div class="mig-device-label">Server</div>
+          <div class="mig-conn-id" id="migConnId">—</div>
+        </div>
+      </div>
+      <div class="mig-details">
+        <div class="mig-detail"><span>Source IP:</span> <strong id="migSrcIp">—</strong></div>
+        <div class="mig-detail"><span>Connection ID:</span> <strong id="migCid">—</strong></div>
+        <div class="mig-detail"><span>Packets in-flight:</span> <strong id="migInflight">0</strong></div>
+        <div class="mig-detail"><span>Status:</span> <strong id="migStatus">Idle</strong></div>
+      </div>
+      <div class="mig-log" id="migLog">Click "Start on WiFi" to establish a QUIC connection.</div>
+    </section>
+
+    <!-- Independent Streams -->
+    <section class="sim-section">
+      <h2>🔀 Independent Streams (No HOL Blocking)</h2>
+      <p class="section-desc">Unlike TCP, a lost packet on one QUIC stream doesn't block other streams. Compare TCP (HTTP/2) vs QUIC (HTTP/3) under packet loss.</p>
+      <div class="sim-controls">
+        <button id="holStart" class="action-btn primary-btn">▶️ Start Transfer</button>
+        <button id="holDrop" class="action-btn warn-btn">💥 Drop Packet on Stream 1</button>
+        <button id="holReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="hol-viz">
+        <div class="hol-side">
+          <div class="hol-title">TCP (HTTP/2) — All streams blocked</div>
+          <div class="hol-streams" id="holTcp">
+            <div class="hol-stream" id="tcp-s1"><span class="hol-s-label">Stream 1</span><div class="hol-packets" id="tcp-s1-pkts"></div></div>
+            <div class="hol-stream" id="tcp-s3"><span class="hol-s-label">Stream 3</span><div class="hol-packets" id="tcp-s3-pkts"></div></div>
+            <div class="hol-stream" id="tcp-s5"><span class="hol-s-label">Stream 5</span><div class="hol-packets" id="tcp-s5-pkts"></div></div>
+          </div>
+        </div>
+        <div class="hol-side">
+          <div class="hol-title">QUIC (HTTP/3) — Only Stream 1 affected</div>
+          <div class="hol-streams" id="holQuic">
+            <div class="hol-stream" id="quic-s1"><span class="hol-s-label">Stream 1</span><div class="hol-packets" id="quic-s1-pkts"></div></div>
+            <div class="hol-stream" id="quic-s3"><span class="hol-s-label">Stream 3</span><div class="hol-packets" id="quic-s3-pkts"></div></div>
+            <div class="hol-stream" id="quic-s5"><span class="hol-s-label">Stream 5</span><div class="hol-packets" id="quic-s5-pkts"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="hol-log" id="holLog">Click "Start Transfer" then "Drop Packet" to see the difference.</div>
+    </section>
+
+    <!-- Loss Detection -->
+    <section class="sim-section">
+      <h2>🔍 Loss Detection & Recovery</h2>
+      <p class="section-desc">QUIC uses packet numbers (never reused), making loss detection unambiguous. It combines time-based and count-based detection.</p>
+      <div class="sim-controls">
+        <button id="ldSend" class="action-btn primary-btn">📤 Send Packet</button>
+        <button id="ldDrop" class="action-btn warn-btn">💥 Drop Next</button>
+        <button id="ldReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="ld-viz">
+        <div class="ld-timeline" id="ldTimeline"></div>
+        <div class="ld-stats">
+          <div class="ld-stat"><span>Packet #:</span> <strong id="ldPktNum">0</strong></div>
+          <div class="ld-stat"><span>Largest ACK'd:</span> <strong id="ldLargestAck">—</strong></div>
+          <div class="ld-stat"><span>Loss threshold:</span> <strong>3 packets</strong></div>
+          <div class="ld-stat"><span>Losses detected:</span> <strong id="ldLosses">0</strong></div>
+          <div class="ld-stat"><span>Smoothed RTT:</span> <strong id="ldSrtt">50ms</strong></div>
+        </div>
+      </div>
+      <div class="ld-log" id="ldLog">Send packets and observe how QUIC detects losses using packet number gaps.</div>
+    </section>
+
+    <!-- QUIC Packet Structure -->
+    <section class="sim-section">
+      <h2>📦 QUIC Packet Structure</h2>
+      <p class="section-desc">QUIC packets carry encrypted frames. Long headers are used during handshake; short headers for established connections.</p>
+      <div class="sim-controls">
+        <button id="pktLong" class="action-btn primary-btn">📋 Long Header (Initial)</button>
+        <button id="pktShort" class="action-btn primary-btn-secondary">📋 Short Header (1-RTT)</button>
+        <button id="pktReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="pkt-viz">
+        <div class="pkt-box" id="pktBox"></div>
+        <div class="pkt-desc" id="pktDesc">Click a packet type to see its structure.</div>
+      </div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔢 Connection IDs</h4>
+          <p>QUIC identifies connections by CIDs (up to 20 bytes), not 4-tuple. Both client and server choose their own CID. CIDs can be rotated for privacy (via NEW_CONNECTION_ID frames).</p>
+        </div>
+        <div class="concept">
+          <h4>🔐 Integrated TLS 1.3</h4>
+          <p>QUIC's crypto is built-in: the Initial packets use keys derived from the connection ID, then switch to TLS 1.3 handshake keys, and finally 1-RTT application keys.</p>
+        </div>
+        <div class="concept">
+          <h4>📊 ACK Frames</h4>
+          <p>QUIC ACKs reference packet numbers, which never repeat (unlike TCP sequence numbers). This eliminates the retransmission ambiguity problem entirely.</p>
+        </div>
+        <div class="concept">
+          <h4>🚫 Amplification Prevention</h4>
+          <p>Before address validation, the server can send at most 3× the data received. This prevents QUIC from being used in reflection/amplification DDoS attacks.</p>
+        </div>
+        <div class="concept">
+          <h4>📱 NAT Rebinding</h4>
+          <p>When NAT mappings change (common on mobile), QUIC detects the new path via PATH_CHALLENGE/PATH_RESPONSE and continues the connection without interruption.</p>
+        </div>
+        <div class="concept">
+          <h4>🌊 Congestion Control</h4>
+          <p>QUIC's congestion control is not fixed by the RFC — implementations choose their own algorithm. Google uses BBR, while others use NewReno or CUBIC variants.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #06b6d4; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #06b6d4; }
+    .primary-btn:hover { background: #0891b2; }
+    .primary-btn-secondary { background: #6366f1; }
+    .warn-btn { background: #ef4444; }
+    .warn-btn:hover { background: #dc2626; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    /* Handshake Compare */
+    .hs-compare-viz { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .hs-lane { flex: 1; min-width: 200px; background: #0c1322; border-radius: 8px; padding: 0.75rem; }
+    .hs-lane-title { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; text-align: center; margin-bottom: 0.5rem; }
+    .hs-lane-diagram { position: relative; min-height: 180px; }
+    .hs-lane-line { position: absolute; top: 20px; bottom: 0; left: 10%; right: 10%; border-left: 2px solid #334155; border-right: 2px solid #334155; }
+    .hs-lane-labels { display: flex; justify-content: space-between; padding: 0 5%; color: #64748b; font-size: 0.7rem; }
+    .hs-lane-msg { position: absolute; left: 10%; right: 10%; display: flex; align-items: center; animation: msgFade 0.3s ease-out; }
+    .hs-lane-msg.right { justify-content: flex-start; }
+    .hs-lane-msg.left { justify-content: flex-end; }
+    .hs-lane-msg .lm-line { flex: 1; height: 2px; }
+    .hs-lane-msg.right .lm-line { background: linear-gradient(to right, #06b6d4, transparent); }
+    .hs-lane-msg.left .lm-line { background: linear-gradient(to left, #06b6d4, transparent); }
+    .hs-lane-msg .lm-text { font-size: 0.65rem; font-family: monospace; color: #67e8f9; padding: 0.1rem 0.3rem; background: #0c1322; white-space: nowrap; }
+    .hs-lane-time { text-align: center; color: #f1f5f9; font-weight: 700; font-size: 1rem; margin-top: 0.5rem; }
+    .hs-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+    @keyframes msgFade { from { opacity: 0; } to { opacity: 1; } }
+
+    /* 0-RTT */
+    .zero-viz { display: flex; align-items: flex-start; justify-content: center; gap: 1rem; margin: 1rem 0; min-height: 250px; }
+    .zero-col { display: flex; flex-direction: column; align-items: center; min-width: 120px; }
+    .zero-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; transition: all 0.4s; }
+    .zero-node.active { border-color: #06b6d4; background: #083344; box-shadow: 0 0 16px rgba(6,182,212,0.3); }
+    .z-icon { font-size: 1.5rem; }
+    .z-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .z-cache { color: #64748b; font-size: 0.7rem; margin-top: 0.3rem; font-family: monospace; }
+    .zero-msgs { flex: 1; position: relative; min-height: 220px; min-width: 200px; }
+    .z-timeline-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+    .z-msg { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 0.3rem; animation: msgFade 0.5s ease-out; }
+    .z-msg.right { flex-direction: row; }
+    .z-msg.left { flex-direction: row-reverse; }
+    .z-msg .zm-arrow { color: #06b6d4; font-size: 1rem; flex-shrink: 0; }
+    .z-msg .zm-text { background: #083344; color: #67e8f9; font-family: monospace; font-size: 0.7rem; padding: 0.2rem 0.4rem; border-radius: 5px; white-space: nowrap; }
+    .z-msg .zm-data { background: #14532d; color: #4ade80; }
+    .zero-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    /* Migration */
+    .mig-viz { display: flex; align-items: center; justify-content: center; gap: 1rem; margin: 1rem 0; }
+    .mig-device { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; min-width: 120px; transition: all 0.4s; }
+    .mig-device.active { border-color: #06b6d4; box-shadow: 0 0 12px rgba(6,182,212,0.3); }
+    .mig-device-icon { font-size: 2rem; }
+    .mig-device-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; }
+    .mig-net { color: #64748b; font-size: 0.75rem; font-family: monospace; margin-top: 0.3rem; }
+    .mig-conn-id { color: #67e8f9; font-size: 0.75rem; font-family: monospace; margin-top: 0.3rem; }
+    .mig-pipe { flex: 1; height: 8px; background: #334155; border-radius: 4px; position: relative; overflow: hidden; }
+    .mig-pipe-inner { height: 100%; background: #06b6d4; border-radius: 4px; transition: all 0.5s; width: 0%; }
+    .mig-pipe-inner.active { width: 100%; }
+    .mig-pipe-inner.migrating { background: #f97316; animation: pulse 0.5s ease-in-out 3; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .mig-details { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.75rem; }
+    .mig-detail { background: #1e293b; border-radius: 6px; padding: 0.4rem 0.6rem; color: #94a3b8; font-size: 0.8rem; display: flex; justify-content: space-between; }
+    .mig-detail strong { color: #f1f5f9; font-family: monospace; }
+    .mig-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    /* HOL Blocking */
+    .hol-viz { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .hol-side { flex: 1; min-width: 260px; background: #0c1322; border-radius: 8px; padding: 0.75rem; }
+    .hol-title { color: #f1f5f9; font-weight: 700; font-size: 0.8rem; margin-bottom: 0.5rem; }
+    .hol-streams { display: flex; flex-direction: column; gap: 0.5rem; }
+    .hol-stream { display: flex; align-items: center; gap: 0.5rem; }
+    .hol-s-label { color: #94a3b8; font-size: 0.75rem; min-width: 60px; }
+    .hol-packets { display: flex; gap: 3px; flex: 1; }
+    .hol-pkt { width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: white; font-weight: 700; transition: all 0.3s; }
+    .hol-pkt.pending { background: #334155; }
+    .hol-pkt.sent { background: #22c55e; }
+    .hol-pkt.blocked { background: #ef4444; animation: pulse 0.5s ease-in-out infinite; }
+    .hol-pkt.dropped { background: #7f1d1d; border: 2px solid #ef4444; }
+    .hol-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    /* Loss Detection */
+    .ld-viz { margin-top: 1rem; }
+    .ld-timeline { display: flex; flex-wrap: wrap; gap: 4px; min-height: 50px; background: #0c1322; border-radius: 8px; padding: 0.5rem; }
+    .ld-pkt { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 0.75rem; color: white; font-weight: 700; animation: msgFade 0.3s ease-out; }
+    .ld-pkt.acked { background: #22c55e; }
+    .ld-pkt.inflight { background: #3b82f6; }
+    .ld-pkt.lost { background: #ef4444; text-decoration: line-through; }
+    .ld-pkt.dropped { background: #7f1d1d; border: 2px dashed #ef4444; }
+    .ld-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; margin-top: 0.75rem; }
+    .ld-stat { background: #1e293b; border-radius: 6px; padding: 0.4rem 0.6rem; color: #94a3b8; font-size: 0.8rem; display: flex; justify-content: space-between; }
+    .ld-stat strong { color: #f1f5f9; font-family: monospace; }
+    .ld-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; }
+
+    /* Packet Structure */
+    .pkt-viz { margin-top: 1rem; }
+    .pkt-box { background: #0c1322; border: 2px solid #334155; border-radius: 10px; padding: 0.5rem; min-height: 80px; }
+    .pkt-field { display: inline-flex; align-items: center; gap: 0.3rem; margin: 0.2rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-family: monospace; font-size: 0.75rem; color: white; }
+    .pkt-field.header { background: #06b6d4; }
+    .pkt-field.crypto { background: #8b5cf6; }
+    .pkt-field.payload { background: #22c55e; }
+    .pkt-field.padding { background: #334155; color: #94a3b8; }
+    .pkt-desc { margin-top: 0.5rem; color: #94a3b8; font-size: 0.85rem; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .hs-compare-viz { flex-direction: column; } .hol-viz { flex-direction: column; } .mig-details { grid-template-columns: 1fr; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function addLaneMsg(lane, dir, text, topPx, isData) {
+      const div = document.createElement('div');
+      div.className = 'hs-lane-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="lm-text">${text}</span><span class="lm-line"></span>`;
+      lane.appendChild(div);
+    }
+
+    function addZMsg(dir, text, topPx, isData) {
+      const div = document.createElement('div');
+      div.className = 'z-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="zm-arrow">${dir === 'right' ? '→→' : '←←'}</span><span class="zm-text ${isData ? 'zm-data' : ''}">${text}</span>`;
+      $('zeroMsgs').appendChild(div);
+    }
+
+    // === Handshake Compare ===
+    $('hsCompare').onclick = () => {
+      [$('tcpLane'), $('quicLane'), $('quic0Lane')].forEach(l => l.querySelectorAll('.hs-lane-msg').forEach(m => m.remove()));
+
+      // TCP + TLS 1.3
+      const tcp = $('tcpLane');
+      const steps = [
+        [200, 'right', 'SYN', 30],
+        [500, 'left', 'SYN-ACK', 50],
+        [800, 'right', 'ACK + ClientHello', 70],
+        [1100, 'left', 'ServerHello + Finished', 90],
+        [1400, 'right', 'Finished + Data', 110],
+      ];
+      steps.forEach(([delay, dir, text, top]) => {
+        setTimeout(() => addLaneMsg(tcp, dir, text, top), delay);
+      });
+      setTimeout(() => { $('tcpTime').textContent = '2 RTT'; }, 1500);
+
+      // QUIC 1-RTT
+      const quic = $('quicLane');
+      const qSteps = [
+        [200, 'right', 'Initial + ClientHello', 30],
+        [700, 'left', 'Initial + ServerHello', 60],
+        [1200, 'right', '1-RTT Data', 90],
+      ];
+      qSteps.forEach(([delay, dir, text, top]) => {
+        setTimeout(() => addLaneMsg(quic, dir, text, top), delay);
+      });
+      setTimeout(() => { $('quicTime').textContent = '1 RTT'; }, 1300);
+
+      // QUIC 0-RTT
+      const q0 = $('quic0Lane');
+      const q0Steps = [
+        [200, 'right', '0-RTT + Data!', 30],
+        [700, 'left', 'ServerHello + Data', 60],
+      ];
+      q0Steps.forEach(([delay, dir, text, top]) => {
+        setTimeout(() => addLaneMsg(q0, dir, text, top), delay);
+      });
+      setTimeout(() => { $('quic0Time').textContent = '0 RTT ⚡'; }, 800);
+
+      $('hsCompLog').textContent = 'TCP+TLS: 2 RTT. QUIC Initial: 1 RTT. QUIC Resumption: 0 RTT — data sent immediately!';
+    };
+
+    $('hsReset').onclick = () => {
+      [$('tcpLane'), $('quicLane'), $('quic0Lane')].forEach(l => l.querySelectorAll('.hs-lane-msg').forEach(m => m.remove()));
+      $('tcpTime').textContent = '—'; $('quicTime').textContent = '—'; $('quic0Time').textContent = '—';
+      $('hsCompLog').textContent = 'Click "Compare" to see how QUIC reduces connection setup time.';
+    };
+
+    // === 0-RTT ===
+    let hasToken = false;
+
+    $('zeroFirst').onclick = () => {
+      $('zeroMsgs').querySelectorAll('.z-msg').forEach(m => m.remove());
+      $('z-client').classList.add('active');
+      $('z-server').classList.add('active');
+
+      setTimeout(() => { addZMsg('right', 'ClientHello', 5); $('zeroLog').textContent = 'Client sends Initial with ClientHello...'; }, 200);
+      setTimeout(() => { addZMsg('left', 'ServerHello + Cert', 35); $('zeroLog').textContent = 'Server responds with ServerHello, certificate, finished...'; }, 800);
+      setTimeout(() => { addZMsg('right', 'Finished', 65); $('zeroLog').textContent = 'Client verifies, sends Finished. Connection established!'; }, 1400);
+      setTimeout(() => {
+        addZMsg('left', 'NEW_TOKEN + transport params', 95);
+        hasToken = true;
+        $('zClientCache').textContent = 'Cache: ✅ token + params';
+        $('zServerCache').textContent = 'Cache: ✅ session ticket';
+        $('zeroLog').textContent = '✅ Server sends NEW_TOKEN. Client caches it for 0-RTT resumption next time.';
+      }, 2000);
+    };
+
+    $('zeroResume').onclick = () => {
+      if (!hasToken) { $('zeroLog').textContent = '⚠️ No cached token! Do "First Connection" first.'; return; }
+      $('zeroMsgs').querySelectorAll('.z-msg').forEach(m => m.remove());
+
+      setTimeout(() => {
+        addZMsg('right', '0-RTT: ClientHello + Data!', 5, true);
+        $('zeroLog').textContent = '⚡ Client sends ClientHello + application data in FIRST packet (0-RTT)!';
+      }, 200);
+      setTimeout(() => {
+        addZMsg('left', 'ServerHello + 1-RTT Data', 40);
+        $('zeroLog').textContent = '✅ Server accepted 0-RTT data. Full handshake completes in background. Zero round trips to first data!';
+      }, 800);
+    };
+
+    $('zeroReplay').onclick = () => {
+      $('zeroMsgs').querySelectorAll('.z-msg').forEach(m => m.remove());
+      setTimeout(() => {
+        addZMsg('right', '0-RTT: POST /transfer (replayed!)', 5, true);
+        $('zeroLog').textContent = '🔁 DANGER: Attacker replays the 0-RTT packet. The POST /transfer could execute twice!';
+      }, 200);
+      setTimeout(() => {
+        addZMsg('left', '⚠️ Server processes duplicate!', 40);
+        $('zeroLog').textContent = '⚠️ 0-RTT data is NOT replay-protected! Only use for idempotent requests (GET). Never for POST/PUT with side effects.';
+      }, 800);
+    };
+
+    $('zeroReset').onclick = () => {
+      hasToken = false;
+      $('zeroMsgs').querySelectorAll('.z-msg').forEach(m => m.remove());
+      $('z-client').classList.remove('active'); $('z-server').classList.remove('active');
+      $('zClientCache').textContent = 'Cache: empty'; $('zServerCache').textContent = 'Cache: empty';
+      $('zeroLog').textContent = 'Start with "First Connection" to establish the shared secret.';
+    };
+
+    // === Connection Migration ===
+    const cid = Array.from({ length: 8 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+    let migConnected = false;
+
+    $('migStart').onclick = () => {
+      migConnected = true;
+      $('migDevice').classList.add('active'); $('migServer').classList.add('active');
+      $('migPipeInner').className = 'mig-pipe-inner active';
+      $('migNet').textContent = '📶 WiFi';
+      $('migSrcIp').textContent = '192.168.1.42:54321';
+      $('migCid').textContent = '0x' + cid;
+      $('migConnId').textContent = 'CID: 0x' + cid;
+      $('migInflight').textContent = '3';
+      $('migStatus').textContent = '✅ Connected';
+      $('migLog').textContent = `Connected via WiFi. CID=0x${cid}. IP doesn't matter — only CID identifies the connection.`;
+    };
+
+    $('migSwitch').onclick = () => {
+      if (!migConnected) { $('migLog').textContent = 'Connect first!'; return; }
+      $('migPipeInner').className = 'mig-pipe-inner active migrating';
+      $('migNet').textContent = '📱 Cellular';
+      $('migSrcIp').textContent = '10.0.0.7:61234';
+      $('migStatus').textContent = '🔄 Migrating...';
+      $('migLog').textContent = 'Switched to cellular! IP changed but CID is the same → connection survives.';
+
+      setTimeout(() => {
+        $('migPipeInner').className = 'mig-pipe-inner active';
+        $('migStatus').textContent = '✅ Migrated';
+        $('migInflight').textContent = '2';
+        $('migLog').textContent = `✅ Migration complete! Same CID (0x${cid}), new IP. Server validated path with PATH_CHALLENGE. No reconnect needed!`;
+      }, 1500);
+    };
+
+    $('migBack').onclick = () => {
+      if (!migConnected) { $('migLog').textContent = 'Connect first!'; return; }
+      $('migPipeInner').className = 'mig-pipe-inner active migrating';
+      $('migNet').textContent = '📶 WiFi';
+      $('migSrcIp').textContent = '192.168.1.42:54999';
+      $('migStatus').textContent = '🔄 Migrating...';
+      setTimeout(() => {
+        $('migPipeInner').className = 'mig-pipe-inner active';
+        $('migStatus').textContent = '✅ Migrated';
+        $('migLog').textContent = `✅ Back on WiFi. New port but same CID. Connection seamless — user notices nothing.`;
+      }, 1000);
+    };
+
+    $('migReset').onclick = () => {
+      migConnected = false;
+      $('migDevice').classList.remove('active'); $('migServer').classList.remove('active');
+      $('migPipeInner').className = 'mig-pipe-inner';
+      $('migNet').textContent = 'Not connected'; $('migConnId').textContent = '—';
+      $('migSrcIp').textContent = '—'; $('migCid').textContent = '—';
+      $('migInflight').textContent = '0'; $('migStatus').textContent = 'Idle';
+      $('migLog').textContent = 'Click "Start on WiFi" to establish a QUIC connection.';
+    };
+
+    // === HOL Blocking ===
+    let holRunning = false;
+    let holDropped = false;
+
+    $('holStart').onclick = () => {
+      holRunning = true; holDropped = false;
+      ['tcp-s1-pkts','tcp-s3-pkts','tcp-s5-pkts','quic-s1-pkts','quic-s3-pkts','quic-s5-pkts'].forEach(id => $(id).innerHTML = '');
+      const streams = ['s1','s3','s5'];
+
+      let pktIdx = 0;
+      const interval = setInterval(() => {
+        if (!holRunning || pktIdx >= 8) { clearInterval(interval); return; }
+        streams.forEach(s => {
+          const tcpEl = $(`tcp-${s}-pkts`);
+          const quicEl = $(`quic-${s}-pkts`);
+          const pkt = document.createElement('div');
+          pkt.className = 'hol-pkt sent';
+          pkt.textContent = pktIdx + 1;
+
+          if (holDropped && s === 's1' && pktIdx === 0) {
+            // This was the dropped packet — show retransmit
+            pkt.className = 'hol-pkt sent';
+            pkt.textContent = 'R';
+          }
+
+          const tcpPkt = pkt.cloneNode(true);
+          const quicPkt = pkt.cloneNode(true);
+
+          if (holDropped && !holDropped.resolved) {
+            tcpPkt.className = 'hol-pkt blocked';
+            if (s === 's1') {
+              quicPkt.className = 'hol-pkt blocked';
+            }
+          }
+
+          tcpEl.appendChild(tcpPkt);
+          quicEl.appendChild(quicPkt);
+        });
+        pktIdx++;
+      }, 400);
+
+      $('holLog').textContent = 'Transferring data on 3 streams... Click "Drop Packet" to see HOL blocking difference.';
+    };
+
+    $('holDrop').onclick = () => {
+      if (!holRunning) { $('holLog').textContent = 'Start a transfer first!'; return; }
+      holDropped = { resolved: false };
+
+      // Mark TCP: all streams blocked
+      document.querySelectorAll('#holTcp .hol-pkt.sent').forEach(p => {
+        if (p.parentElement.id !== 'tcp-s1-pkts') p.className = 'hol-pkt blocked';
+      });
+      // Add dropped marker to TCP stream 1
+      const tcpDrop = document.createElement('div');
+      tcpDrop.className = 'hol-pkt dropped'; tcpDrop.textContent = '✕';
+      $('tcp-s1-pkts').appendChild(tcpDrop);
+
+      // QUIC: only stream 1 blocked
+      const quicDrop = document.createElement('div');
+      quicDrop.className = 'hol-pkt dropped'; quicDrop.textContent = '✕';
+      $('quic-s1-pkts').appendChild(quicDrop);
+
+      $('holLog').textContent = '💥 Packet lost on Stream 1! TCP: ALL streams stall. QUIC: Only Stream 1 waits for retransmit.';
+
+      setTimeout(() => {
+        holDropped.resolved = true;
+        document.querySelectorAll('#holTcp .hol-pkt.blocked').forEach(p => p.className = 'hol-pkt sent');
+        document.querySelectorAll('#holQuic .hol-pkt.blocked').forEach(p => p.className = 'hol-pkt sent');
+        $('holLog').textContent = '✅ Retransmit received. TCP recovered all streams. QUIC streams 3 & 5 were never affected!';
+      }, 2000);
+    };
+
+    $('holReset').onclick = () => {
+      holRunning = false; holDropped = false;
+      ['tcp-s1-pkts','tcp-s3-pkts','tcp-s5-pkts','quic-s1-pkts','quic-s3-pkts','quic-s5-pkts'].forEach(id => $(id).innerHTML = '');
+      $('holLog').textContent = 'Click "Start Transfer" then "Drop Packet" to see the difference.';
+    };
+
+    // === Loss Detection ===
+    let ldPktNum = 0, ldLargestAck = -1, ldLosses = 0, ldDropNext = false;
+    let ldPackets = []; // { num, status: 'acked'|'inflight'|'lost'|'dropped' }
+
+    $('ldSend').onclick = () => {
+      ldPktNum++;
+      if (ldDropNext) {
+        ldPackets.push({ num: ldPktNum, status: 'dropped' });
+        ldDropNext = false;
+        $('ldLog').textContent = `Packet #${ldPktNum} dropped! It won't be ACK'd.`;
+      } else {
+        ldPackets.push({ num: ldPktNum, status: 'inflight' });
+        setTimeout(() => {
+          const pkt = ldPackets.find(p => p.num === ldPktNum && p.status === 'inflight');
+          if (pkt) {
+            pkt.status = 'acked';
+            ldLargestAck = Math.max(ldLargestAck, pkt.num);
+            // Check for losses: any unacked packet more than 3 behind largest ACK
+            ldPackets.forEach(p => {
+              if ((p.status === 'dropped' || p.status === 'inflight') && ldLargestAck - p.num >= 3) {
+                p.status = 'lost';
+                ldLosses++;
+              }
+            });
+            renderLD();
+          }
+        }, 300);
+      }
+      renderLD();
+    };
+
+    $('ldDrop').onclick = () => { ldDropNext = true; $('ldLog').textContent = '💥 Next packet will be dropped!'; };
+
+    function renderLD() {
+      $('ldTimeline').innerHTML = '';
+      ldPackets.forEach(p => {
+        const el = document.createElement('div');
+        el.className = 'ld-pkt ' + p.status;
+        el.textContent = '#' + p.num;
+        $('ldTimeline').appendChild(el);
+      });
+      $('ldPktNum').textContent = ldPktNum;
+      $('ldLargestAck').textContent = ldLargestAck >= 0 ? '#' + ldLargestAck : '—';
+      $('ldLosses').textContent = ldLosses;
+      if (ldLosses > 0) $('ldLog').textContent = `Loss detected! Packet gap ≥ 3 from largest ACK (#${ldLargestAck}). QUIC never reuses packet numbers — no ambiguity.`;
+    }
+
+    $('ldReset').onclick = () => {
+      ldPktNum = 0; ldLargestAck = -1; ldLosses = 0; ldDropNext = false; ldPackets = [];
+      $('ldTimeline').innerHTML = '';
+      $('ldPktNum').textContent = '0'; $('ldLargestAck').textContent = '—'; $('ldLosses').textContent = '0';
+      $('ldLog').textContent = 'Send packets and observe how QUIC detects losses using packet number gaps.';
+    };
+
+    // === Packet Structure ===
+    $('pktLong').onclick = () => {
+      $('pktBox').innerHTML = `
+        <div class="pkt-field header">Form: 1 (Long)</div>
+        <div class="pkt-field header">Fixed: 1</div>
+        <div class="pkt-field header">Type: Initial (00)</div>
+        <div class="pkt-field header">Version: 0x00000001</div>
+        <div class="pkt-field header">DCID Len + DCID</div>
+        <div class="pkt-field header">SCID Len + SCID</div>
+        <div class="pkt-field header">Token Length + Token</div>
+        <div class="pkt-field header">Pkt Length</div>
+        <div class="pkt-field header">Pkt Number</div>
+        <div class="pkt-field crypto">CRYPTO Frame (ClientHello)</div>
+        <div class="pkt-field padding">PADDING (to 1200 bytes min)</div>
+      `;
+      $('pktDesc').textContent = 'Long Header: Used for Initial, Handshake, and 0-RTT packets. Contains version, both connection IDs, and is padded to 1200+ bytes to prevent amplification attacks.';
+    };
+
+    $('pktShort').onclick = () => {
+      $('pktBox').innerHTML = `
+        <div class="pkt-field header">Form: 0 (Short)</div>
+        <div class="pkt-field header">Fixed: 1</div>
+        <div class="pkt-field header">Spin Bit</div>
+        <div class="pkt-field header">Key Phase</div>
+        <div class="pkt-field header">DCID (from server)</div>
+        <div class="pkt-field header">Pkt Number (1-4 bytes)</div>
+        <div class="pkt-field payload">STREAM Frame (app data)</div>
+        <div class="pkt-field payload">ACK Frame</div>
+      `;
+      $('pktDesc').textContent = 'Short Header: Used after handshake. Minimal overhead — no version, no SCID, variable-length packet number. The spin bit helps measure RTT without decryption.';
+    };
+
+    $('pktReset').onclick = () => {
+      $('pktBox').innerHTML = '';
+      $('pktDesc').textContent = 'Click a packet type to see its structure.';
+    };
+  </script>
+</BaseLayout>

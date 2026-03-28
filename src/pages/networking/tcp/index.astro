@@ -1,0 +1,822 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="TCP Internals — Interactive Visualization"
+  description="Explore TCP's 3-way handshake, congestion control, flow control, Nagle's algorithm, and TIME_WAIT with interactive visualizations."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "Networking", href: "/networking/" },
+    { label: "TCP", href: "/networking/tcp/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🤝 TCP Internals</h1>
+      <p class="subtitle">Reliable delivery, congestion control, and connection lifecycle</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          TCP (Transmission Control Protocol) provides <strong>reliable, ordered, error-checked</strong> delivery of bytes
+          between applications. It uses sequence numbers for ordering, acknowledgments for reliability, and a sliding
+          window for flow control. TCP's congestion control algorithms prevent network collapse while maximizing throughput.
+          Understanding TCP internals is essential for diagnosing latency, optimizing throughput, and building high-performance networked systems.
+        </p>
+      </div>
+    </section>
+
+    <!-- 3-Way Handshake -->
+    <section class="sim-section">
+      <h2>🤝 Three-Way Handshake</h2>
+      <p class="section-desc">Watch TCP establish a connection. Each side picks a random ISN (Initial Sequence Number) and they exchange SYN/ACK segments.</p>
+      <div class="sim-controls">
+        <button id="startHandshake" class="action-btn primary-btn">▶️ Start Handshake</button>
+        <button id="resetHandshake" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="handshake-viz">
+        <div class="hs-col">
+          <div class="hs-node" id="hs-client">
+            <div class="hs-icon">💻</div>
+            <div class="hs-label">Client</div>
+            <div class="hs-state" id="hs-client-state">CLOSED</div>
+          </div>
+        </div>
+        <div class="hs-messages" id="hs-messages">
+          <div class="hs-timeline-line"></div>
+        </div>
+        <div class="hs-col">
+          <div class="hs-node" id="hs-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Server</div>
+            <div class="hs-state" id="hs-server-state">LISTEN</div>
+          </div>
+        </div>
+      </div>
+      <div class="hs-log" id="hsLog">Click "Start Handshake" to begin...</div>
+    </section>
+
+    <!-- Sequence & Acknowledgment -->
+    <section class="sim-section">
+      <h2>📨 Sequence Numbers & ACKs</h2>
+      <p class="section-desc">Send data segments and watch how sequence numbers and acknowledgments track reliable delivery. Try triggering a retransmission!</p>
+      <div class="sim-controls">
+        <button id="sendSegment" class="action-btn primary-btn">📤 Send Segment</button>
+        <button id="dropSegment" class="action-btn warn-btn">💥 Drop Next Segment</button>
+        <button id="resetSeq" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="seq-viz">
+        <div class="seq-header">
+          <span class="seq-side">Sender</span>
+          <span class="seq-middle">Network</span>
+          <span class="seq-side">Receiver</span>
+        </div>
+        <div class="seq-timeline" id="seqTimeline"></div>
+        <div class="seq-stats">
+          <div class="seq-stat">
+            <div class="stat-label">Next Seq #</div>
+            <div class="stat-value" id="nextSeq">1000</div>
+          </div>
+          <div class="seq-stat">
+            <div class="stat-label">Expected ACK</div>
+            <div class="stat-value" id="expectedAck">1000</div>
+          </div>
+          <div class="seq-stat">
+            <div class="stat-label">Segments Sent</div>
+            <div class="stat-value" id="segSent">0</div>
+          </div>
+          <div class="seq-stat">
+            <div class="stat-label">Retransmits</div>
+            <div class="stat-value" id="retransmits">0</div>
+          </div>
+        </div>
+      </div>
+      <div class="seq-log" id="seqLog">Ready to send...</div>
+    </section>
+
+    <!-- Congestion Control -->
+    <section class="sim-section">
+      <h2>📈 Congestion Control (Reno)</h2>
+      <p class="section-desc">Visualize TCP Reno's congestion window (cwnd) over time. Watch slow start, congestion avoidance, and fast recovery in action.</p>
+      <div class="sim-controls">
+        <button id="ccStep" class="action-btn primary-btn">📶 Send Round</button>
+        <button id="ccLoss" class="action-btn warn-btn">💥 Packet Loss</button>
+        <button id="cc3Dup" class="action-btn primary-btn-secondary">🔁 3 Dup ACKs</button>
+        <button id="ccAuto" class="action-btn primary-btn-secondary">⏩ Auto-Run</button>
+        <button id="ccReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="cc-viz">
+        <div class="cc-chart">
+          <canvas id="ccCanvas" width="700" height="280"></canvas>
+        </div>
+        <div class="cc-info">
+          <div class="cc-stat">
+            <span class="cc-stat-label">cwnd</span>
+            <span class="cc-stat-value" id="ccCwnd">1</span>
+            <span class="cc-stat-unit">segments</span>
+          </div>
+          <div class="cc-stat">
+            <span class="cc-stat-label">ssthresh</span>
+            <span class="cc-stat-value" id="ccSsthresh">64</span>
+            <span class="cc-stat-unit">segments</span>
+          </div>
+          <div class="cc-stat">
+            <span class="cc-stat-label">Phase</span>
+            <span class="cc-stat-value phase-label" id="ccPhase">Slow Start</span>
+          </div>
+          <div class="cc-stat">
+            <span class="cc-stat-label">Round</span>
+            <span class="cc-stat-value" id="ccRound">0</span>
+          </div>
+        </div>
+      </div>
+      <div class="cc-legend">
+        <span class="legend-item"><span class="legend-color" style="background:#22c55e"></span> Slow Start</span>
+        <span class="legend-item"><span class="legend-color" style="background:#3b82f6"></span> Congestion Avoidance</span>
+        <span class="legend-item"><span class="legend-color" style="background:#f97316"></span> Fast Recovery</span>
+        <span class="legend-item"><span class="legend-color" style="background:#ef4444"></span> Timeout Loss</span>
+      </div>
+    </section>
+
+    <!-- Flow Control -->
+    <section class="sim-section">
+      <h2>🪟 Sliding Window & Flow Control</h2>
+      <p class="section-desc">The receiver advertises a window size (rwnd) to prevent buffer overflow. Watch how the sender adjusts its transmission rate.</p>
+      <div class="sim-controls">
+        <button id="fwSend" class="action-btn primary-btn">📤 Send Data</button>
+        <button id="fwConsume" class="action-btn primary-btn-secondary">📥 App Reads</button>
+        <button id="fwShrink" class="action-btn warn-btn">📉 Shrink Window</button>
+        <button id="fwReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="window-viz">
+        <div class="window-bar-label">Sender's View of Receiver Buffer:</div>
+        <div class="window-bar" id="windowBar"></div>
+        <div class="window-labels">
+          <span>0</span>
+          <span id="windowAck">ACK'd</span>
+          <span id="windowSent">Sent</span>
+          <span id="windowEdge">Window Edge</span>
+          <span>Buffer End</span>
+        </div>
+        <div class="window-stats">
+          <div class="ws-stat"><span>Receiver Buffer:</span> <span id="fwBufSize">16</span> KB</div>
+          <div class="ws-stat"><span>Used:</span> <span id="fwBufUsed">0</span> KB</div>
+          <div class="ws-stat"><span>rwnd (advertised):</span> <span id="fwRwnd">16</span> KB</div>
+          <div class="ws-stat"><span>Can send:</span> <span id="fwCanSend">16</span> KB</div>
+        </div>
+      </div>
+      <div class="fw-log" id="fwLog">Receiver buffer is empty, full window available.</div>
+    </section>
+
+    <!-- Nagle's Algorithm -->
+    <section class="sim-section">
+      <h2>✉️ Nagle's Algorithm</h2>
+      <p class="section-desc">Nagle's algorithm coalesces small writes into larger segments to reduce overhead. Compare behavior with and without Nagle.</p>
+      <div class="sim-controls">
+        <label class="toggle-label">
+          <input type="checkbox" id="nagleToggle" checked />
+          <span>Nagle's Algorithm</span>
+        </label>
+        <button id="nagleType" class="action-btn primary-btn">⌨️ Type Character</button>
+        <button id="nagleBurst" class="action-btn primary-btn-secondary">💬 Type 10 Chars</button>
+        <button id="nagleReset" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="nagle-viz">
+        <div class="nagle-col">
+          <div class="nagle-header">Application Buffer</div>
+          <div class="nagle-buffer" id="nagleAppBuf"></div>
+        </div>
+        <div class="nagle-arrow">→</div>
+        <div class="nagle-col">
+          <div class="nagle-header">TCP Send Buffer</div>
+          <div class="nagle-buffer" id="nagleTcpBuf"></div>
+        </div>
+        <div class="nagle-arrow">→</div>
+        <div class="nagle-col">
+          <div class="nagle-header">Wire (segments)</div>
+          <div class="nagle-wire" id="nagleWire"></div>
+        </div>
+      </div>
+      <div class="nagle-stats">
+        <div class="ns-stat">Chars buffered: <strong id="nagleChars">0</strong></div>
+        <div class="ns-stat">Segments sent: <strong id="nagleSegs">0</strong></div>
+        <div class="ns-stat">Bytes/segment: <strong id="nagleRatio">-</strong></div>
+      </div>
+      <div class="nagle-log" id="nagleLog">Type characters to see how Nagle's algorithm batches small writes.</div>
+    </section>
+
+    <!-- TIME_WAIT -->
+    <section class="sim-section">
+      <h2>⏳ Connection Teardown & TIME_WAIT</h2>
+      <p class="section-desc">Watch the 4-way FIN handshake and understand why TIME_WAIT lasts 2×MSL (Maximum Segment Lifetime).</p>
+      <div class="sim-controls">
+        <button id="startClose" class="action-btn primary-btn">🔌 Close Connection</button>
+        <button id="resetClose" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+
+      <div class="close-viz">
+        <div class="close-col">
+          <div class="close-node" id="cl-client">
+            <div class="hs-icon">💻</div>
+            <div class="hs-label">Active Close</div>
+            <div class="hs-state" id="cl-client-state">ESTABLISHED</div>
+          </div>
+        </div>
+        <div class="close-messages" id="closeMessages">
+          <div class="hs-timeline-line"></div>
+        </div>
+        <div class="close-col">
+          <div class="close-node" id="cl-server">
+            <div class="hs-icon">🖥️</div>
+            <div class="hs-label">Passive Close</div>
+            <div class="hs-state" id="cl-server-state">ESTABLISHED</div>
+          </div>
+        </div>
+      </div>
+      <div class="tw-timer" id="twTimer"></div>
+      <div class="close-log" id="closeLog">Click "Close Connection" to start the teardown sequence.</div>
+    </section>
+
+    <!-- Key Concepts -->
+    <section class="concepts-section">
+      <h2>📚 Key Concepts</h2>
+      <div class="concepts-grid">
+        <div class="concept">
+          <h4>🔢 Sequence Numbers</h4>
+          <p>Each byte in a TCP stream has a unique 32-bit sequence number. The ISN is chosen randomly to prevent spoofing and collisions with old connections.</p>
+        </div>
+        <div class="concept">
+          <h4>⏱️ Retransmission Timer</h4>
+          <p>TCP uses an adaptive RTO (Retransmission Timeout) based on measured RTT. Jacobson's algorithm smooths RTT estimates: SRTT = 0.875×SRTT + 0.125×RTT.</p>
+        </div>
+        <div class="concept">
+          <h4>📊 SACK</h4>
+          <p>Selective ACK lets the receiver report non-contiguous received blocks, enabling the sender to retransmit only missing segments instead of everything after a gap.</p>
+        </div>
+        <div class="concept">
+          <h4>🚫 TCP_NODELAY</h4>
+          <p>Setting TCP_NODELAY disables Nagle's algorithm. Essential for latency-sensitive apps (games, trading) where small messages must be sent immediately.</p>
+        </div>
+        <div class="concept">
+          <h4>🔄 TCP Fast Open</h4>
+          <p>TFO allows data in the SYN packet using a cached cookie, eliminating one RTT for repeat connections. Requires kernel support and application opt-in.</p>
+        </div>
+        <div class="concept">
+          <h4>📉 ECN</h4>
+          <p>Explicit Congestion Notification allows routers to signal congestion without dropping packets. TCP reduces cwnd proactively, improving throughput under load.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #3b82f6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .action-btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; color: white; }
+    .primary-btn { background: #3b82f6; }
+    .primary-btn:hover { background: #2563eb; }
+    .primary-btn-secondary { background: #6366f1; }
+    .warn-btn { background: #ef4444; }
+    .warn-btn:hover { background: #dc2626; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+
+    .sim-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1.5rem; }
+
+    /* Handshake */
+    .handshake-viz, .close-viz { display: flex; align-items: flex-start; justify-content: center; gap: 1rem; margin: 1rem 0; min-height: 250px; }
+    .hs-col, .close-col { display: flex; flex-direction: column; align-items: center; min-width: 120px; }
+    .hs-node, .close-node { background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 1rem; text-align: center; transition: all 0.4s; }
+    .hs-node.active, .close-node.active { border-color: #3b82f6; background: #1e3a5f; box-shadow: 0 0 16px rgba(59,130,246,0.3); }
+    .hs-icon { font-size: 1.5rem; }
+    .hs-label { color: #f1f5f9; font-weight: 700; font-size: 0.85rem; margin-top: 0.3rem; }
+    .hs-state { color: #fbbf24; font-family: monospace; font-size: 0.75rem; margin-top: 0.25rem; }
+    .hs-messages, .close-messages { flex: 1; position: relative; min-height: 200px; min-width: 200px; }
+    .hs-timeline-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+    .hs-msg { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 0.3rem; animation: msgFade 0.5s ease-out; }
+    .hs-msg.right { flex-direction: row; }
+    .hs-msg.left { flex-direction: row-reverse; }
+    .hs-msg .msg-arrow { color: #3b82f6; font-size: 1.2rem; flex-shrink: 0; }
+    .hs-msg .msg-text { background: #1e3a5f; color: #93c5fd; font-family: monospace; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 6px; white-space: nowrap; }
+    @keyframes msgFade { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .hs-log, .close-log, .seq-log, .fw-log, .nagle-log { background: #1e293b; border-radius: 8px; padding: 0.75rem; color: #cbd5e1; font-size: 0.85rem; font-family: monospace; margin-top: 0.5rem; min-height: 2rem; }
+
+    /* Sequence Numbers */
+    .seq-viz { margin-top: 1rem; }
+    .seq-header { display: flex; justify-content: space-between; color: #94a3b8; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .seq-side { width: 80px; text-align: center; }
+    .seq-middle { flex: 1; text-align: center; }
+    .seq-timeline { min-height: 200px; position: relative; background: #0c1322; border-radius: 8px; padding: 0.5rem; overflow-y: auto; max-height: 300px; }
+    .seq-row { display: flex; align-items: center; margin: 0.3rem 0; animation: msgFade 0.3s ease-out; }
+    .seq-row .sr-sender { width: 80px; text-align: center; }
+    .seq-row .sr-line { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+    .seq-row .sr-receiver { width: 80px; text-align: center; }
+    .seq-row .sr-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .seq-row .sr-arrow { height: 2px; flex: 1; position: relative; }
+    .seq-row .sr-arrow::after { content: ''; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; }
+    .seq-row.send .sr-arrow { background: #3b82f6; }
+    .seq-row.send .sr-arrow::after { border-left-color: #3b82f6; }
+    .seq-row.ack .sr-arrow { background: #22c55e; direction: rtl; }
+    .seq-row.ack .sr-arrow::after { left: -1px; right: auto; border-right-color: #22c55e; border-left-color: transparent; }
+    .seq-row.drop .sr-arrow { background: #ef4444; border-style: dashed; }
+    .seq-row .sr-label { position: absolute; top: -14px; font-size: 0.7rem; font-family: monospace; color: #cbd5e1; white-space: nowrap; }
+    .seq-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin-top: 1rem; }
+    .seq-stat { background: #1e293b; border-radius: 8px; padding: 0.5rem; text-align: center; }
+    .stat-label { color: #64748b; font-size: 0.7rem; }
+    .stat-value { color: #f1f5f9; font-size: 1.1rem; font-weight: 700; font-family: monospace; }
+
+    /* Congestion Control */
+    .cc-viz { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .cc-chart { flex: 1; min-width: 300px; background: #0c1322; border-radius: 8px; padding: 0.5rem; }
+    .cc-chart canvas { width: 100%; height: auto; }
+    .cc-info { display: flex; flex-direction: column; gap: 0.5rem; min-width: 160px; }
+    .cc-stat { background: #1e293b; border-radius: 8px; padding: 0.5rem 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+    .cc-stat-label { color: #64748b; font-size: 0.75rem; min-width: 60px; }
+    .cc-stat-value { color: #f1f5f9; font-weight: 700; font-family: monospace; font-size: 1rem; }
+    .cc-stat-unit { color: #475569; font-size: 0.7rem; }
+    .phase-label { font-size: 0.8rem !important; }
+    .cc-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.75rem; }
+    .legend-item { display: flex; align-items: center; gap: 0.3rem; color: #94a3b8; font-size: 0.8rem; }
+    .legend-color { width: 12px; height: 12px; border-radius: 3px; }
+
+    /* Flow Control Window */
+    .window-viz { margin-top: 1rem; }
+    .window-bar-label { color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .window-bar { display: flex; height: 40px; border-radius: 8px; overflow: hidden; border: 1px solid #334155; }
+    .wb-seg { height: 100%; transition: width 0.3s; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; color: white; }
+    .wb-acked { background: #334155; }
+    .wb-inflight { background: #3b82f6; }
+    .wb-available { background: #1e3a5f; border: 1px dashed #3b82f6; }
+    .wb-blocked { background: #1c1917; }
+    .window-labels { display: flex; justify-content: space-between; color: #64748b; font-size: 0.7rem; margin-top: 0.2rem; }
+    .window-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.75rem; }
+    .ws-stat { background: #1e293b; border-radius: 6px; padding: 0.4rem 0.6rem; color: #cbd5e1; font-size: 0.85rem; display: flex; justify-content: space-between; }
+
+    /* Nagle */
+    .nagle-viz { display: flex; align-items: flex-start; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+    .nagle-col { flex: 1; min-width: 140px; }
+    .nagle-header { color: #94a3b8; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .nagle-buffer { background: #0c1322; border-radius: 8px; padding: 0.5rem; min-height: 60px; font-family: monospace; color: #fbbf24; font-size: 0.85rem; word-break: break-all; }
+    .nagle-arrow { color: #475569; font-size: 1.5rem; margin-top: 2rem; }
+    .nagle-wire { background: #0c1322; border-radius: 8px; padding: 0.5rem; min-height: 60px; }
+    .nw-seg { display: inline-block; background: #1e3a5f; border: 1px solid #3b82f6; border-radius: 4px; padding: 0.15rem 0.3rem; margin: 0.1rem; font-family: monospace; font-size: 0.75rem; color: #93c5fd; }
+    .nagle-stats { display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap; }
+    .ns-stat { color: #94a3b8; font-size: 0.85rem; }
+    .ns-stat strong { color: #f1f5f9; }
+    .toggle-label { display: flex; align-items: center; gap: 0.4rem; color: #cbd5e1; font-size: 0.9rem; cursor: pointer; }
+    .toggle-label input { width: 16px; height: 16px; }
+
+    /* TIME_WAIT */
+    .tw-timer { text-align: center; color: #fbbf24; font-family: monospace; font-size: 1rem; margin-top: 0.5rem; min-height: 1.5rem; }
+
+    .concepts-section { margin-bottom: 2rem; }
+    .concepts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .concepts-grid { grid-template-columns: 1fr; } .seq-stats { grid-template-columns: repeat(2, 1fr); } .cc-viz { flex-direction: column; } }
+    .concept { background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .concept h4 { color: #f1f5f9; margin: 0 0 0.3rem; }
+    .concept p { color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+  </style>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // === 3-Way Handshake ===
+    function addHsMsg(container, dir, text, topPx) {
+      const div = document.createElement('div');
+      div.className = 'hs-msg ' + dir;
+      div.style.top = topPx + 'px';
+      div.innerHTML = `<span class="msg-arrow">${dir === 'right' ? '→→→' : '←←←'}</span><span class="msg-text">${text}</span>`;
+      container.appendChild(div);
+    }
+
+    $('startHandshake').onclick = () => {
+      const msgs = $('hs-messages');
+      msgs.querySelectorAll('.hs-msg').forEach(m => m.remove());
+      const isn1 = Math.floor(Math.random() * 90000) + 10000;
+      const isn2 = Math.floor(Math.random() * 90000) + 10000;
+
+      setTimeout(() => {
+        $('hs-client-state').textContent = 'SYN_SENT';
+        $('hs-client').classList.add('active');
+        addHsMsg(msgs, 'right', `SYN seq=${isn1}`, 10);
+        $('hsLog').textContent = `Client → SYN seq=${isn1} (ISN chosen randomly)`;
+      }, 200);
+
+      setTimeout(() => {
+        $('hs-server-state').textContent = 'SYN_RCVD';
+        $('hs-server').classList.add('active');
+        addHsMsg(msgs, 'left', `SYN-ACK seq=${isn2} ack=${isn1 + 1}`, 60);
+        $('hsLog').textContent = `Server → SYN-ACK seq=${isn2}, ack=${isn1 + 1}`;
+      }, 1000);
+
+      setTimeout(() => {
+        $('hs-client-state').textContent = 'ESTABLISHED';
+        addHsMsg(msgs, 'right', `ACK ack=${isn2 + 1}`, 110);
+        $('hsLog').textContent = `Client → ACK ack=${isn2 + 1} — Connection ESTABLISHED ✅`;
+      }, 1800);
+
+      setTimeout(() => {
+        $('hs-server-state').textContent = 'ESTABLISHED';
+        $('hsLog').textContent = `✅ Both sides ESTABLISHED. ISNs: client=${isn1}, server=${isn2}. Ready to transfer data.`;
+      }, 2400);
+    };
+
+    $('resetHandshake').onclick = () => {
+      $('hs-messages').querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('hs-client-state').textContent = 'CLOSED';
+      $('hs-server-state').textContent = 'LISTEN';
+      $('hs-client').classList.remove('active');
+      $('hs-server').classList.remove('active');
+      $('hsLog').textContent = 'Click "Start Handshake" to begin...';
+    };
+
+    // === Sequence Numbers & ACKs ===
+    let seqNum = 1000;
+    let ackNum = 1000;
+    let segCount = 0;
+    let retransCount = 0;
+    let dropNext = false;
+    const MSS = 1460;
+
+    function addSeqRow(type, label) {
+      const tl = $('seqTimeline');
+      const row = document.createElement('div');
+      row.className = 'seq-row ' + type;
+      row.innerHTML = `
+        <div class="sr-sender">${type === 'send' || type === 'drop' ? '●' : ''}</div>
+        <div class="sr-line"><div class="sr-arrow"><span class="sr-label">${label}</span></div></div>
+        <div class="sr-receiver">${type === 'ack' ? '●' : ''}</div>
+      `;
+      tl.appendChild(row);
+      tl.scrollTop = tl.scrollHeight;
+    }
+
+    $('sendSegment').onclick = () => {
+      const thisSeq = seqNum;
+      if (dropNext) {
+        addSeqRow('drop', `SEQ=${thisSeq} len=${MSS} ✕ DROPPED`);
+        $('seqLog').textContent = `Segment dropped! Sender will retransmit after RTO timeout...`;
+        dropNext = false;
+        segCount++;
+        setTimeout(() => {
+          retransCount++;
+          addSeqRow('send', `SEQ=${thisSeq} len=${MSS} [RETRANSMIT]`);
+          setTimeout(() => {
+            seqNum = thisSeq + MSS;
+            ackNum = seqNum;
+            addSeqRow('ack', `ACK=${seqNum}`);
+            $('nextSeq').textContent = seqNum;
+            $('expectedAck').textContent = seqNum;
+            $('retransmits').textContent = retransCount;
+            $('seqLog').textContent = `Retransmit successful. ACK=${seqNum}`;
+          }, 300);
+        }, 800);
+      } else {
+        segCount++;
+        addSeqRow('send', `SEQ=${thisSeq} len=${MSS}`);
+        seqNum += MSS;
+        setTimeout(() => {
+          ackNum = seqNum;
+          addSeqRow('ack', `ACK=${seqNum}`);
+          $('seqLog').textContent = `Segment delivered. ACK=${seqNum} (expecting next byte)`;
+        }, 400);
+      }
+      $('nextSeq').textContent = seqNum;
+      $('expectedAck').textContent = ackNum;
+      $('segSent').textContent = segCount;
+    };
+
+    $('dropSegment').onclick = () => {
+      dropNext = true;
+      $('seqLog').textContent = '💥 Next segment will be dropped!';
+    };
+
+    $('resetSeq').onclick = () => {
+      seqNum = 1000; ackNum = 1000; segCount = 0; retransCount = 0; dropNext = false;
+      $('seqTimeline').innerHTML = '';
+      $('nextSeq').textContent = '1000'; $('expectedAck').textContent = '1000';
+      $('segSent').textContent = '0'; $('retransmits').textContent = '0';
+      $('seqLog').textContent = 'Ready to send...';
+    };
+
+    // === Congestion Control ===
+    let cwnd = 1, ssthresh = 64, ccRound = 0;
+    let ccHistory = [{ round: 0, cwnd: 1, phase: 'ss' }];
+    let autoRunning = false;
+
+    function getPhase() {
+      return cwnd < ssthresh ? 'Slow Start' : 'Congestion Avoidance';
+    }
+
+    function getPhaseKey() {
+      return cwnd < ssthresh ? 'ss' : 'ca';
+    }
+
+    function ccStepFn() {
+      ccRound++;
+      if (cwnd < ssthresh) {
+        cwnd = Math.min(cwnd * 2, ssthresh);
+      } else {
+        cwnd += 1;
+      }
+      ccHistory.push({ round: ccRound, cwnd, phase: getPhaseKey() });
+      updateCC();
+    }
+
+    function ccLossFn() {
+      ccRound++;
+      ssthresh = Math.max(Math.floor(cwnd / 2), 2);
+      cwnd = 1;
+      ccHistory.push({ round: ccRound, cwnd, phase: 'loss' });
+      updateCC();
+    }
+
+    function cc3DupFn() {
+      ccRound++;
+      ssthresh = Math.max(Math.floor(cwnd / 2), 2);
+      cwnd = ssthresh + 3;
+      ccHistory.push({ round: ccRound, cwnd, phase: 'fr' });
+      updateCC();
+    }
+
+    function updateCC() {
+      $('ccCwnd').textContent = cwnd;
+      $('ccSsthresh').textContent = ssthresh;
+      $('ccPhase').textContent = getPhase();
+      $('ccRound').textContent = ccRound;
+      drawCC();
+    }
+
+    function drawCC() {
+      const canvas = $('ccCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      if (ccHistory.length < 2) return;
+      const maxCwnd = Math.max(...ccHistory.map(h => h.cwnd), 10);
+      const xStep = (W - 60) / Math.max(ccHistory.length - 1, 1);
+
+      // Grid
+      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const y = H - 30 - (i / 5) * (H - 50);
+        ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(W - 10, y); ctx.stroke();
+        ctx.fillStyle = '#64748b'; ctx.font = '10px monospace';
+        ctx.fillText(Math.round(maxCwnd * i / 5), 5, y + 4);
+      }
+
+      // ssthresh line
+      const ssy = H - 30 - (ssthresh / maxCwnd) * (H - 50);
+      ctx.strokeStyle = '#f97316'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.moveTo(50, ssy); ctx.lineTo(W - 10, ssy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f97316'; ctx.font = '10px monospace';
+      ctx.fillText('ssthresh=' + ssthresh, W - 100, ssy - 5);
+
+      // Line
+      const colors = { ss: '#22c55e', ca: '#3b82f6', fr: '#f97316', loss: '#ef4444' };
+      ctx.lineWidth = 2;
+      for (let i = 1; i < ccHistory.length; i++) {
+        const x0 = 50 + (i - 1) * xStep, x1 = 50 + i * xStep;
+        const y0 = H - 30 - (ccHistory[i - 1].cwnd / maxCwnd) * (H - 50);
+        const y1 = H - 30 - (ccHistory[i].cwnd / maxCwnd) * (H - 50);
+        ctx.strokeStyle = colors[ccHistory[i].phase] || '#3b82f6';
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.fillStyle = colors[ccHistory[i].phase] || '#3b82f6';
+        ctx.beginPath(); ctx.arc(x1, y1, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    $('ccStep').onclick = ccStepFn;
+    $('ccLoss').onclick = ccLossFn;
+    $('cc3Dup').onclick = cc3DupFn;
+    $('ccReset').onclick = () => {
+      cwnd = 1; ssthresh = 64; ccRound = 0; autoRunning = false;
+      ccHistory = [{ round: 0, cwnd: 1, phase: 'ss' }];
+      updateCC();
+    };
+    $('ccAuto').onclick = () => {
+      if (autoRunning) { autoRunning = false; return; }
+      autoRunning = true;
+      const run = () => {
+        if (!autoRunning || ccRound > 100) { autoRunning = false; return; }
+        if (Math.random() < 0.05) ccLossFn();
+        else if (Math.random() < 0.03) cc3DupFn();
+        else ccStepFn();
+        setTimeout(run, 200);
+      };
+      run();
+    };
+    drawCC();
+
+    // === Flow Control ===
+    let bufSize = 16, bufUsed = 0, inflight = 0;
+
+    function updateFW() {
+      const rwnd = bufSize - bufUsed;
+      const canSend = Math.max(rwnd - inflight, 0);
+      const bar = $('windowBar');
+      const total = bufSize;
+      bar.innerHTML = '';
+
+      const acked = bufUsed - inflight;
+      if (acked > 0) bar.innerHTML += `<div class="wb-seg wb-acked" style="width:${(acked/total)*100}%">ACK'd</div>`;
+      if (inflight > 0) bar.innerHTML += `<div class="wb-seg wb-inflight" style="width:${(inflight/total)*100}%">In-flight</div>`;
+      if (canSend > 0) bar.innerHTML += `<div class="wb-seg wb-available" style="width:${(canSend/total)*100}%">Available</div>`;
+      const blocked = total - bufUsed - canSend;
+      if (blocked > 0) bar.innerHTML += `<div class="wb-seg wb-blocked" style="width:${(blocked/total)*100}%"></div>`;
+
+      $('fwBufSize').textContent = bufSize;
+      $('fwBufUsed').textContent = bufUsed;
+      $('fwRwnd').textContent = rwnd;
+      $('fwCanSend').textContent = canSend;
+    }
+
+    $('fwSend').onclick = () => {
+      const rwnd = bufSize - bufUsed;
+      if (rwnd <= 0) { $('fwLog').textContent = '⚠️ Zero window! Sender is blocked (will probe with ZWP).'; return; }
+      const amt = Math.min(2, rwnd);
+      bufUsed += amt; inflight += amt;
+      updateFW();
+      $('fwLog').textContent = `Sent ${amt} KB. Receiver buffer ${bufUsed}/${bufSize} KB used. rwnd=${bufSize - bufUsed} KB`;
+      setTimeout(() => { inflight = Math.max(inflight - amt, 0); updateFW(); }, 500);
+    };
+
+    $('fwConsume').onclick = () => {
+      if (bufUsed <= 0) { $('fwLog').textContent = 'Buffer already empty!'; return; }
+      const amt = Math.min(4, bufUsed);
+      bufUsed -= amt;
+      updateFW();
+      $('fwLog').textContent = `App consumed ${amt} KB. Buffer freed → rwnd=${bufSize - bufUsed} KB (window update sent)`;
+    };
+
+    $('fwShrink').onclick = () => {
+      bufSize = Math.max(bufSize - 4, 4);
+      bufUsed = Math.min(bufUsed, bufSize);
+      updateFW();
+      $('fwLog').textContent = `Receiver shrunk buffer to ${bufSize} KB. rwnd=${bufSize - bufUsed} KB`;
+    };
+
+    $('fwReset').onclick = () => {
+      bufSize = 16; bufUsed = 0; inflight = 0;
+      updateFW();
+      $('fwLog').textContent = 'Receiver buffer is empty, full window available.';
+    };
+    updateFW();
+
+    // === Nagle's Algorithm ===
+    let nagleChars = 0, nagleSegs = 0, totalCharsOnWire = 0;
+    let nagleBuf = '';
+    let nagleAckPending = false;
+
+    function flushNagle(chars) {
+      nagleSegs++;
+      totalCharsOnWire += chars.length;
+      const wire = $('nagleWire');
+      const seg = document.createElement('span');
+      seg.className = 'nw-seg';
+      seg.textContent = `[${chars}]`;
+      wire.appendChild(seg);
+      $('nagleSegs').textContent = nagleSegs;
+      $('nagleRatio').textContent = (totalCharsOnWire / nagleSegs).toFixed(1);
+    }
+
+    function nagleAddChar(ch) {
+      nagleChars++;
+      $('nagleChars').textContent = nagleChars;
+      const nagleOn = $('nagleToggle').checked;
+
+      if (!nagleOn) {
+        // No Nagle: send immediately
+        $('nagleAppBuf').textContent = '';
+        $('nagleTcpBuf').textContent = '';
+        flushNagle(ch);
+        $('nagleLog').textContent = `TCP_NODELAY: sent '${ch}' immediately (1-byte segment + 40-byte header overhead!)`;
+      } else {
+        nagleBuf += ch;
+        $('nagleAppBuf').textContent = '';
+        $('nagleTcpBuf').textContent = nagleBuf;
+
+        if (!nagleAckPending) {
+          // No unacknowledged data: send immediately
+          const toSend = nagleBuf;
+          nagleBuf = '';
+          nagleAckPending = true;
+          flushNagle(toSend);
+          $('nagleTcpBuf').textContent = nagleBuf;
+          $('nagleLog').textContent = `Nagle: No outstanding ACK, sent '${toSend}' immediately.`;
+          // Simulate ACK arriving
+          setTimeout(() => {
+            nagleAckPending = false;
+            if (nagleBuf.length > 0) {
+              const batch = nagleBuf;
+              nagleBuf = '';
+              flushNagle(batch);
+              $('nagleTcpBuf').textContent = '';
+              $('nagleLog').textContent = `Nagle: ACK arrived, flushed buffered '${batch}' as one segment.`;
+            }
+          }, 400);
+        } else {
+          $('nagleLog').textContent = `Nagle: ACK pending, buffering '${ch}' (buf='${nagleBuf}')`;
+        }
+      }
+    }
+
+    $('nagleType').onclick = () => {
+      const ch = String.fromCharCode(65 + nagleChars % 26);
+      nagleAddChar(ch);
+    };
+
+    $('nagleBurst').onclick = () => {
+      for (let i = 0; i < 10; i++) {
+        setTimeout(() => {
+          const ch = String.fromCharCode(65 + nagleChars % 26);
+          nagleAddChar(ch);
+        }, i * 50);
+      }
+    };
+
+    $('nagleReset').onclick = () => {
+      nagleChars = 0; nagleSegs = 0; totalCharsOnWire = 0; nagleBuf = ''; nagleAckPending = false;
+      $('nagleAppBuf').textContent = '';
+      $('nagleTcpBuf').textContent = '';
+      $('nagleWire').innerHTML = '';
+      $('nagleChars').textContent = '0'; $('nagleSegs').textContent = '0'; $('nagleRatio').textContent = '-';
+      $('nagleLog').textContent = 'Type characters to see how Nagle\'s algorithm batches small writes.';
+    };
+
+    // === Connection Teardown ===
+    $('startClose').onclick = () => {
+      const msgs = $('closeMessages');
+      msgs.querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('twTimer').textContent = '';
+
+      setTimeout(() => {
+        $('cl-client-state').textContent = 'FIN_WAIT_1';
+        $('cl-client').classList.add('active');
+        addHsMsg(msgs, 'right', 'FIN seq=X', 10);
+        $('closeLog').textContent = 'Active close → FIN_WAIT_1: sent FIN';
+      }, 200);
+
+      setTimeout(() => {
+        $('cl-server-state').textContent = 'CLOSE_WAIT';
+        $('cl-server').classList.add('active');
+        addHsMsg(msgs, 'left', 'ACK ack=X+1', 50);
+        $('cl-client-state').textContent = 'FIN_WAIT_2';
+        $('closeLog').textContent = 'Passive close → CLOSE_WAIT. Active close → FIN_WAIT_2';
+      }, 1000);
+
+      setTimeout(() => {
+        $('cl-server-state').textContent = 'LAST_ACK';
+        addHsMsg(msgs, 'left', 'FIN seq=Y', 90);
+        $('closeLog').textContent = 'Passive close sends FIN → LAST_ACK';
+      }, 1800);
+
+      setTimeout(() => {
+        $('cl-client-state').textContent = 'TIME_WAIT';
+        addHsMsg(msgs, 'right', 'ACK ack=Y+1', 130);
+        $('cl-server-state').textContent = 'CLOSED';
+        $('cl-server').classList.remove('active');
+        $('closeLog').textContent = 'Active close → TIME_WAIT (waits 2×MSL = 60s). Passive close → CLOSED.';
+        // TIME_WAIT countdown
+        let tw = 60;
+        const timer = setInterval(() => {
+          tw -= 5;
+          if (tw <= 0) {
+            clearInterval(timer);
+            $('cl-client-state').textContent = 'CLOSED';
+            $('cl-client').classList.remove('active');
+            $('twTimer').textContent = 'TIME_WAIT expired → CLOSED';
+            $('closeLog').textContent = '✅ Both sides CLOSED. TIME_WAIT ensures delayed segments don\'t corrupt new connections.';
+          } else {
+            $('twTimer').textContent = `⏳ TIME_WAIT: ${tw}s remaining (2×MSL)`;
+          }
+        }, 500);
+      }, 2600);
+    };
+
+    $('resetClose').onclick = () => {
+      $('closeMessages').querySelectorAll('.hs-msg').forEach(m => m.remove());
+      $('cl-client-state').textContent = 'ESTABLISHED';
+      $('cl-server-state').textContent = 'ESTABLISHED';
+      $('cl-client').classList.remove('active');
+      $('cl-server').classList.remove('active');
+      $('twTimer').textContent = '';
+      $('closeLog').textContent = 'Click "Close Connection" to start the teardown sequence.';
+    };
+  </script>
+</BaseLayout>
