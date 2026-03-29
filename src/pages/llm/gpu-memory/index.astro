@@ -1,0 +1,388 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="GPU Memory Management — Interactive Visualization"
+  description="Understand CUDA memory allocation, memory pooling, gradient checkpointing, mixed precision training, and OOM strategies for deep learning workloads."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "LLM", href: "/llm/" },
+    { label: "GPU Memory", href: "/llm/gpu-memory/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🧠 GPU Memory Management</h1>
+      <p class="subtitle">CUDA allocators, gradient checkpointing, mixed precision — mastering the scarcest resource in deep learning</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          GPU memory (HBM) is the bottleneck of modern deep learning. An H100 has <strong>80 GB</strong> of HBM3 —
+          sounds like a lot until you realize training a 7B model in fp32 needs <strong>~112 GB</strong> just for weights + optimizer states.
+          Understanding how memory is allocated, pooled, and optimized is essential for shipping real models.
+        </p>
+      </div>
+    </section>
+
+    <!-- CUDA Memory Allocator -->
+    <section class="alloc-section">
+      <h2>📦 CUDA Memory Allocator</h2>
+      <p class="section-desc">PyTorch uses a caching allocator to avoid expensive cudaMalloc/cudaFree calls. Click to simulate allocations.</p>
+      <div class="alloc-viz">
+        <div class="alloc-controls">
+          <button class="alloc-btn" onclick="allocBlock('small')">Alloc 2MB</button>
+          <button class="alloc-btn" onclick="allocBlock('medium')">Alloc 20MB</button>
+          <button class="alloc-btn" onclick="allocBlock('large')">Alloc 200MB</button>
+          <button class="alloc-btn free-btn" onclick="freeRandom()">Free Random</button>
+          <button class="alloc-btn reset-btn" onclick="resetAlloc()">Reset</button>
+        </div>
+        <div class="pool-container">
+          <div class="pool-label">Small Pool (&le;1MB blocks)</div>
+          <div class="pool-bar" id="smallPool"></div>
+          <div class="pool-label">Large Pool (&gt;1MB blocks)</div>
+          <div class="pool-bar" id="largePool"></div>
+        </div>
+        <div class="alloc-stats">
+          <span>Allocated: <strong id="allocUsed">0 MB</strong></span>
+          <span>Cached: <strong id="allocCached">0 MB</strong></span>
+          <span>Fragmentation: <strong id="allocFrag">0%</strong></span>
+        </div>
+      </div>
+      <div class="info-box">
+        <p><strong>Key insight:</strong> PyTorch's caching allocator splits memory into a <em>small pool</em> (≤1MB) and <em>large pool</em> (&gt;1MB). Freed blocks stay cached for reuse — this is why <code>nvidia-smi</code> shows more memory than <code>torch.cuda.memory_allocated()</code>. Fragmentation happens when freed blocks can't be coalesced.</p>
+      </div>
+    </section>
+
+    <!-- Memory Breakdown -->
+    <section class="breakdown-section">
+      <h2>📊 Training Memory Breakdown</h2>
+      <p class="section-desc">See where GPU memory goes during training. Adjust parameters to explore.</p>
+      <div class="breakdown-controls">
+        <div class="ctrl-group">
+          <label>Parameters (B): <strong id="bkParamLabel">7</strong></label>
+          <input type="range" id="bkParamSlider" min="1" max="70" value="7">
+        </div>
+        <div class="ctrl-group">
+          <label>Precision:</label>
+          <select id="bkPrecision">
+            <option value="fp32">FP32 (4 bytes)</option>
+            <option value="fp16" selected>FP16 / BF16 (2 bytes)</option>
+            <option value="int8">INT8 (1 byte)</option>
+          </select>
+        </div>
+        <div class="ctrl-group">
+          <label>Grad Checkpointing:</label>
+          <select id="bkCheckpoint">
+            <option value="off">Off</option>
+            <option value="on">On (~√N layers)</option>
+          </select>
+        </div>
+      </div>
+      <div class="breakdown-chart" id="breakdownChart">
+        <div class="bk-segment weights-seg" id="bkWeights"><span class="seg-label">Weights</span><span class="seg-val" id="bkWeightsVal"></span></div>
+        <div class="bk-segment grads-seg" id="bkGrads"><span class="seg-label">Gradients</span><span class="seg-val" id="bkGradsVal"></span></div>
+        <div class="bk-segment optim-seg" id="bkOptim"><span class="seg-label">Optimizer</span><span class="seg-val" id="bkOptimVal"></span></div>
+        <div class="bk-segment activ-seg" id="bkActiv"><span class="seg-label">Activations</span><span class="seg-val" id="bkActivVal"></span></div>
+      </div>
+      <div class="breakdown-total">
+        Total: <strong id="bkTotal">0 GB</strong> | H100 80GB: <strong id="bkFit"></strong>
+      </div>
+    </section>
+
+    <!-- Mixed Precision -->
+    <section class="mp-section">
+      <h2>⚡ Mixed Precision Training (FP16 / BF16)</h2>
+      <div class="mp-diagram">
+        <div class="mp-row">
+          <div class="mp-box master"><h4>Master Weights (FP32)</h4><p>Full precision copy for accurate updates</p></div>
+          <div class="mp-arrow">→ cast to FP16</div>
+          <div class="mp-box fp16"><h4>FP16 Weights</h4><p>Used in forward & backward pass</p></div>
+        </div>
+        <div class="mp-row">
+          <div class="mp-box fp16"><h4>FP16 Gradients</h4><p>Computed during backward pass</p></div>
+          <div class="mp-arrow">→ loss scaling →</div>
+          <div class="mp-box master"><h4>FP32 Update</h4><p>optimizer.step() in full precision</p></div>
+        </div>
+      </div>
+      <div class="mp-compare">
+        <div class="mp-col">
+          <h4>FP32</h4>
+          <div class="bits-row"><span class="bit sign">S</span><span class="bit exp">Exponent (8)</span><span class="bit mant">Mantissa (23)</span></div>
+          <p>Range: ±3.4×10³⁸ | Precision: ~7 decimal digits</p>
+        </div>
+        <div class="mp-col">
+          <h4>FP16</h4>
+          <div class="bits-row"><span class="bit sign">S</span><span class="bit exp e5">Exp (5)</span><span class="bit mant m10">Mant (10)</span></div>
+          <p>Range: ±65504 | Precision: ~3 decimal digits</p>
+        </div>
+        <div class="mp-col">
+          <h4>BF16</h4>
+          <div class="bits-row"><span class="bit sign">S</span><span class="bit exp">Exp (8)</span><span class="bit mant m7">Mant (7)</span></div>
+          <p>Range: ±3.4×10³⁸ | Precision: ~2 decimal digits</p>
+        </div>
+      </div>
+      <div class="info-box">
+        <p><strong>Why BF16 wins for LLMs:</strong> Same exponent range as FP32 means no loss scaling needed. Training is more stable even with lower mantissa precision. All modern GPUs (A100+) have native BF16 tensor cores.</p>
+      </div>
+    </section>
+
+    <!-- Gradient Checkpointing -->
+    <section class="gc-section">
+      <h2>♻️ Gradient Checkpointing</h2>
+      <p class="section-desc">Trade compute for memory by recomputing activations during backward pass instead of storing them all.</p>
+      <div class="gc-tabs">
+        <button class="gc-tab active" data-gc="normal" onclick="showGC('normal')">Normal Training</button>
+        <button class="gc-tab" data-gc="checkpoint" onclick="showGC('checkpoint')">With Checkpointing</button>
+      </div>
+      <div class="gc-panel" id="gcNormal">
+        <div class="gc-layers">
+          <div class="gc-layer stored"><span>Layer 1</span><span class="gc-mem">📦 stored</span></div>
+          <div class="gc-layer stored"><span>Layer 2</span><span class="gc-mem">📦 stored</span></div>
+          <div class="gc-layer stored"><span>Layer 3</span><span class="gc-mem">📦 stored</span></div>
+          <div class="gc-layer stored"><span>Layer 4</span><span class="gc-mem">📦 stored</span></div>
+          <div class="gc-layer stored"><span>Layer 5</span><span class="gc-mem">📦 stored</span></div>
+          <div class="gc-layer stored"><span>Layer 6</span><span class="gc-mem">📦 stored</span></div>
+        </div>
+        <div class="gc-stats-box">
+          <p>Memory: <strong>O(N)</strong> — all N layers' activations stored</p>
+          <p>Compute: <strong>1× forward, 1× backward</strong></p>
+        </div>
+      </div>
+      <div class="gc-panel hidden" id="gcCheckpoint">
+        <div class="gc-layers">
+          <div class="gc-layer checkpoint"><span>Layer 1</span><span class="gc-mem">✅ checkpoint</span></div>
+          <div class="gc-layer freed"><span>Layer 2</span><span class="gc-mem">🗑️ freed</span></div>
+          <div class="gc-layer freed"><span>Layer 3</span><span class="gc-mem">🗑️ freed</span></div>
+          <div class="gc-layer checkpoint"><span>Layer 4</span><span class="gc-mem">✅ checkpoint</span></div>
+          <div class="gc-layer freed"><span>Layer 5</span><span class="gc-mem">🗑️ freed</span></div>
+          <div class="gc-layer freed"><span>Layer 6</span><span class="gc-mem">🗑️ freed</span></div>
+        </div>
+        <div class="gc-stats-box">
+          <p>Memory: <strong>O(√N)</strong> — only checkpoint layers stored</p>
+          <p>Compute: <strong>1× forward, ~1.33× backward</strong> (recomputes freed segments)</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- OOM Strategies -->
+    <section class="oom-section">
+      <h2>🚨 OOM Strategies Cheat Sheet</h2>
+      <div class="oom-grid">
+        <div class="oom-card">
+          <h4>1. Reduce Batch Size</h4>
+          <p>Simplest fix. Halving batch ≈ halves activation memory. Use gradient accumulation to keep effective batch the same.</p>
+        </div>
+        <div class="oom-card">
+          <h4>2. Mixed Precision (FP16/BF16)</h4>
+          <p>Halves weight + gradient memory. Almost free performance — modern GPUs run FP16 at 2× FLOPS.</p>
+        </div>
+        <div class="oom-card">
+          <h4>3. Gradient Checkpointing</h4>
+          <p>Saves ~60% activation memory at cost of ~33% more compute. Essential for large models.</p>
+        </div>
+        <div class="oom-card">
+          <h4>4. DeepSpeed ZeRO</h4>
+          <p>Stage 1: shard optimizer states. Stage 2: + gradients. Stage 3: + weights. Linear memory reduction with GPU count.</p>
+        </div>
+        <div class="oom-card">
+          <h4>5. CPU Offloading</h4>
+          <p>Move optimizer states or entire layers to CPU RAM. Slower but lets you train models that don't fit at all.</p>
+        </div>
+        <div class="oom-card">
+          <h4>6. torch.cuda.empty_cache()</h4>
+          <p>Releases cached but unused memory. Doesn't fix real OOM but helps fragmentation. Last resort, not a solution.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #8b5cf6; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .info-box { background: #1e293b; border-radius: 10px; padding: 1rem; margin-top: 1rem; }
+    .info-box p { color: #94a3b8; margin: 0; line-height: 1.6; font-size: 0.9rem; }
+    .info-box strong { color: #f1f5f9; }
+    .info-box em { color: #f59e0b; }
+    .info-box code { background: #334155; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85rem; color: #e2e8f0; }
+
+    /* Allocator */
+    .alloc-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .alloc-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .alloc-btn { padding: 0.5rem 1rem; border: 2px solid #334155; border-radius: 8px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: all 0.2s; }
+    .alloc-btn:hover { border-color: #3b82f6; color: #f1f5f9; }
+    .free-btn:hover { border-color: #ef4444; }
+    .reset-btn:hover { border-color: #f59e0b; }
+    .pool-container { margin-bottom: 1rem; }
+    .pool-label { color: #94a3b8; font-size: 0.8rem; margin: 0.5rem 0 0.2rem; }
+    .pool-bar { background: #1e293b; border-radius: 6px; height: 40px; display: flex; gap: 1px; padding: 2px; overflow: hidden; min-height: 40px; }
+    .pool-block { border-radius: 4px; height: 100%; transition: all 0.3s; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: white; font-weight: 700; min-width: 8px; }
+    .pool-block.used { background: #3b82f6; }
+    .pool-block.freed { background: #334155; border: 1px dashed #64748b; }
+    .alloc-stats { display: flex; gap: 2rem; color: #94a3b8; font-size: 0.85rem; }
+    .alloc-stats strong { color: #f1f5f9; }
+
+    /* Breakdown */
+    .breakdown-section { margin-bottom: 2rem; }
+    .breakdown-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .ctrl-group label { color: #94a3b8; font-size: 0.85rem; display: block; margin-bottom: 0.3rem; }
+    .ctrl-group input[type=range] { width: 100%; }
+    .ctrl-group select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem; width: 100%; }
+    .breakdown-chart { display: flex; height: 60px; border-radius: 10px; overflow: hidden; margin-bottom: 0.5rem; }
+    .bk-segment { display: flex; flex-direction: column; align-items: center; justify-content: center; transition: width 0.4s; min-width: 40px; }
+    .seg-label { font-size: 0.7rem; color: rgba(255,255,255,0.9); font-weight: 700; }
+    .seg-val { font-size: 0.7rem; color: rgba(255,255,255,0.7); }
+    .weights-seg { background: #3b82f6; }
+    .grads-seg { background: #22c55e; }
+    .optim-seg { background: #f59e0b; }
+    .activ-seg { background: #a855f7; }
+    .breakdown-total { color: #f1f5f9; font-size: 0.95rem; margin-top: 0.5rem; }
+
+    /* Mixed Precision */
+    .mp-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .mp-diagram { margin-bottom: 1.5rem; }
+    .mp-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .mp-box { background: #1e293b; border-radius: 8px; padding: 0.8rem; flex: 1; min-width: 160px; }
+    .mp-box.master { border: 2px solid #3b82f6; }
+    .mp-box.fp16 { border: 2px solid #22c55e; }
+    .mp-box h4 { color: #f1f5f9; margin: 0 0 0.3rem; font-size: 0.85rem; }
+    .mp-box p { color: #94a3b8; margin: 0; font-size: 0.8rem; }
+    .mp-arrow { color: #f59e0b; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+    .mp-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .mp-col { background: #1e293b; border-radius: 8px; padding: 1rem; }
+    .mp-col h4 { color: #f1f5f9; margin: 0 0 0.5rem; }
+    .mp-col p { color: #94a3b8; font-size: 0.8rem; margin: 0.5rem 0 0; }
+    .bits-row { display: flex; gap: 2px; }
+    .bit { padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-align: center; color: white; }
+    .bit.sign { background: #ef4444; min-width: 20px; }
+    .bit.exp { background: #3b82f6; flex: 2; }
+    .bit.exp.e5 { flex: 1.2; }
+    .bit.mant { background: #22c55e; flex: 3; }
+    .bit.mant.m10 { flex: 1.8; }
+    .bit.mant.m7 { flex: 1.2; }
+
+    /* Gradient Checkpointing */
+    .gc-section { margin-bottom: 2rem; }
+    .gc-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .gc-tab { padding: 0.6rem 1rem; border: 2px solid #334155; border-radius: 8px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .gc-tab.active { border-color: #8b5cf6; color: #f1f5f9; background: #1e293b; }
+    .gc-panel.hidden { display: none; }
+    .gc-layers { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .gc-layer { background: #1e293b; border-radius: 8px; padding: 0.7rem 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; flex: 1; min-width: 100px; }
+    .gc-layer span:first-child { color: #f1f5f9; font-weight: 600; font-size: 0.85rem; }
+    .gc-mem { font-size: 0.75rem; }
+    .gc-layer.stored { border: 2px solid #3b82f6; }
+    .gc-layer.stored .gc-mem { color: #3b82f6; }
+    .gc-layer.checkpoint { border: 2px solid #22c55e; }
+    .gc-layer.checkpoint .gc-mem { color: #22c55e; }
+    .gc-layer.freed { border: 2px solid #334155; }
+    .gc-layer.freed .gc-mem { color: #64748b; }
+    .gc-stats-box { background: #1e293b; border-radius: 8px; padding: 1rem; }
+    .gc-stats-box p { color: #94a3b8; font-size: 0.85rem; margin: 0.3rem 0; }
+    .gc-stats-box strong { color: #f1f5f9; }
+
+    /* OOM */
+    .oom-section { margin-bottom: 2rem; }
+    .oom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .oom-card { background: #1e293b; border-radius: 10px; padding: 1rem; border-left: 3px solid #ef4444; }
+    .oom-card h4 { color: #f1f5f9; margin: 0 0 0.3rem; font-size: 0.9rem; }
+    .oom-card p { color: #94a3b8; font-size: 0.85rem; margin: 0; line-height: 1.5; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // --- Allocator Sim ---
+    let blocks = [];
+    let blockId = 0;
+    function allocBlock(size) {
+      const mb = size === 'small' ? 2 : size === 'medium' ? 20 : 200;
+      const pool = mb <= 1 ? 'small' : 'large';
+      blocks.push({ id: blockId++, mb, pool, freed: false });
+      renderPools();
+    }
+    function freeRandom() {
+      const used = blocks.filter(b => !b.freed);
+      if (used.length === 0) return;
+      used[Math.floor(Math.random() * used.length)].freed = true;
+      renderPools();
+    }
+    function resetAlloc() { blocks = []; blockId = 0; renderPools(); }
+    window.allocBlock = allocBlock;
+    window.freeRandom = freeRandom;
+    window.resetAlloc = resetAlloc;
+
+    function renderPools() {
+      const smallBlocks = blocks.filter(b => b.pool === 'small');
+      const largeBlocks = blocks.filter(b => b.pool === 'large');
+      renderPool('smallPool', smallBlocks);
+      renderPool('largePool', largeBlocks);
+      const totalUsed = blocks.filter(b => !b.freed).reduce((s, b) => s + b.mb, 0);
+      const totalCached = blocks.filter(b => b.freed).reduce((s, b) => s + b.mb, 0);
+      const total = totalUsed + totalCached;
+      $('allocUsed').textContent = totalUsed + ' MB';
+      $('allocCached').textContent = totalCached + ' MB';
+      $('allocFrag').textContent = total > 0 ? Math.round(totalCached / (total) * 100) + '%' : '0%';
+    }
+    function renderPool(id, poolBlocks) {
+      const el = $(id);
+      el.innerHTML = '';
+      poolBlocks.forEach(b => {
+        const div = document.createElement('div');
+        div.className = 'pool-block ' + (b.freed ? 'freed' : 'used');
+        div.style.width = Math.max(b.mb * 0.5, 8) + 'px';
+        div.textContent = b.mb;
+        el.appendChild(div);
+      });
+    }
+    renderPools();
+
+    // --- Breakdown ---
+    function updateBreakdown() {
+      const params = +$('bkParamSlider').value;
+      $('bkParamLabel').textContent = params;
+      const prec = $('bkPrecision').value;
+      const ckpt = $('bkCheckpoint').value;
+      const bytes = prec === 'fp32' ? 4 : prec === 'fp16' ? 2 : 1;
+      const wGB = params * bytes;
+      const gGB = params * bytes;
+      const oGB = params * 4 * 2; // Adam fp32 states
+      let aGB = params * 2 * 0.5; // rough activation est
+      if (ckpt === 'on') aGB *= 0.33;
+      const total = wGB + gGB + oGB + aGB;
+      const setW = (wGB / total * 100);
+      const setG = (gGB / total * 100);
+      const setO = (oGB / total * 100);
+      const setA = (aGB / total * 100);
+      $('bkWeights').style.width = setW + '%';
+      $('bkGrads').style.width = setG + '%';
+      $('bkOptim').style.width = setO + '%';
+      $('bkActiv').style.width = setA + '%';
+      $('bkWeightsVal').textContent = wGB.toFixed(1) + ' GB';
+      $('bkGradsVal').textContent = gGB.toFixed(1) + ' GB';
+      $('bkOptimVal').textContent = oGB.toFixed(1) + ' GB';
+      $('bkActivVal').textContent = aGB.toFixed(1) + ' GB';
+      $('bkTotal').textContent = total.toFixed(1) + ' GB';
+      $('bkFit').textContent = total <= 80 ? '✅ Fits' : '❌ Need ' + Math.ceil(total / 80) + ' GPUs';
+    }
+    $('bkParamSlider').oninput = updateBreakdown;
+    $('bkPrecision').onchange = updateBreakdown;
+    $('bkCheckpoint').onchange = updateBreakdown;
+    updateBreakdown();
+
+    // --- Gradient Checkpointing ---
+    window.showGC = function(type) {
+      document.querySelectorAll('.gc-tab').forEach(t => t.classList.toggle('active', t.dataset.gc === type));
+      $('gcNormal').classList.toggle('hidden', type !== 'normal');
+      $('gcCheckpoint').classList.toggle('hidden', type !== 'checkpoint');
+    };
+  </script>
+</BaseLayout>

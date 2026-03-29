@@ -1,0 +1,480 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="LLM Inference Serving — Interactive Visualization"
+  description="Understand continuous batching, PagedAttention, speculative decoding, KV cache optimization, and TTFT vs TPS metrics for LLM serving."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "LLM", href: "/llm/" },
+    { label: "Inference Serving", href: "/llm/inference-serving/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🚀 LLM Inference Serving</h1>
+      <p class="subtitle">Continuous batching, PagedAttention, speculative decoding — how to serve LLMs at scale</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Serving a 70B model to thousands of users requires far more than just calling <code>model.generate()</code>.
+          Naive serving wastes <strong>60-80%</strong> of GPU compute on padding and idle cycles. Modern serving engines
+          like <strong>vLLM</strong>, <strong>TensorRT-LLM</strong>, and <strong>TGI</strong> use techniques like continuous batching 
+          and PagedAttention to achieve 10-24× higher throughput.
+        </p>
+      </div>
+    </section>
+
+    <!-- Batching Comparison -->
+    <section class="batch-section">
+      <h2>📦 Static vs Continuous Batching</h2>
+      <p class="section-desc">Watch how requests flow through the GPU. Click "Step" to advance one token generation cycle.</p>
+      <div class="batch-tabs">
+        <button class="batch-tab active" data-bt="static" onclick="showBatch('static')">Static Batching</button>
+        <button class="batch-tab" data-bt="continuous" onclick="showBatch('continuous')">Continuous Batching</button>
+      </div>
+
+      <div class="batch-panel" id="batchStatic">
+        <div class="batch-viz">
+          <div class="batch-timeline" id="staticTimeline"></div>
+          <div class="batch-controls-row">
+            <button class="step-btn" onclick="stepStatic()">▶ Step</button>
+            <button class="step-btn" onclick="resetStatic()">↺ Reset</button>
+            <span class="step-info" id="staticInfo">Step 0 — GPU util: 100%</span>
+          </div>
+        </div>
+        <div class="batch-info-box">
+          <p><strong>Static batching:</strong> All requests in a batch must wait for the longest sequence to finish. Shorter sequences pad with empty tokens, wasting GPU cycles. New requests queue until the entire batch completes.</p>
+        </div>
+      </div>
+
+      <div class="batch-panel hidden" id="batchContinuous">
+        <div class="batch-viz">
+          <div class="batch-timeline" id="contTimeline"></div>
+          <div class="batch-controls-row">
+            <button class="step-btn" onclick="stepCont()">▶ Step</button>
+            <button class="step-btn" onclick="resetCont()">↺ Reset</button>
+            <span class="step-info" id="contInfo">Step 0 — GPU util: 100%</span>
+          </div>
+        </div>
+        <div class="batch-info-box">
+          <p><strong>Continuous batching:</strong> As soon as one request finishes, a new one takes its slot immediately. No waiting, no padding. GPU stays saturated. This is how vLLM, TGI, and TRT-LLM work.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PagedAttention -->
+    <section class="paged-section">
+      <h2>📄 PagedAttention (vLLM)</h2>
+      <p class="section-desc">KV cache managed like virtual memory — blocks allocated on demand, no contiguous memory needed.</p>
+      <div class="paged-diagram">
+        <div class="paged-row">
+          <div class="paged-col">
+            <h4>Traditional KV Cache</h4>
+            <div class="mem-bar" id="traditionalMem">
+              <div class="mem-block used-big">Req A (512 tokens pre-allocated)</div>
+              <div class="mem-block wasted">40% wasted (internal fragmentation)</div>
+              <div class="mem-block used-big">Req B (512 tokens pre-allocated)</div>
+              <div class="mem-block wasted">60% wasted</div>
+            </div>
+            <p class="paged-note">Must pre-allocate max sequence length. Average waste: <strong>50-70%</strong></p>
+          </div>
+          <div class="paged-col">
+            <h4>PagedAttention</h4>
+            <div class="mem-bar" id="pagedMem">
+              <div class="mem-block page a">A₁</div>
+              <div class="mem-block page b">B₁</div>
+              <div class="mem-block page a">A₂</div>
+              <div class="mem-block page c">C₁</div>
+              <div class="mem-block page b">B₂</div>
+              <div class="mem-block page a">A₃</div>
+              <div class="mem-block page free">free</div>
+              <div class="mem-block page c">C₂</div>
+            </div>
+            <p class="paged-note">Blocks allocated on demand. Non-contiguous. Waste: <strong>&lt;4%</strong> (last block only)</p>
+          </div>
+        </div>
+      </div>
+      <div class="info-box">
+        <p><strong>Key insight:</strong> PagedAttention maps logical KV cache blocks to physical GPU memory blocks via a block table (just like OS page tables). This enables prefix sharing, copy-on-write for beam search, and near-zero memory waste. vLLM achieves <strong>2-4× higher throughput</strong> than HuggingFace Transformers.</p>
+      </div>
+    </section>
+
+    <!-- Speculative Decoding -->
+    <section class="spec-section">
+      <h2>⚡ Speculative Decoding</h2>
+      <p class="section-desc">Use a small draft model to propose tokens, then verify in parallel with the large model.</p>
+      <div class="spec-diagram">
+        <div class="spec-step">
+          <div class="spec-model draft">
+            <h4>Draft Model (1B)</h4>
+            <div class="spec-tokens">
+              <span class="tok draft-tok">The</span>
+              <span class="tok draft-tok">quick</span>
+              <span class="tok draft-tok">brown</span>
+              <span class="tok draft-tok">fox</span>
+              <span class="tok draft-tok">jumps</span>
+            </div>
+            <p>Generate K=5 tokens autoregressively (fast, ~2ms each)</p>
+          </div>
+          <div class="spec-arrow">→ verify all at once →</div>
+          <div class="spec-model target">
+            <h4>Target Model (70B)</h4>
+            <div class="spec-tokens">
+              <span class="tok accept">The ✓</span>
+              <span class="tok accept">quick ✓</span>
+              <span class="tok accept">brown ✓</span>
+              <span class="tok reject">fox ✗</span>
+              <span class="tok skip">jumps —</span>
+            </div>
+            <p>Single forward pass verifies all K tokens in parallel</p>
+          </div>
+        </div>
+        <div class="spec-result">
+          <p>Accepted 3/5 tokens in one 70B forward pass instead of 3 separate passes → <strong>~2-3× speedup</strong> for well-matched draft models</p>
+        </div>
+      </div>
+      <div class="info-box">
+        <p><strong>Why it works:</strong> LLM inference is memory-bandwidth bound, not compute-bound. Verifying 5 tokens costs almost the same as generating 1 (the KV cache is the bottleneck, not the matmuls). Acceptance rate depends on draft model quality — typically 60-85% match rate.</p>
+      </div>
+    </section>
+
+    <!-- Metrics -->
+    <section class="metrics-section">
+      <h2>📈 Key Serving Metrics</h2>
+      <p class="section-desc">Adjust request parameters to see how they affect latency.</p>
+      <div class="metrics-controls">
+        <div class="ctrl-group">
+          <label>Input Tokens: <strong id="inputTokLabel">256</strong></label>
+          <input type="range" id="inputTokSlider" min="32" max="4096" value="256" step="32">
+        </div>
+        <div class="ctrl-group">
+          <label>Output Tokens: <strong id="outputTokLabel">128</strong></label>
+          <input type="range" id="outputTokSlider" min="16" max="2048" value="128" step="16">
+        </div>
+        <div class="ctrl-group">
+          <label>Model:</label>
+          <select id="modelSelect">
+            <option value="7">7B (fast)</option>
+            <option value="13">13B</option>
+            <option value="70" selected>70B</option>
+            <option value="405">405B (slow)</option>
+          </select>
+        </div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card ttft">
+          <h4>TTFT</h4>
+          <p class="metric-label">Time to First Token</p>
+          <p class="metric-val" id="ttftVal">—</p>
+          <p class="metric-desc">Prefill time: process all input tokens at once. Scales with input length.</p>
+        </div>
+        <div class="metric-card tps">
+          <h4>TPS</h4>
+          <p class="metric-label">Tokens Per Second</p>
+          <p class="metric-val" id="tpsVal">—</p>
+          <p class="metric-desc">Decode throughput: one token at a time, memory-bandwidth bound.</p>
+        </div>
+        <div class="metric-card total">
+          <h4>Total Latency</h4>
+          <p class="metric-label">End-to-end</p>
+          <p class="metric-val" id="totalLatVal">—</p>
+          <p class="metric-desc">TTFT + (output_tokens / TPS). Dominated by decode for long outputs.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- KV Cache Calculator -->
+    <section class="kv-section">
+      <h2>💾 KV Cache Memory Calculator</h2>
+      <p class="section-desc">KV cache memory scales with batch size × sequence length × model dimensions.</p>
+      <div class="kv-controls">
+        <div class="ctrl-group">
+          <label>Concurrent Users: <strong id="kvBatchLabel">32</strong></label>
+          <input type="range" id="kvBatchSlider" min="1" max="256" value="32">
+        </div>
+        <div class="ctrl-group">
+          <label>Seq Length: <strong id="kvSeqLabel">2048</strong></label>
+          <input type="range" id="kvSeqSlider" min="256" max="32768" value="2048" step="256">
+        </div>
+        <div class="ctrl-group">
+          <label>Model:</label>
+          <select id="kvModelSelect">
+            <option value="7">Llama 7B (32 layers, 32 heads)</option>
+            <option value="70" selected>Llama 70B (80 layers, 64 heads)</option>
+            <option value="405">Llama 405B (126 layers, 128 heads)</option>
+          </select>
+        </div>
+      </div>
+      <div class="kv-result">
+        <div class="kv-bar-outer">
+          <div class="kv-bar-fill" id="kvBarFill"></div>
+        </div>
+        <div class="kv-stats">
+          <span>KV Cache: <strong id="kvMemVal">— GB</strong></span>
+          <span>Model Weights: <strong id="kvWeightsVal">— GB</strong></span>
+          <span>Total: <strong id="kvTotalVal">— GB</strong></span>
+          <span>GPUs (80GB): <strong id="kvGpuVal">—</strong></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #22c55e; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    .overview-card code { background: #334155; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85rem; color: #e2e8f0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .info-box { background: #1e293b; border-radius: 10px; padding: 1rem; margin-top: 1rem; }
+    .info-box p { color: #94a3b8; margin: 0; line-height: 1.6; font-size: 0.9rem; }
+    .info-box strong { color: #f1f5f9; }
+    .ctrl-group label { color: #94a3b8; font-size: 0.85rem; display: block; margin-bottom: 0.3rem; }
+    .ctrl-group input[type=range] { width: 100%; }
+    .ctrl-group select { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem; width: 100%; }
+
+    /* Batching */
+    .batch-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .batch-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .batch-tab { padding: 0.6rem 1rem; border: 2px solid #334155; border-radius: 8px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .batch-tab.active { border-color: #22c55e; color: #f1f5f9; background: #1e293b; }
+    .batch-panel.hidden { display: none; }
+    .batch-timeline { display: flex; flex-direction: column; gap: 4px; margin-bottom: 0.8rem; min-height: 120px; }
+    .batch-row { display: flex; gap: 2px; height: 24px; align-items: center; }
+    .batch-label { width: 50px; color: #94a3b8; font-size: 0.75rem; }
+    .batch-cells { display: flex; gap: 1px; flex: 1; }
+    .batch-cell { width: 20px; height: 20px; border-radius: 3px; }
+    .batch-cell.active { background: #22c55e; }
+    .batch-cell.pad { background: #334155; }
+    .batch-cell.empty { background: #1e293b; }
+    .batch-cell.done { background: #3b82f6; }
+    .batch-cell.new { background: #f59e0b; }
+    .batch-controls-row { display: flex; gap: 0.5rem; align-items: center; }
+    .step-btn { padding: 0.4rem 0.8rem; border: 2px solid #334155; border-radius: 6px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+    .step-btn:hover { border-color: #22c55e; color: #f1f5f9; }
+    .step-info { color: #94a3b8; font-size: 0.85rem; margin-left: 0.5rem; }
+    .batch-info-box { background: #1e293b; border-radius: 8px; padding: 1rem; margin-top: 0.5rem; }
+    .batch-info-box p { color: #94a3b8; font-size: 0.85rem; margin: 0; line-height: 1.5; }
+    .batch-info-box strong { color: #f1f5f9; }
+
+    /* PagedAttention */
+    .paged-section { margin-bottom: 2rem; }
+    .paged-diagram { margin-bottom: 1rem; }
+    .paged-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .paged-row { grid-template-columns: 1fr; } }
+    .paged-col { background: #0f172a; border-radius: 10px; padding: 1rem; }
+    .paged-col h4 { color: #f1f5f9; margin: 0 0 0.5rem; }
+    .paged-note { color: #94a3b8; font-size: 0.8rem; margin: 0.5rem 0 0; }
+    .paged-note strong { color: #f1f5f9; }
+    .mem-bar { display: flex; flex-wrap: wrap; gap: 3px; }
+    .mem-block { padding: 0.4rem 0.5rem; border-radius: 5px; font-size: 0.7rem; font-weight: 700; color: white; }
+    .mem-block.used-big { background: #3b82f6; flex: 2; }
+    .mem-block.wasted { background: #7f1d1d; flex: 1; color: #fca5a5; }
+    .mem-block.page { min-width: 36px; text-align: center; }
+    .mem-block.page.a { background: #3b82f6; }
+    .mem-block.page.b { background: #22c55e; }
+    .mem-block.page.c { background: #f59e0b; }
+    .mem-block.page.free { background: #334155; color: #64748b; }
+
+    /* Speculative Decoding */
+    .spec-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .spec-diagram { margin-bottom: 0.5rem; }
+    .spec-step { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .spec-model { background: #1e293b; border-radius: 8px; padding: 1rem; flex: 1; min-width: 200px; }
+    .spec-model.draft { border: 2px solid #f59e0b; }
+    .spec-model.target { border: 2px solid #3b82f6; }
+    .spec-model h4 { color: #f1f5f9; margin: 0 0 0.5rem; font-size: 0.9rem; }
+    .spec-model p { color: #94a3b8; font-size: 0.8rem; margin: 0.5rem 0 0; }
+    .spec-tokens { display: flex; gap: 4px; flex-wrap: wrap; }
+    .tok { padding: 0.3rem 0.5rem; border-radius: 5px; font-size: 0.8rem; font-weight: 700; }
+    .tok.draft-tok { background: #f59e0b; color: #1e293b; }
+    .tok.accept { background: #22c55e; color: white; }
+    .tok.reject { background: #ef4444; color: white; }
+    .tok.skip { background: #334155; color: #64748b; }
+    .spec-arrow { color: #f59e0b; font-weight: 700; font-size: 0.85rem; white-space: nowrap; }
+    .spec-result { background: #1e293b; border-radius: 8px; padding: 1rem; margin-top: 0.5rem; }
+    .spec-result p { color: #94a3b8; margin: 0; font-size: 0.9rem; }
+    .spec-result strong { color: #f1f5f9; }
+
+    /* Metrics */
+    .metrics-section { margin-bottom: 2rem; }
+    .metrics-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .metric-card { background: #1e293b; border-radius: 10px; padding: 1rem; text-align: center; }
+    .metric-card.ttft { border-top: 3px solid #3b82f6; }
+    .metric-card.tps { border-top: 3px solid #22c55e; }
+    .metric-card.total { border-top: 3px solid #f59e0b; }
+    .metric-card h4 { color: #f1f5f9; margin: 0; font-size: 1.1rem; }
+    .metric-label { color: #64748b; font-size: 0.8rem; margin: 0.2rem 0; }
+    .metric-val { color: #f1f5f9; font-size: 1.5rem; font-weight: 800; margin: 0.5rem 0; }
+    .metric-desc { color: #94a3b8; font-size: 0.8rem; margin: 0; line-height: 1.4; }
+
+    /* KV Cache */
+    .kv-section { margin-bottom: 2rem; }
+    .kv-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .kv-result { background: #1e293b; border-radius: 12px; padding: 1.2rem; }
+    .kv-bar-outer { background: #0f172a; border-radius: 8px; height: 30px; overflow: hidden; margin-bottom: 0.8rem; }
+    .kv-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #a855f7); border-radius: 8px; transition: width 0.3s; }
+    .kv-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; color: #94a3b8; font-size: 0.9rem; }
+    .kv-stats strong { color: #f1f5f9; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // --- Batching Simulation ---
+    const staticReqs = [
+      { id: 'A', len: 8 }, { id: 'B', len: 3 }, { id: 'C', len: 6 }, { id: 'D', len: 4 }
+    ];
+    let staticStep = 0;
+    const maxSteps = 12;
+
+    function renderStatic() {
+      const el = $('staticTimeline');
+      el.innerHTML = '';
+      let activeCount = 0;
+      let totalSlots = 0;
+      staticReqs.forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'batch-row';
+        const label = document.createElement('div');
+        label.className = 'batch-label';
+        label.textContent = 'Req ' + r.id;
+        row.appendChild(label);
+        const cells = document.createElement('div');
+        cells.className = 'batch-cells';
+        for (let i = 0; i < maxSteps; i++) {
+          const c = document.createElement('div');
+          c.className = 'batch-cell';
+          if (i < staticStep) {
+            totalSlots++;
+            if (i < r.len) { c.className += ' done'; activeCount++; }
+            else c.className += ' pad';
+          } else if (i === staticStep) {
+            totalSlots++;
+            if (i < r.len) { c.className += ' active'; activeCount++; }
+            else c.className += ' pad';
+          } else c.className += ' empty';
+          cells.appendChild(c);
+        }
+        row.appendChild(cells);
+        el.appendChild(row);
+      });
+      const util = totalSlots > 0 ? Math.round(activeCount / totalSlots * 100) : 100;
+      $('staticInfo').textContent = `Step ${staticStep} — GPU util: ${util}%`;
+    }
+
+    window.stepStatic = () => { if (staticStep < maxSteps - 1) staticStep++; renderStatic(); };
+    window.resetStatic = () => { staticStep = 0; renderStatic(); };
+    renderStatic();
+
+    // Continuous batching
+    const contSlots = [
+      { id: 'A', len: 8, start: 0 }, { id: 'B', len: 3, start: 0 },
+      { id: 'C', len: 6, start: 0 }, { id: 'D', len: 4, start: 0 },
+      { id: 'E', len: 5, start: 3 }, { id: 'F', len: 4, start: 4 },
+    ];
+    let contStep = 0;
+
+    function renderCont() {
+      const el = $('contTimeline');
+      el.innerHTML = '';
+      const activeReqs = contSlots.filter(r => r.start <= contStep && r.start + r.len > contStep);
+      const visibleReqs = contSlots.filter(r => r.start <= contStep);
+      let activeCount = 0;
+      let totalSlots = 0;
+      visibleReqs.forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'batch-row';
+        const label = document.createElement('div');
+        label.className = 'batch-label';
+        label.textContent = 'Req ' + r.id;
+        row.appendChild(label);
+        const cells = document.createElement('div');
+        cells.className = 'batch-cells';
+        for (let i = 0; i < maxSteps; i++) {
+          const c = document.createElement('div');
+          c.className = 'batch-cell';
+          if (i < r.start) { c.className += ' empty'; }
+          else if (i < r.start + r.len) {
+            if (i < contStep) { c.className += ' done'; }
+            else if (i === contStep) { c.className += ' active'; }
+            else c.className += ' empty';
+            if (i <= contStep) { activeCount++; totalSlots++; }
+          } else {
+            if (i <= contStep) totalSlots++;
+            c.className += ' empty';
+          }
+          cells.appendChild(c);
+        }
+        row.appendChild(cells);
+        el.appendChild(row);
+      });
+      const util = totalSlots > 0 ? Math.round(activeCount / totalSlots * 100) : 100;
+      $('contInfo').textContent = `Step ${contStep} — GPU util: ${util}%`;
+    }
+
+    window.stepCont = () => { if (contStep < maxSteps - 1) contStep++; renderCont(); };
+    window.resetCont = () => { contStep = 0; renderCont(); };
+    window.showBatch = function(type) {
+      document.querySelectorAll('.batch-tab').forEach(t => t.classList.toggle('active', t.dataset.bt === type));
+      $('batchStatic').classList.toggle('hidden', type !== 'static');
+      $('batchContinuous').classList.toggle('hidden', type !== 'continuous');
+    };
+    renderCont();
+
+    // --- Metrics Calculator ---
+    function updateMetrics() {
+      const input = +$('inputTokSlider').value;
+      const output = +$('outputTokSlider').value;
+      const modelB = +$('modelSelect').value;
+      $('inputTokLabel').textContent = input;
+      $('outputTokLabel').textContent = output;
+      // Rough estimates based on model size
+      const prefillTokPerSec = modelB <= 7 ? 8000 : modelB <= 13 ? 5000 : modelB <= 70 ? 1500 : 400;
+      const decodeTPS = modelB <= 7 ? 80 : modelB <= 13 ? 50 : modelB <= 70 ? 25 : 8;
+      const ttftMs = Math.round(input / prefillTokPerSec * 1000);
+      const totalMs = ttftMs + Math.round(output / decodeTPS * 1000);
+      $('ttftVal').textContent = ttftMs < 1000 ? ttftMs + ' ms' : (ttftMs / 1000).toFixed(1) + ' s';
+      $('tpsVal').textContent = decodeTPS + ' tok/s';
+      $('totalLatVal').textContent = totalMs < 1000 ? totalMs + ' ms' : (totalMs / 1000).toFixed(1) + ' s';
+    }
+    $('inputTokSlider').oninput = updateMetrics;
+    $('outputTokSlider').oninput = updateMetrics;
+    $('modelSelect').onchange = updateMetrics;
+    updateMetrics();
+
+    // --- KV Cache Calculator ---
+    function updateKV() {
+      const batch = +$('kvBatchSlider').value;
+      const seq = +$('kvSeqSlider').value;
+      const model = $('kvModelSelect').value;
+      $('kvBatchLabel').textContent = batch;
+      $('kvSeqLabel').textContent = seq;
+      // layers, kv_heads, head_dim for llama models
+      const configs = { '7': [32, 32, 128], '70': [80, 8, 128], '405': [126, 8, 128] };
+      const [layers, kvHeads, headDim] = configs[model];
+      // KV cache = 2 * layers * kv_heads * head_dim * seq * batch * 2bytes (fp16)
+      const kvBytes = 2 * layers * kvHeads * headDim * seq * batch * 2;
+      const kvGB = kvBytes / 1e9;
+      const weightsGB = model === '7' ? 14 : model === '70' ? 140 : 810;
+      const totalGB = kvGB + weightsGB;
+      $('kvMemVal').textContent = kvGB.toFixed(1) + ' GB';
+      $('kvWeightsVal').textContent = weightsGB + ' GB';
+      $('kvTotalVal').textContent = totalGB.toFixed(1) + ' GB';
+      $('kvGpuVal').textContent = Math.max(1, Math.ceil(totalGB / 80));
+      $('kvBarFill').style.width = Math.min(100, kvGB / (weightsGB * 0.5) * 100) + '%';
+    }
+    $('kvBatchSlider').oninput = updateKV;
+    $('kvSeqSlider').oninput = updateKV;
+    $('kvModelSelect').onchange = updateKV;
+    updateKV();
+  </script>
+</BaseLayout>

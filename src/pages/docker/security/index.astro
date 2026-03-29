@@ -1,0 +1,868 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Docker Security: Seccomp, AppArmor, Capabilities & Rootless" 
+  description="Interactive visualizations of container security — seccomp profiles, AppArmor, Linux capabilities, rootless containers, image scanning, and secrets management"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Docker", href: "/docker/" },
+    { label: "Security", href: "/docker/security/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔒 Docker Security</h1>
+      <p class="subtitle">Seccomp, AppArmor, Capabilities, Rootless Containers &amp; More</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Containers share the host kernel — a single kernel exploit can compromise every container on the machine.
+          Defense in depth is essential: <strong>drop capabilities</strong> your app doesn't need,
+          <strong>filter syscalls</strong> with seccomp, enforce <strong>mandatory access control</strong> via AppArmor/SELinux,
+          run <strong>rootless</strong> so even a breakout has no host privileges, <strong>scan images</strong> for known CVEs,
+          and <strong>never bake secrets</strong> into images.
+        </p>
+      </div>
+    </section>
+
+    <!-- Linux Capabilities -->
+    <section class="caps-section">
+      <h2>🎛️ Linux Capabilities</h2>
+      <p class="section-desc">
+        Root is not monolithic — it's split into ~41 capabilities. Docker drops most by default. 
+        Toggle capabilities to see the attack surface change.
+      </p>
+
+      <div class="caps-demo">
+        <div class="caps-grid" id="capsGrid">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="caps-info-panel">
+          <div class="attack-surface-meter">
+            <h3>Attack Surface</h3>
+            <div class="surface-bar">
+              <div class="surface-fill" id="surfaceFill" style="width: 25%"></div>
+            </div>
+            <div class="surface-labels">
+              <span>Minimal</span>
+              <span id="surfacePercent">25%</span>
+              <span>Full Root</span>
+            </div>
+          </div>
+          <div class="caps-detail" id="capsDetail">
+            <p class="log-empty">Click a capability to see what it allows.</p>
+          </div>
+          <div class="caps-presets">
+            <button class="action-btn primary-btn" id="presetDefault">Docker Default</button>
+            <button class="action-btn chaos-btn" id="presetPrivileged">--privileged</button>
+            <button class="action-btn reset-btn" id="presetMinimal">Minimal (web app)</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Seccomp Profiles -->
+    <section class="seccomp-section">
+      <h2>🛡️ Seccomp Profiles</h2>
+      <p class="section-desc">
+        Seccomp-BPF filters which syscalls a process can invoke. Docker's default profile blocks ~44 dangerous syscalls.
+        Watch syscalls get intercepted in real time.
+      </p>
+
+      <div class="seccomp-demo">
+        <div class="seccomp-process" id="seccompProcess">
+          <h3>📦 Container Process</h3>
+          <div class="syscall-stream" id="syscallStream">
+            <!-- Rendered by JS -->
+          </div>
+          <button class="action-btn primary-btn" id="seccompStartBtn">▶ Run Workload</button>
+          <button class="action-btn reset-btn" id="seccompResetBtn">🔄 Reset</button>
+        </div>
+
+        <div class="seccomp-filter" id="seccompFilter">
+          <h3>🔒 Seccomp-BPF Filter</h3>
+          <div class="filter-profile">
+            <label>Profile:</label>
+            <select id="seccompProfileSelect" class="config-select">
+              <option value="default">Docker Default</option>
+              <option value="strict">Strict (read/write/exit only)</option>
+              <option value="none">Unconfined (no filter)</option>
+            </select>
+          </div>
+          <div class="filter-stats">
+            <div class="stat-box allowed-stat">
+              <span class="stat-num" id="allowedCount">0</span>
+              <span class="stat-label">Allowed</span>
+            </div>
+            <div class="stat-box blocked-stat">
+              <span class="stat-num" id="blockedCount">0</span>
+              <span class="stat-label">Blocked (EPERM)</span>
+            </div>
+          </div>
+          <div class="filter-log" id="filterLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AppArmor -->
+    <section class="apparmor-section">
+      <h2>🛡️ AppArmor Mandatory Access Control</h2>
+      <p class="section-desc">
+        AppArmor profiles restrict file access, network, and capability usage per-container.
+        Explore what Docker's default profile allows and denies.
+      </p>
+
+      <div class="apparmor-demo">
+        <div class="apparmor-rules" id="apparmorRules">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="apparmor-test">
+          <h3>🧪 Test Container Actions</h3>
+          <div class="test-actions" id="testActions">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="apparmor-log" id="apparmorLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Rootless Containers -->
+    <section class="rootless-section">
+      <h2>👤 Rootless Containers</h2>
+      <p class="section-desc">
+        In rootless mode the Docker daemon runs as an unprivileged user. Even if an attacker escapes the container,
+        they land as a normal user — not root. Compare the attack paths.
+      </p>
+
+      <div class="rootless-demo">
+        <div class="rootless-comparison">
+          <div class="rootless-card danger-card">
+            <h3>🔴 Root Daemon (default)</h3>
+            <div class="attack-path" id="rootAttackPath">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+          <div class="rootless-card safe-card">
+            <h3>🟢 Rootless Daemon</h3>
+            <div class="attack-path" id="rootlessAttackPath">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+        </div>
+        <div class="rootless-controls">
+          <button class="action-btn chaos-btn" id="simulateEscapeBtn">💥 Simulate Container Escape</button>
+          <button class="action-btn reset-btn" id="rootlessResetBtn">🔄 Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Image Scanning -->
+    <section class="scanning-section">
+      <h2>🔍 Image Scanning</h2>
+      <p class="section-desc">
+        Scan images for known CVEs before deploying. Watch a scan walk through image layers and flag vulnerabilities.
+      </p>
+
+      <div class="scanning-demo">
+        <div class="scan-image-select">
+          <label>Image to scan:</label>
+          <select id="scanImageSelect" class="config-select">
+            <option value="nginx:latest">nginx:latest</option>
+            <option value="node:18">node:18</option>
+            <option value="alpine:3.19">alpine:3.19</option>
+            <option value="ubuntu:22.04">ubuntu:22.04</option>
+          </select>
+          <button class="action-btn primary-btn" id="scanStartBtn">🔍 Start Scan</button>
+        </div>
+        <div class="scan-progress" id="scanProgress">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="scan-results" id="scanResults">
+          <div class="log-empty">Select an image and click "Start Scan"</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Secrets Management -->
+    <section class="secrets-section">
+      <h2>🔑 Secrets Management</h2>
+      <p class="section-desc">
+        Never put secrets in images or environment variables — they leak into layers and <code>docker inspect</code>.
+        Compare the right and wrong ways to handle secrets.
+      </p>
+
+      <div class="secrets-demo">
+        <div class="secrets-comparison">
+          <div class="secrets-card bad-card" id="secretsBad">
+            <h3>❌ Anti-patterns</h3>
+            <div class="secret-items" id="badSecretItems">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+          <div class="secrets-card good-card" id="secretsGood">
+            <h3>✅ Best Practices</h3>
+            <div class="secret-items" id="goodSecretItems">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+        </div>
+        <div class="secrets-interactive">
+          <button class="action-btn chaos-btn" id="inspectLayersBtn">🔍 Inspect Image Layers</button>
+          <button class="action-btn primary-btn" id="showMountBtn">📁 Show tmpfs Mount</button>
+          <div class="secrets-output" id="secretsOutput"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html" target="_blank">capabilities(7)</a>, <a href="https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html" target="_blank">seccomp-BPF</a>, <a href="https://docs.docker.com/engine/security/rootless/" target="_blank">Docker rootless mode</a>, and <a href="https://docs.docker.com/engine/security/apparmor/" target="_blank">AppArmor profiles</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Docker%20Security%20visualizer%20—%20seccomp%2C%20AppArmor%2C%20capabilities%2C%20rootless&url=https://systeminternals.dev/docker/security/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/docker/security/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/docker/security/&t=Interactive%20Docker%20Security%20Visualizer" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 1100px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 40px; }
+  .viz-header h1 {
+    font-size: 2.5rem; margin-bottom: 10px;
+    background: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .subtitle { color: #888; font-size: 1.1rem; }
+  h2 { font-size: 1.5rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 20px; line-height: 1.6; }
+  .section-desc code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #f59e0b; }
+  .overview-section { margin-bottom: 50px; }
+  .overview-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px; padding: 28px; line-height: 1.8; color: #bbb;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #f59e0b; font-style: normal; }
+
+  /* Capabilities */
+  .caps-section { margin-bottom: 50px; }
+  .caps-demo { display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
+  @media (max-width: 800px) { .caps-demo { grid-template-columns: 1fr; } }
+  .caps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .cap-chip {
+    padding: 8px 12px; border-radius: 8px; font-size: 0.75rem; font-family: monospace;
+    cursor: pointer; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.03); color: #888; user-select: none; text-align: center;
+  }
+  .cap-chip.enabled { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: #f87171; }
+  .cap-chip.safe { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.3); color: #4ade80; }
+  .cap-chip:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .caps-info-panel { display: flex; flex-direction: column; gap: 16px; }
+  .attack-surface-meter h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; }
+  .surface-bar {
+    height: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden;
+  }
+  .surface-fill {
+    height: 100%; border-radius: 10px; transition: all 0.5s ease;
+    background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);
+  }
+  .surface-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: #666; margin-top: 4px; }
+  #surfacePercent { color: #fff; font-weight: 600; }
+  .caps-detail {
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; min-height: 60px;
+    font-size: 0.85rem; color: #aaa; line-height: 1.5;
+  }
+  .caps-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* Seccomp */
+  .seccomp-section { margin-bottom: 50px; }
+  .seccomp-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { .seccomp-demo { grid-template-columns: 1fr; } }
+  .seccomp-process, .seccomp-filter {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 20px;
+  }
+  .seccomp-process h3, .seccomp-filter h3 { font-size: 1rem; color: #fff; margin-bottom: 12px; }
+  .syscall-stream { min-height: 200px; max-height: 300px; overflow-y: auto; margin-bottom: 12px; }
+  .syscall-entry {
+    display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px;
+    font-family: monospace; font-size: 0.8rem; margin-bottom: 4px;
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+  .syscall-entry.allowed { background: rgba(34,197,94,0.1); color: #4ade80; }
+  .syscall-entry.blocked { background: rgba(239,68,68,0.15); color: #f87171; }
+  .syscall-badge {
+    font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 600;
+  }
+  .badge-allow { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .badge-block { background: rgba(239,68,68,0.2); color: #f87171; }
+  .filter-profile { margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .filter-profile label { color: #888; font-size: 0.85rem; }
+  .config-select {
+    background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+    color: #fff; padding: 6px 10px; font-size: 0.85rem;
+  }
+  .filter-stats { display: flex; gap: 12px; margin-bottom: 12px; }
+  .stat-box {
+    flex: 1; text-align: center; padding: 12px; border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+  }
+  .stat-num { display: block; font-size: 1.8rem; font-weight: 700; }
+  .allowed-stat .stat-num { color: #4ade80; }
+  .blocked-stat .stat-num { color: #f87171; }
+  .stat-label { font-size: 0.75rem; color: #888; }
+  .filter-log {
+    max-height: 150px; overflow-y: auto; font-family: monospace; font-size: 0.75rem;
+    color: #666; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px;
+  }
+
+  /* AppArmor */
+  .apparmor-section { margin-bottom: 50px; }
+  .apparmor-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { .apparmor-demo { grid-template-columns: 1fr; } }
+  .apparmor-rules, .apparmor-test {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 20px;
+  }
+  .apparmor-test h3 { font-size: 1rem; color: #fff; margin-bottom: 12px; }
+  .rule-line {
+    font-family: monospace; font-size: 0.8rem; padding: 4px 8px; margin-bottom: 2px;
+    border-radius: 4px; transition: background 0.3s;
+  }
+  .rule-line.highlight-allow { background: rgba(34,197,94,0.15); }
+  .rule-line.highlight-deny { background: rgba(239,68,68,0.15); }
+  .rule-line .kw { color: #c084fc; }
+  .rule-line .path { color: #38bdf8; }
+  .rule-line .perm { color: #4ade80; }
+  .rule-line .deny-kw { color: #f87171; }
+  .rule-line .comment { color: #555; }
+  .test-btn {
+    display: block; width: 100%; text-align: left; padding: 10px 14px; margin-bottom: 8px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; color: #ccc; cursor: pointer; transition: all 0.2s;
+    font-size: 0.85rem;
+  }
+  .test-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.2); }
+  .test-btn.result-allow { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.05); }
+  .test-btn.result-deny { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.05); }
+  .apparmor-log {
+    margin-top: 12px; font-family: monospace; font-size: 0.75rem; color: #888;
+    max-height: 100px; overflow-y: auto;
+  }
+
+  /* Rootless */
+  .rootless-section { margin-bottom: 50px; }
+  .rootless-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .rootless-comparison { grid-template-columns: 1fr; } }
+  .rootless-card {
+    background: rgba(255,255,255,0.03); border-radius: 12px; padding: 20px;
+  }
+  .danger-card { border: 1px solid rgba(239,68,68,0.2); }
+  .safe-card { border: 1px solid rgba(34,197,94,0.2); }
+  .rootless-card h3 { font-size: 1rem; margin-bottom: 16px; }
+  .attack-path { min-height: 180px; }
+  .path-step {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+    opacity: 0.3; transition: all 0.5s;
+  }
+  .path-step.active { opacity: 1; }
+  .path-step.danger { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); }
+  .path-step.safe { border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.05); }
+  .path-step.blocked { border-color: rgba(34,197,94,0.5); background: rgba(34,197,94,0.1); }
+  .path-step .step-icon { font-size: 1.2rem; }
+  .path-step .step-text { color: #ccc; }
+  .path-step.danger .step-text { color: #f87171; }
+  .path-step.safe .step-text { color: #4ade80; }
+  .rootless-controls { display: flex; gap: 10px; justify-content: center; }
+
+  /* Image Scanning */
+  .scanning-section { margin-bottom: 50px; }
+  .scan-image-select { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .scan-image-select label { color: #888; }
+  .scan-progress { margin-bottom: 16px; }
+  .scan-layer {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; margin-bottom: 4px;
+    border-radius: 6px; font-size: 0.8rem; font-family: monospace;
+    background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+    transition: all 0.3s;
+  }
+  .scan-layer.scanning { border-color: rgba(59,130,246,0.4); background: rgba(59,130,246,0.05); }
+  .scan-layer.done { border-color: rgba(34,197,94,0.3); }
+  .scan-layer.has-vuln { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.03); }
+  .scan-layer .layer-status { min-width: 24px; text-align: center; }
+  .scan-results {
+    background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px;
+  }
+  .vuln-row {
+    display: grid; grid-template-columns: 90px 1fr 80px 80px; gap: 8px; padding: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; align-items: center;
+  }
+  .vuln-row:last-child { border-bottom: none; }
+  .vuln-sev {
+    padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-align: center;
+  }
+  .sev-critical { background: rgba(239,68,68,0.2); color: #f87171; }
+  .sev-high { background: rgba(249,115,22,0.2); color: #fb923c; }
+  .sev-medium { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .sev-low { background: rgba(34,197,94,0.2); color: #4ade80; }
+  .vuln-pkg { color: #38bdf8; font-family: monospace; }
+  .vuln-ver { color: #888; font-family: monospace; }
+  .vuln-fix { color: #4ade80; font-family: monospace; }
+  .scan-summary {
+    display: flex; gap: 16px; margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  .summary-item { font-size: 0.85rem; font-weight: 600; }
+
+  /* Secrets */
+  .secrets-section { margin-bottom: 50px; }
+  .secrets-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .secrets-comparison { grid-template-columns: 1fr; } }
+  .secrets-card { border-radius: 12px; padding: 20px; }
+  .bad-card { background: rgba(239,68,68,0.03); border: 1px solid rgba(239,68,68,0.2); }
+  .good-card { background: rgba(34,197,94,0.03); border: 1px solid rgba(34,197,94,0.2); }
+  .secrets-card h3 { font-size: 1rem; margin-bottom: 12px; }
+  .secret-item {
+    padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; font-size: 0.82rem;
+    background: rgba(0,0,0,0.2); font-family: monospace; line-height: 1.5;
+  }
+  .secret-item .label { display: block; font-family: sans-serif; font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+  .bad-card .secret-item { color: #f87171; }
+  .good-card .secret-item { color: #4ade80; }
+  .secrets-interactive { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+  .secrets-output {
+    width: 100%; margin-top: 12px; font-family: monospace; font-size: 0.8rem;
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; color: #aaa;
+    min-height: 40px; white-space: pre-wrap;
+  }
+
+  /* Shared */
+  .action-btn {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05); color: #fff; cursor: pointer;
+    font-size: 0.85rem; transition: all 0.2s;
+  }
+  .action-btn:hover { background: rgba(255,255,255,0.1); transform: translateY(-1px); }
+  .primary-btn { border-color: rgba(59,130,246,0.4); color: #60a5fa; }
+  .primary-btn:hover { background: rgba(59,130,246,0.15); }
+  .chaos-btn { border-color: rgba(239,68,68,0.4); color: #f87171; }
+  .chaos-btn:hover { background: rgba(239,68,68,0.15); }
+  .reset-btn { border-color: rgba(255,255,255,0.1); color: #888; }
+  .log-empty { color: #555; font-style: italic; font-size: 0.85rem; }
+
+  .viz-footer { text-align: center; color: #555; font-size: 0.85rem; margin-top: 40px; padding: 20px 0; border-top: 1px solid rgba(255,255,255,0.05); }
+  .viz-footer a { color: #888; }
+  .share-buttons { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 20px; flex-wrap: wrap; }
+  .share-buttons span { color: #555; font-size: 0.85rem; }
+  .share-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); color: #888; font-size: 0.8rem; transition: all 0.2s; }
+  .share-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
+</style>
+
+<script>
+  // ── Capabilities ──
+  const ALL_CAPS = [
+    { name: 'CAP_NET_BIND_SERVICE', desc: 'Bind to ports < 1024 (e.g. 80, 443). Most web servers need this.', default: true, dangerous: false },
+    { name: 'CAP_CHOWN', desc: 'Change file ownership. Needed for some package managers during build.', default: true, dangerous: false },
+    { name: 'CAP_DAC_OVERRIDE', desc: 'Bypass file read/write/execute permission checks. Wide access.', default: true, dangerous: true },
+    { name: 'CAP_FOWNER', desc: 'Bypass permission checks on operations that require UID match.', default: true, dangerous: false },
+    { name: 'CAP_FSETID', desc: 'Set setuid/setgid bits when creating files.', default: true, dangerous: false },
+    { name: 'CAP_KILL', desc: 'Send signals to any process (within the PID namespace).', default: true, dangerous: false },
+    { name: 'CAP_SETGID', desc: 'Set GID. Needed for su/sudo style operations.', default: true, dangerous: false },
+    { name: 'CAP_SETUID', desc: 'Set UID. Needed for su/sudo style operations.', default: true, dangerous: true },
+    { name: 'CAP_SETPCAP', desc: 'Modify process capabilities. Meta-capability.', default: true, dangerous: true },
+    { name: 'CAP_NET_RAW', desc: 'Use raw sockets. Allows ping, but also packet sniffing.', default: true, dangerous: true },
+    { name: 'CAP_SYS_CHROOT', desc: 'Use chroot(). Sandbox escape possible with other caps.', default: true, dangerous: false },
+    { name: 'CAP_MKNOD', desc: 'Create special files with mknod.', default: true, dangerous: false },
+    { name: 'CAP_AUDIT_WRITE', desc: 'Write records to kernel audit log.', default: true, dangerous: false },
+    { name: 'CAP_SETFCAP', desc: 'Set file capabilities (xattrs).', default: true, dangerous: false },
+    { name: 'CAP_SYS_ADMIN', desc: '⚠️ GOD MODE — mount, pivot_root, BPF, namespaces, cgroups. Never grant unless you must.', default: false, dangerous: true },
+    { name: 'CAP_SYS_PTRACE', desc: 'Trace/debug any process. Container escape vector via /proc.', default: false, dangerous: true },
+    { name: 'CAP_SYS_MODULE', desc: 'Load/unload kernel modules. Full kernel compromise.', default: false, dangerous: true },
+    { name: 'CAP_SYS_RAWIO', desc: 'Direct I/O to /dev/mem and ports. Bare-metal access.', default: false, dangerous: true },
+    { name: 'CAP_SYS_BOOT', desc: 'Reboot the host. Denial-of-service.', default: false, dangerous: true },
+    { name: 'CAP_NET_ADMIN', desc: 'Configure network interfaces, routing, iptables.', default: false, dangerous: true },
+    { name: 'CAP_SYS_TIME', desc: 'Set system clock. Can break TLS, logs, cron.', default: false, dangerous: true },
+    { name: 'CAP_SYS_RESOURCE', desc: 'Override resource limits (rlimits, disk quota).', default: false, dangerous: true },
+    { name: 'CAP_LINUX_IMMUTABLE', desc: 'Set immutable file attributes.', default: false, dangerous: false },
+    { name: 'CAP_IPC_LOCK', desc: 'Lock memory (mlock). Needed for crypto / databases.', default: false, dangerous: false },
+  ];
+
+  let capStates = {};
+  function initCaps(preset) {
+    capStates = {};
+    ALL_CAPS.forEach(c => {
+      if (preset === 'default') capStates[c.name] = c.default;
+      else if (preset === 'privileged') capStates[c.name] = true;
+      else capStates[c.name] = (c.name === 'CAP_NET_BIND_SERVICE' || c.name === 'CAP_CHOWN');
+    });
+    renderCaps();
+  }
+
+  function renderCaps() {
+    const grid = document.getElementById('capsGrid');
+    grid.innerHTML = '';
+    ALL_CAPS.forEach(c => {
+      const chip = document.createElement('div');
+      chip.className = `cap-chip ${capStates[c.name] ? (c.dangerous ? 'enabled' : 'safe') : ''}`;
+      chip.textContent = c.name.replace('CAP_', '');
+      chip.onclick = () => {
+        capStates[c.name] = !capStates[c.name];
+        renderCaps();
+        document.getElementById('capsDetail').innerHTML = `<strong style="color:#fff">${c.name}</strong><br>${c.desc}`;
+      };
+      grid.appendChild(chip);
+    });
+    const enabled = Object.values(capStates).filter(Boolean).length;
+    const pct = Math.round((enabled / ALL_CAPS.length) * 100);
+    document.getElementById('surfaceFill').style.width = pct + '%';
+    document.getElementById('surfacePercent').textContent = pct + '%';
+  }
+
+  document.getElementById('presetDefault').onclick = () => initCaps('default');
+  document.getElementById('presetPrivileged').onclick = () => initCaps('privileged');
+  document.getElementById('presetMinimal').onclick = () => initCaps('minimal');
+  initCaps('default');
+
+  // ── Seccomp ──
+  const SYSCALLS = {
+    safe: ['read', 'write', 'open', 'close', 'stat', 'fstat', 'mmap', 'brk', 'getpid', 'epoll_wait', 'accept', 'sendto', 'recvfrom', 'futex', 'nanosleep', 'clock_gettime'],
+    blocked_default: ['mount', 'umount2', 'ptrace', 'reboot', 'swapon', 'swapoff', 'init_module', 'delete_module', 'pivot_root', 'sethostname', 'kexec_load', 'unshare', 'keyctl', 'bpf', 'userfaultfd', 'perf_event_open'],
+    blocked_strict: ['ioctl', 'socket', 'connect', 'bind', 'listen', 'mprotect', 'fork', 'execve', 'clone', 'openat', 'getdents']
+  };
+
+  let seccompInterval = null;
+  let allowedCount = 0, blockedCount = 0;
+
+  document.getElementById('seccompStartBtn').onclick = function() {
+    if (seccompInterval) return;
+    const stream = document.getElementById('syscallStream');
+    const profile = document.getElementById('seccompProfileSelect').value;
+    stream.innerHTML = '';
+    allowedCount = 0; blockedCount = 0;
+    updateSeccompStats();
+
+    let calls;
+    if (profile === 'none') calls = [...SYSCALLS.safe, ...SYSCALLS.blocked_default];
+    else if (profile === 'strict') calls = [...SYSCALLS.safe, ...SYSCALLS.blocked_default, ...SYSCALLS.blocked_strict];
+    else calls = [...SYSCALLS.safe, ...SYSCALLS.blocked_default];
+
+    let i = 0;
+    seccompInterval = setInterval(() => {
+      if (i >= 40) { clearInterval(seccompInterval); seccompInterval = null; return; }
+      const sc = calls[Math.floor(Math.random() * calls.length)];
+      let blocked = false;
+      if (profile === 'default') blocked = SYSCALLS.blocked_default.includes(sc);
+      else if (profile === 'strict') blocked = SYSCALLS.blocked_default.includes(sc) || SYSCALLS.blocked_strict.includes(sc);
+      // 'none' => nothing blocked
+
+      if (blocked) blockedCount++; else allowedCount++;
+      updateSeccompStats();
+
+      const entry = document.createElement('div');
+      entry.className = `syscall-entry ${blocked ? 'blocked' : 'allowed'}`;
+      entry.innerHTML = `<span class="syscall-badge ${blocked ? 'badge-block' : 'badge-allow'}">${blocked ? 'DENY' : 'ALLOW'}</span> <span>${sc}()</span>`;
+      stream.appendChild(entry);
+      stream.scrollTop = stream.scrollHeight;
+
+      const log = document.getElementById('filterLog');
+      if (blocked) {
+        log.innerHTML += `<div style="color:#f87171">audit: seccomp BLOCKED syscall=${sc} pid=${1000+i}</div>`;
+        log.scrollTop = log.scrollHeight;
+      }
+      i++;
+    }, 200);
+  };
+
+  document.getElementById('seccompResetBtn').onclick = function() {
+    if (seccompInterval) { clearInterval(seccompInterval); seccompInterval = null; }
+    document.getElementById('syscallStream').innerHTML = '';
+    document.getElementById('filterLog').innerHTML = '';
+    allowedCount = 0; blockedCount = 0; updateSeccompStats();
+  };
+
+  function updateSeccompStats() {
+    document.getElementById('allowedCount').textContent = allowedCount;
+    document.getElementById('blockedCount').textContent = blockedCount;
+  }
+
+  // ── AppArmor ──
+  const APPARMOR_RULES = [
+    { text: '# docker-default profile', type: 'comment' },
+    { text: 'profile docker-default flags=(attach_disconnected,mediate_deleted) {', type: 'header' },
+    { text: '  network,', type: 'allow', id: 'net' },
+    { text: '  capability,', type: 'allow', id: 'cap' },
+    { text: '  file,', type: 'allow', id: 'file-all' },
+    { text: '  deny @{PROC}/sys/kernel/{?,osrelease,ngroups_max} w,', type: 'deny', id: 'proc-w' },
+    { text: '  deny @{PROC}/sysrq-trigger rwklx,', type: 'deny', id: 'sysrq' },
+    { text: '  deny @{PROC}/kcore rwklx,', type: 'deny', id: 'kcore' },
+    { text: '  deny mount,', type: 'deny', id: 'mount' },
+    { text: '  deny /sys/firmware/** rwklx,', type: 'deny', id: 'firmware' },
+    { text: '  deny /sys/kernel/security/** rwklx,', type: 'deny', id: 'security' },
+    { text: '}', type: 'header' },
+  ];
+
+  const APPARMOR_TESTS = [
+    { action: 'Read /etc/passwd', result: 'allow', rule: 'file-all', detail: 'Allowed by: file (general file access)' },
+    { action: 'Open TCP socket', result: 'allow', rule: 'net', detail: 'Allowed by: network' },
+    { action: 'Write to /proc/sys/kernel/hostname', result: 'deny', rule: 'proc-w', detail: 'Denied by: deny @{PROC}/sys/kernel/* w' },
+    { action: 'Read /proc/kcore', result: 'deny', rule: 'kcore', detail: 'Denied by: deny @{PROC}/kcore rwklx' },
+    { action: 'Mount filesystem', result: 'deny', rule: 'mount', detail: 'Denied by: deny mount' },
+    { action: 'Read /sys/firmware/efi', result: 'deny', rule: 'firmware', detail: 'Denied by: deny /sys/firmware/** rwklx' },
+    { action: 'Drop capability NET_RAW', result: 'allow', rule: 'cap', detail: 'Allowed by: capability (manage own caps)' },
+  ];
+
+  (function renderAppArmor() {
+    const rulesEl = document.getElementById('apparmorRules');
+    rulesEl.innerHTML = '<h3 style="font-size:1rem;color:#fff;margin-bottom:12px">📄 docker-default Profile</h3>';
+    APPARMOR_RULES.forEach(r => {
+      const line = document.createElement('div');
+      line.className = 'rule-line';
+      line.id = 'rule-' + (r.id || '');
+      if (r.type === 'comment') line.innerHTML = `<span class="comment">${r.text}</span>`;
+      else if (r.type === 'deny') line.innerHTML = r.text.replace('deny', '<span class="deny-kw">deny</span>').replace(/(\/[^\s,]+)/g, '<span class="path">$1</span>');
+      else if (r.type === 'allow') line.innerHTML = r.text.replace(/(network|capability|file)/g, '<span class="perm">$1</span>');
+      else line.innerHTML = `<span class="kw">${r.text}</span>`;
+      rulesEl.appendChild(line);
+    });
+
+    const testsEl = document.getElementById('testActions');
+    APPARMOR_TESTS.forEach((t, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'test-btn';
+      btn.textContent = t.action;
+      btn.onclick = () => {
+        btn.className = `test-btn result-${t.result}`;
+        btn.textContent = `${t.result === 'allow' ? '✅' : '🚫'} ${t.action}`;
+        // highlight rule
+        document.querySelectorAll('.rule-line').forEach(l => l.classList.remove('highlight-allow', 'highlight-deny'));
+        const ruleEl = document.getElementById('rule-' + t.rule);
+        if (ruleEl) ruleEl.classList.add(t.result === 'allow' ? 'highlight-allow' : 'highlight-deny');
+        const log = document.getElementById('apparmorLog');
+        log.innerHTML += `<div style="color:${t.result === 'allow' ? '#4ade80' : '#f87171'}">[apparmor] ${t.result.toUpperCase()} ${t.action} — ${t.detail}</div>`;
+        log.scrollTop = log.scrollHeight;
+      };
+      testsEl.appendChild(btn);
+    });
+  })();
+
+  // ── Rootless ──
+  const ROOT_STEPS = [
+    { icon: '📦', text: 'Attacker exploits vuln in container app' },
+    { icon: '💥', text: 'Container escape via kernel exploit' },
+    { icon: '👑', text: 'Lands as root on host (UID 0)', danger: true },
+    { icon: '🔓', text: 'Full host compromise — game over', danger: true },
+  ];
+  const ROOTLESS_STEPS = [
+    { icon: '📦', text: 'Attacker exploits vuln in container app' },
+    { icon: '💥', text: 'Container escape via kernel exploit' },
+    { icon: '👤', text: 'Lands as unprivileged user (UID 1000)', safe: true },
+    { icon: '🛡️', text: 'No root access — escape contained!', safe: true },
+  ];
+
+  function renderAttackPaths() {
+    const rootEl = document.getElementById('rootAttackPath');
+    const rootlessEl = document.getElementById('rootlessAttackPath');
+    rootEl.innerHTML = ''; rootlessEl.innerHTML = '';
+    ROOT_STEPS.forEach(s => {
+      const d = document.createElement('div');
+      d.className = 'path-step'; 
+      d.innerHTML = `<span class="step-icon">${s.icon}</span><span class="step-text">${s.text}</span>`;
+      rootEl.appendChild(d);
+    });
+    ROOTLESS_STEPS.forEach(s => {
+      const d = document.createElement('div');
+      d.className = 'path-step';
+      d.innerHTML = `<span class="step-icon">${s.icon}</span><span class="step-text">${s.text}</span>`;
+      rootlessEl.appendChild(d);
+    });
+  }
+  renderAttackPaths();
+
+  document.getElementById('simulateEscapeBtn').onclick = function() {
+    const rootSteps = document.querySelectorAll('#rootAttackPath .path-step');
+    const rootlessSteps = document.querySelectorAll('#rootlessAttackPath .path-step');
+    rootSteps.forEach(s => { s.classList.remove('active', 'danger', 'safe'); });
+    rootlessSteps.forEach(s => { s.classList.remove('active', 'danger', 'safe', 'blocked'); });
+
+    [rootSteps, rootlessSteps].forEach((steps, idx) => {
+      steps.forEach((step, i) => {
+        setTimeout(() => {
+          step.classList.add('active');
+          if (idx === 0 && i >= 2) step.classList.add('danger');
+          if (idx === 1 && i >= 2) step.classList.add(i === 3 ? 'blocked' : 'safe');
+        }, (i + 1) * 600);
+      });
+    });
+  };
+
+  document.getElementById('rootlessResetBtn').onclick = function() {
+    document.querySelectorAll('.path-step').forEach(s => s.classList.remove('active', 'danger', 'safe', 'blocked'));
+  };
+
+  // ── Image Scanning ──
+  const SCAN_DATA = {
+    'nginx:latest': {
+      layers: ['sha256:a1b2...base-debian', 'sha256:c3d4...nginx-core', 'sha256:e5f6...config'],
+      vulns: [
+        { sev: 'critical', pkg: 'libssl3', ver: '3.0.9', fix: '3.0.13' },
+        { sev: 'high', pkg: 'libcurl4', ver: '7.88.1', fix: '7.88.1-10+deb12u5' },
+        { sev: 'medium', pkg: 'zlib1g', ver: '1.2.13', fix: '1.2.13.1' },
+        { sev: 'low', pkg: 'bash', ver: '5.2.15', fix: '5.2.21' },
+      ]
+    },
+    'node:18': {
+      layers: ['sha256:a1b2...base-debian', 'sha256:f7g8...buildtools', 'sha256:h9i0...node18', 'sha256:j1k2...npm'],
+      vulns: [
+        { sev: 'critical', pkg: 'node', ver: '18.17.0', fix: '18.19.1' },
+        { sev: 'critical', pkg: 'libssl3', ver: '3.0.9', fix: '3.0.13' },
+        { sev: 'high', pkg: 'nghttp2', ver: '1.52.0', fix: '1.57.0' },
+        { sev: 'high', pkg: 'libcurl4', ver: '7.88.1', fix: '7.88.1-10+deb12u5' },
+        { sev: 'medium', pkg: 'libc6', ver: '2.36-9', fix: '2.36-9+deb12u4' },
+        { sev: 'medium', pkg: 'perl', ver: '5.36.0', fix: '5.36.0-7+deb12u1' },
+      ]
+    },
+    'alpine:3.19': {
+      layers: ['sha256:a1b2...alpine-base'],
+      vulns: [
+        { sev: 'low', pkg: 'busybox', ver: '1.36.1', fix: '1.36.1-r15' },
+      ]
+    },
+    'ubuntu:22.04': {
+      layers: ['sha256:a1b2...ubuntu-base', 'sha256:c3d4...apt-lists'],
+      vulns: [
+        { sev: 'medium', pkg: 'libssl3', ver: '3.0.2', fix: '3.0.2-0ubuntu1.15' },
+        { sev: 'medium', pkg: 'libsystemd0', ver: '249.11', fix: '249.11-0ubuntu3.12' },
+        { sev: 'low', pkg: 'coreutils', ver: '8.32', fix: '8.32-4.1ubuntu1.2' },
+      ]
+    }
+  };
+
+  document.getElementById('scanStartBtn').onclick = function() {
+    const img = document.getElementById('scanImageSelect').value;
+    const data = SCAN_DATA[img];
+    const progressEl = document.getElementById('scanProgress');
+    const resultsEl = document.getElementById('scanResults');
+    progressEl.innerHTML = ''; resultsEl.innerHTML = '<div class="log-empty">Scanning...</div>';
+
+    data.layers.forEach((l, i) => {
+      const layer = document.createElement('div');
+      layer.className = 'scan-layer';
+      layer.innerHTML = `<span class="layer-status">⏳</span><span>${l}</span>`;
+      progressEl.appendChild(layer);
+    });
+
+    const layers = progressEl.querySelectorAll('.scan-layer');
+    layers.forEach((layer, i) => {
+      setTimeout(() => {
+        layer.classList.add('scanning');
+        layer.querySelector('.layer-status').textContent = '🔍';
+        setTimeout(() => {
+          layer.classList.remove('scanning');
+          layer.classList.add('done');
+          layer.querySelector('.layer-status').textContent = '✅';
+          if (i === layers.length - 1) showScanResults(data);
+        }, 500);
+      }, i * 700);
+    });
+  };
+
+  function showScanResults(data) {
+    const el = document.getElementById('scanResults');
+    let html = '<div class="vuln-row" style="color:#888;font-weight:600"><span>Severity</span><span>Package</span><span>Version</span><span>Fix</span></div>';
+    data.vulns.forEach(v => {
+      html += `<div class="vuln-row"><span class="vuln-sev sev-${v.sev}">${v.sev.toUpperCase()}</span><span class="vuln-pkg">${v.pkg}</span><span class="vuln-ver">${v.ver}</span><span class="vuln-fix">${v.fix}</span></div>`;
+    });
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    data.vulns.forEach(v => counts[v.sev]++);
+    html += `<div class="scan-summary">`;
+    Object.entries(counts).forEach(([k, v]) => {
+      if (v > 0) html += `<span class="summary-item sev-${k}" style="color:${k==='critical'?'#f87171':k==='high'?'#fb923c':k==='medium'?'#fbbf24':'#4ade80'}">${v} ${k}</span>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  // ── Secrets ──
+  const BAD_SECRETS = [
+    { label: 'Hardcoded in Dockerfile', code: 'ENV DB_PASSWORD=supersecret123' },
+    { label: 'Passed via -e flag', code: 'docker run -e API_KEY=sk-abc123 myapp' },
+    { label: 'Copied into image', code: 'COPY ./credentials.json /app/' },
+    { label: 'In docker-compose.yml', code: 'environment:\n  - SECRET_KEY=hunter2' },
+  ];
+  const GOOD_SECRETS = [
+    { label: 'Docker secrets (Swarm)', code: 'docker secret create db_pass ./secret.txt\n# Mounted at /run/secrets/db_pass' },
+    { label: 'BuildKit --mount=type=secret', code: 'RUN --mount=type=secret,id=npmrc,target=/root/.npmrc \\\n  npm install' },
+    { label: 'tmpfs mount at runtime', code: 'docker run --mount type=tmpfs,dst=/secrets \\\n  -v ./secrets:/secrets:ro myapp' },
+    { label: 'External vault (HashiCorp/AWS)', code: 'vault kv get -field=password secret/db\n# Injected at runtime, never in image' },
+  ];
+
+  (function renderSecrets() {
+    const badEl = document.getElementById('badSecretItems');
+    const goodEl = document.getElementById('goodSecretItems');
+    BAD_SECRETS.forEach(s => {
+      badEl.innerHTML += `<div class="secret-item"><span class="label">${s.label}</span>${s.code}</div>`;
+    });
+    GOOD_SECRETS.forEach(s => {
+      goodEl.innerHTML += `<div class="secret-item"><span class="label">${s.label}</span>${s.code}</div>`;
+    });
+  })();
+
+  document.getElementById('inspectLayersBtn').onclick = function() {
+    const out = document.getElementById('secretsOutput');
+    out.innerHTML = '';
+    const lines = [
+      '$ docker history myapp:latest',
+      'IMAGE          CREATED        CREATED BY                                     SIZE',
+      'a1b2c3d4e5f6   2 hours ago    CMD ["node", "server.js"]                      0B',
+      '<span style="color:#f87171">f7g8h9i0j1k2   2 hours ago    ENV DB_PASSWORD=supersecret123                  0B</span>',
+      '<span style="color:#f87171">m3n4o5p6q7r8   2 hours ago    COPY credentials.json /app/                    2.1kB</span>',
+      's9t0u1v2w3x4   3 hours ago    RUN npm install                                 48MB',
+      '',
+      '<span style="color:#f87171">⚠️  Secrets visible in image history! Anyone with docker pull can see them.</span>',
+      '<span style="color:#f87171">⚠️  Even if you DELETE the file later, it persists in a lower layer.</span>',
+    ];
+    lines.forEach((l, i) => {
+      setTimeout(() => {
+        out.innerHTML += l + '\n';
+        out.scrollTop = out.scrollHeight;
+      }, i * 150);
+    });
+  };
+
+  document.getElementById('showMountBtn').onclick = function() {
+    const out = document.getElementById('secretsOutput');
+    out.innerHTML = '';
+    const lines = [
+      '$ docker run --mount type=tmpfs,destination=/run/secrets myapp',
+      '',
+      '# Inside container:',
+      '$ mount | grep secrets',
+      'tmpfs on /run/secrets type tmpfs (rw,nosuid,nodev,noexec,relatime)',
+      '',
+      '$ ls -la /run/secrets/',
+      'total 0',
+      'drwxrwxrwt 2 root root 40 Mar 28 db_password',
+      '',
+      '<span style="color:#4ade80">✅ Secret in tmpfs — never written to disk, not in any image layer</span>',
+      '<span style="color:#4ade80">✅ Only accessible to this container, auto-cleaned on stop</span>',
+    ];
+    lines.forEach((l, i) => {
+      setTimeout(() => {
+        out.innerHTML += l + '\n';
+        out.scrollTop = out.scrollHeight;
+      }, i * 120);
+    });
+  };
+</script>
+</BaseLayout>

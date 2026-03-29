@@ -1,0 +1,389 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Model Quantization — Interactive Visualization"
+  description="Understand INT8, INT4, GPTQ, AWQ quantization for LLMs. Interactive precision comparison, calibration walkthrough, and accuracy-speed tradeoffs."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "LLM", href: "/llm/" },
+    { label: "Quantization", href: "/llm/quantization/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🔢 Model Quantization</h1>
+      <p class="subtitle">INT8, INT4, GPTQ, AWQ — fitting 70B models on consumer GPUs without destroying quality</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A Llama 70B model in FP16 needs <strong>140 GB</strong> — two H100s just for inference. Quantize to INT4 and it fits 
+          in <strong>35 GB</strong> — one GPU. The trick: most weights can be represented with far fewer bits without meaningful quality loss.
+          Modern methods like <strong>GPTQ</strong> and <strong>AWQ</strong> achieve this with &lt;1% perplexity degradation.
+        </p>
+      </div>
+    </section>
+
+    <!-- Precision Comparison -->
+    <section class="prec-section">
+      <h2>📐 Precision Formats</h2>
+      <p class="section-desc">See how the same value is represented across different bit widths.</p>
+      <div class="prec-input-row">
+        <label>Value: <strong id="precValLabel">3.14159</strong></label>
+        <input type="range" id="precSlider" min="-100" max="100" value="31" step="1">
+      </div>
+      <div class="prec-grid">
+        <div class="prec-card">
+          <h4>FP32 (32 bits)</h4>
+          <div class="prec-bits" id="fp32Bits"></div>
+          <p class="prec-val" id="fp32Val"></p>
+          <p class="prec-size">4 bytes per parameter</p>
+        </div>
+        <div class="prec-card">
+          <h4>FP16 (16 bits)</h4>
+          <div class="prec-bits" id="fp16Bits"></div>
+          <p class="prec-val" id="fp16Val"></p>
+          <p class="prec-size">2 bytes per parameter</p>
+        </div>
+        <div class="prec-card">
+          <h4>INT8 (8 bits)</h4>
+          <div class="prec-bits" id="int8Bits"></div>
+          <p class="prec-val" id="int8Val"></p>
+          <p class="prec-size">1 byte per parameter</p>
+        </div>
+        <div class="prec-card">
+          <h4>INT4 (4 bits)</h4>
+          <div class="prec-bits" id="int4Bits"></div>
+          <p class="prec-val" id="int4Val"></p>
+          <p class="prec-size">0.5 bytes per parameter</p>
+        </div>
+      </div>
+      <div class="error-bar">
+        <span>Quantization Error: </span>
+        <div class="error-fill-outer"><div class="error-fill" id="quantError"></div></div>
+        <strong id="quantErrorVal">0%</strong>
+      </div>
+    </section>
+
+    <!-- Methods Comparison -->
+    <section class="methods-section">
+      <h2>⚙️ Quantization Methods</h2>
+      <p class="section-desc">Click each method to understand how it works.</p>
+      <div class="method-tabs">
+        <button class="method-tab active" data-m="absmax" onclick="showMethod('absmax')">Absmax (Naive)</button>
+        <button class="method-tab" data-m="gptq" onclick="showMethod('gptq')">GPTQ</button>
+        <button class="method-tab" data-m="awq" onclick="showMethod('awq')">AWQ</button>
+        <button class="method-tab" data-m="gguf" onclick="showMethod('gguf')">GGUF/llama.cpp</button>
+      </div>
+
+      <div class="method-panel" id="methodAbsmax">
+        <div class="method-content">
+          <h4>Absmax Quantization (Post-Training, Naive)</h4>
+          <div class="method-formula">
+            <code>scale = max(|W|) / 127</code><br>
+            <code>W_quant = round(W / scale)</code><br>
+            <code>W_dequant = W_quant × scale</code>
+          </div>
+          <p>Simplest approach: find the absolute max of the weight tensor, compute a scale factor, round everything to integers. Works okay for INT8 but falls apart at INT4 because outlier weights dominate the range.</p>
+          <div class="method-pros-cons">
+            <span class="pro">✅ Fast, no calibration data needed</span>
+            <span class="con">❌ Poor accuracy at low bit widths</span>
+            <span class="con">❌ Outliers waste quantization range</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="method-panel hidden" id="methodGptq">
+        <div class="method-content">
+          <h4>GPTQ (Post-Training, Calibration-Based)</h4>
+          <div class="method-formula">
+            <code>For each column of W:</code><br>
+            <code>  quantize weight, compute error</code><br>
+            <code>  redistribute error to remaining weights using Hessian</code>
+          </div>
+          <p>Based on Optimal Brain Quantization (OBQ). Processes weights column-by-column. When quantizing one weight introduces error, GPTQ adjusts neighboring unquantized weights to compensate — using a calibration dataset to estimate the Hessian (second-order info).</p>
+          <div class="method-pros-cons">
+            <span class="pro">✅ Excellent INT4 quality (&lt;0.5% perplexity increase)</span>
+            <span class="pro">✅ One-shot — quantize once, deploy forever</span>
+            <span class="con">❌ Needs ~128 calibration samples</span>
+            <span class="con">❌ Slow quantization (hours for 70B)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="method-panel hidden" id="methodAwq">
+        <div class="method-content">
+          <h4>AWQ — Activation-Aware Weight Quantization</h4>
+          <div class="method-formula">
+            <code>For each weight channel:</code><br>
+            <code>  importance = activation_magnitude</code><br>
+            <code>  scale salient channels up before quantizing</code><br>
+            <code>  scale activations down to compensate</code>
+          </div>
+          <p>Key insight: only ~1% of weights are "salient" (those connected to high-magnitude activations). Instead of treating all weights equally, AWQ protects important weights by scaling them up before quantization, then absorbing the scale into the preceding layer's activations.</p>
+          <div class="method-pros-cons">
+            <span class="pro">✅ Better than GPTQ at INT4 for most models</span>
+            <span class="pro">✅ Hardware-friendly (no mixed-precision tricks)</span>
+            <span class="pro">✅ Faster quantization than GPTQ</span>
+            <span class="con">❌ Still needs calibration data</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="method-panel hidden" id="methodGguf">
+        <div class="method-content">
+          <h4>GGUF / llama.cpp Quantization</h4>
+          <div class="method-formula">
+            <code>Block quantization: group of 32-256 weights</code><br>
+            <code>Each block has its own scale + zero point</code><br>
+            <code>Multiple quant types: Q4_0, Q4_K_M, Q5_K_S, Q8_0...</code>
+          </div>
+          <p>The llama.cpp ecosystem uses block quantization with many "K-quant" variants. The "K" variants use importance-based mixed precision: more important layers get higher bit widths. Q4_K_M is the sweet spot for most users — good quality at ~4.8 bits average.</p>
+          <div class="method-pros-cons">
+            <span class="pro">✅ Runs on CPU (AVX2/NEON optimized)</span>
+            <span class="pro">✅ Many quant levels — fine-grained control</span>
+            <span class="pro">✅ No calibration needed for basic types</span>
+            <span class="con">❌ CPU inference slower than GPU</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Size / Quality Tradeoff -->
+    <section class="tradeoff-section">
+      <h2>📊 Size vs Quality Tradeoff</h2>
+      <p class="section-desc">Compare model sizes and approximate quality impact across quantization levels.</p>
+      <div class="tradeoff-controls">
+        <div class="ctrl-group">
+          <label>Model Size (B): <strong id="trParamLabel">70</strong></label>
+          <input type="range" id="trParamSlider" min="1" max="405" value="70">
+        </div>
+      </div>
+      <div class="tradeoff-table">
+        <div class="tr-header">
+          <span>Format</span><span>Bits</span><span>Size</span><span>Perplexity Δ</span><span>Speed</span>
+        </div>
+        <div class="tr-row" id="trFp16"><span>FP16</span><span>16</span><span id="trFp16Size">—</span><span class="quality good">baseline</span><span>1×</span></div>
+        <div class="tr-row" id="trInt8"><span>INT8</span><span>8</span><span id="trInt8Size">—</span><span class="quality good">+0.1%</span><span>1.5-2×</span></div>
+        <div class="tr-row" id="trInt4"><span>INT4 (GPTQ)</span><span>4</span><span id="trInt4Size">—</span><span class="quality ok">+0.3-1%</span><span>2-3×</span></div>
+        <div class="tr-row" id="trAwq"><span>INT4 (AWQ)</span><span>4</span><span id="trAwqSize">—</span><span class="quality ok">+0.2-0.8%</span><span>2-3×</span></div>
+        <div class="tr-row" id="trInt3"><span>INT3</span><span>3</span><span id="trInt3Size">—</span><span class="quality bad">+2-5%</span><span>3-4×</span></div>
+        <div class="tr-row" id="trInt2"><span>INT2</span><span>2</span><span id="trInt2Size">—</span><span class="quality terrible">+10-30%</span><span>4-5×</span></div>
+      </div>
+      <div class="gpu-fit-bar">
+        <div class="gpu-fit-label">Fits on:</div>
+        <div class="gpu-fit-chips" id="gpuFitChips"></div>
+      </div>
+    </section>
+
+    <!-- Calibration -->
+    <section class="calib-section">
+      <h2>🎯 Calibration Process</h2>
+      <p class="section-desc">How GPTQ and AWQ use calibration data to preserve model quality.</p>
+      <div class="calib-steps">
+        <div class="calib-step">
+          <div class="calib-num">1</div>
+          <div class="calib-content">
+            <h4>Collect Calibration Data</h4>
+            <p>128 random samples from training distribution (e.g., C4, WikiText). More data helps but diminishing returns past ~256 samples.</p>
+          </div>
+        </div>
+        <div class="calib-step">
+          <div class="calib-num">2</div>
+          <div class="calib-content">
+            <h4>Run Forward Pass</h4>
+            <p>Pass calibration data through the model to collect activation statistics — which channels matter most, what the typical ranges are.</p>
+          </div>
+        </div>
+        <div class="calib-step">
+          <div class="calib-num">3</div>
+          <div class="calib-content">
+            <h4>Quantize Layer-by-Layer</h4>
+            <p>Process each layer independently. Use collected stats to minimize quantization error (GPTQ: Hessian-based rebalancing. AWQ: scale salient channels).</p>
+          </div>
+        </div>
+        <div class="calib-step">
+          <div class="calib-num">4</div>
+          <div class="calib-content">
+            <h4>Evaluate & Ship</h4>
+            <p>Measure perplexity on held-out data. If degradation is acceptable (&lt;1%), deploy. The quantized model is now a fixed artifact — no calibration needed at inference time.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .viz-container { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .viz-header { text-align: center; margin-bottom: 2rem; }
+    .viz-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; }
+    .overview-card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border-left: 4px solid #f59e0b; }
+    .overview-card p { color: #cbd5e1; line-height: 1.7; margin: 0; }
+    h2 { color: #f1f5f9; margin: 2rem 0 0.5rem; }
+    .section-desc { color: #94a3b8; margin-bottom: 1rem; }
+    .ctrl-group label { color: #94a3b8; font-size: 0.85rem; display: block; margin-bottom: 0.3rem; }
+    .ctrl-group input[type=range] { width: 100%; }
+
+    /* Precision */
+    .prec-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .prec-input-row { margin-bottom: 1rem; color: #94a3b8; font-size: 0.9rem; }
+    .prec-input-row input { width: 100%; margin-top: 0.3rem; }
+    .prec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.8rem; margin-bottom: 1rem; }
+    .prec-card { background: #1e293b; border-radius: 8px; padding: 1rem; }
+    .prec-card h4 { color: #f1f5f9; margin: 0 0 0.5rem; font-size: 0.9rem; }
+    .prec-bits { display: flex; gap: 1px; flex-wrap: wrap; margin-bottom: 0.5rem; min-height: 24px; }
+    .pbit { width: 14px; height: 20px; border-radius: 2px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.6rem; color: rgba(255,255,255,0.8); font-weight: 700; }
+    .pbit.on { background: #3b82f6; }
+    .pbit.off { background: #334155; }
+    .prec-val { color: #f1f5f9; font-weight: 700; margin: 0; font-size: 1rem; }
+    .prec-size { color: #64748b; font-size: 0.8rem; margin: 0.3rem 0 0; }
+    .error-bar { display: flex; align-items: center; gap: 0.5rem; color: #94a3b8; font-size: 0.85rem; }
+    .error-fill-outer { flex: 1; background: #1e293b; border-radius: 6px; height: 16px; overflow: hidden; }
+    .error-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444); border-radius: 6px; transition: width 0.3s; }
+
+    /* Methods */
+    .methods-section { margin-bottom: 2rem; }
+    .method-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .method-tab { padding: 0.6rem 1rem; border: 2px solid #334155; border-radius: 8px; background: transparent; color: #94a3b8; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+    .method-tab.active { border-color: #f59e0b; color: #f1f5f9; background: #1e293b; }
+    .method-panel.hidden { display: none; }
+    .method-content { background: #1e293b; border-radius: 10px; padding: 1.2rem; }
+    .method-content h4 { color: #f1f5f9; margin: 0 0 0.8rem; }
+    .method-content p { color: #94a3b8; font-size: 0.9rem; margin: 0.8rem 0; line-height: 1.6; }
+    .method-formula { background: #0f172a; border-radius: 6px; padding: 0.8rem; margin-bottom: 0.5rem; font-family: monospace; font-size: 0.85rem; color: #22c55e; line-height: 1.6; }
+    .method-formula code { color: #22c55e; background: none; padding: 0; }
+    .method-pros-cons { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.8rem; }
+    .pro, .con { font-size: 0.85rem; padding: 0.3rem 0; }
+    .pro { color: #22c55e; }
+    .con { color: #f87171; }
+
+    /* Tradeoff Table */
+    .tradeoff-section { background: #0f172a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .tradeoff-controls { margin-bottom: 1rem; max-width: 300px; }
+    .tradeoff-table { margin-bottom: 1rem; }
+    .tr-header, .tr-row { display: grid; grid-template-columns: 2fr 1fr 1.5fr 1.5fr 1fr; gap: 0.5rem; padding: 0.5rem 0.8rem; align-items: center; }
+    .tr-header { color: #64748b; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; border-bottom: 1px solid #334155; }
+    .tr-row { color: #f1f5f9; font-size: 0.85rem; border-bottom: 1px solid #1e293b; }
+    .tr-row span:first-child { font-weight: 600; }
+    .quality { font-weight: 700; font-size: 0.8rem; }
+    .quality.good { color: #22c55e; }
+    .quality.ok { color: #f59e0b; }
+    .quality.bad { color: #f87171; }
+    .quality.terrible { color: #ef4444; }
+    .gpu-fit-bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .gpu-fit-label { color: #94a3b8; font-size: 0.85rem; }
+    .gpu-fit-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .gpu-chip { padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; }
+    .gpu-chip.fits { background: #22c55e20; color: #22c55e; border: 1px solid #22c55e40; }
+    .gpu-chip.tight { background: #f59e0b20; color: #f59e0b; border: 1px solid #f59e0b40; }
+    .gpu-chip.no { background: #ef444420; color: #ef4444; border: 1px solid #ef444440; }
+
+    /* Calibration */
+    .calib-section { margin-bottom: 2rem; }
+    .calib-steps { display: flex; flex-direction: column; gap: 0.8rem; }
+    .calib-step { display: flex; gap: 1rem; background: #1e293b; border-radius: 10px; padding: 1rem; }
+    .calib-num { width: 36px; height: 36px; background: #f59e0b; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #1e293b; flex-shrink: 0; }
+    .calib-content h4 { color: #f1f5f9; margin: 0 0 0.3rem; font-size: 0.9rem; }
+    .calib-content p { color: #94a3b8; font-size: 0.85rem; margin: 0; line-height: 1.5; }
+  </style>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // --- Precision Visualization ---
+    function updatePrec() {
+      const raw = +$('precSlider').value;
+      const val = raw / 10;
+      $('precValLabel').textContent = val.toFixed(5);
+
+      // FP32 — show 32 "bits"
+      renderBits('fp32Bits', 32, val);
+      $('fp32Val').textContent = 'Stored: ' + val.toFixed(7);
+
+      // FP16 — 16 bits, some precision loss
+      const fp16 = Math.fround(val); // close enough approx
+      renderBits('fp16Bits', 16, fp16);
+      $('fp16Val').textContent = 'Stored: ' + fp16.toFixed(4);
+
+      // INT8 — scale to [-127, 127]
+      const scale8 = Math.max(Math.abs(val), 0.001) / 127;
+      const int8 = Math.round(val / scale8) * scale8;
+      renderBits('int8Bits', 8, int8);
+      $('int8Val').textContent = 'Stored: ' + int8.toFixed(3);
+
+      // INT4 — scale to [-7, 7]
+      const scale4 = Math.max(Math.abs(val), 0.001) / 7;
+      const int4 = Math.round(val / scale4) * scale4;
+      renderBits('int4Bits', 4, int4);
+      $('int4Val').textContent = 'Stored: ' + int4.toFixed(2);
+
+      // Error bar
+      const err = val !== 0 ? Math.abs(int4 - val) / Math.abs(val) * 100 : 0;
+      $('quantError').style.width = Math.min(100, err * 2) + '%';
+      $('quantErrorVal').textContent = err.toFixed(1) + '%';
+    }
+
+    function renderBits(id, count, val) {
+      const el = $(id);
+      el.innerHTML = '';
+      // Simple visualization: show bits as colored squares
+      const intRepr = Math.abs(Math.round(val * (count === 32 ? 1000 : count === 16 ? 100 : count === 8 ? 10 : 1)));
+      for (let i = count - 1; i >= 0; i--) {
+        const bit = document.createElement('span');
+        bit.className = 'pbit ' + ((intRepr >> i) & 1 ? 'on' : 'off');
+        bit.textContent = (intRepr >> i) & 1;
+        el.appendChild(bit);
+      }
+    }
+
+    $('precSlider').oninput = updatePrec;
+    updatePrec();
+
+    // --- Methods ---
+    window.showMethod = function(type) {
+      document.querySelectorAll('.method-tab').forEach(t => t.classList.toggle('active', t.dataset.m === type));
+      ['methodAbsmax','methodGptq','methodAwq','methodGguf'].forEach(id => {
+        $(id).classList.toggle('hidden', id !== 'method' + type[0].toUpperCase() + type.slice(1));
+      });
+    };
+
+    // --- Tradeoff Table ---
+    function updateTradeoff() {
+      const params = +$('trParamSlider').value;
+      $('trParamLabel').textContent = params;
+      const fp16 = params * 2;
+      $('trFp16Size').textContent = fp16.toFixed(1) + ' GB';
+      $('trInt8Size').textContent = (params * 1).toFixed(1) + ' GB';
+      $('trInt4Size').textContent = (params * 0.5).toFixed(1) + ' GB';
+      $('trAwqSize').textContent = (params * 0.5).toFixed(1) + ' GB';
+      $('trInt3Size').textContent = (params * 0.375).toFixed(1) + ' GB';
+      $('trInt2Size').textContent = (params * 0.25).toFixed(1) + ' GB';
+
+      // GPU fit chips
+      const int4Size = params * 0.5;
+      const gpus = [
+        { name: '24GB (4090)', mem: 24 },
+        { name: '48GB (A6000)', mem: 48 },
+        { name: '80GB (H100)', mem: 80 },
+      ];
+      const el = $('gpuFitChips');
+      el.innerHTML = '';
+      gpus.forEach(g => {
+        const chip = document.createElement('span');
+        chip.className = 'gpu-chip';
+        if (int4Size <= g.mem * 0.85) chip.className += ' fits';
+        else if (int4Size <= g.mem) chip.className += ' tight';
+        else chip.className += ' no';
+        chip.textContent = g.name + (int4Size <= g.mem ? ' ✓' : ' ✗');
+        el.appendChild(chip);
+      });
+    }
+
+    $('trParamSlider').oninput = updateTradeoff;
+    updateTradeoff();
+  </script>
+</BaseLayout>

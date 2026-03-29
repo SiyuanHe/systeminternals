@@ -1,0 +1,1500 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="Docker Compose Internals: Service Dependencies, Networking & Lifecycle" 
+  description="Interactive visualization of Docker Compose internals — DAG dependency resolution, inter-service networking, volume mounts, health checks, and the compose lifecycle"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "Docker", href: "/docker/" },
+    { label: "Docker Compose", href: "/docker/docker-compose/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🐳 Docker Compose Internals</h1>
+      <p class="subtitle">Service Dependencies, Networking &amp; the Compose Lifecycle</p>
+    </header>
+
+    <!-- Overview -->
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          Docker Compose is <strong>not an orchestrator</strong> — it's a <em>single-host</em> tool
+          that reads a declarative YAML file and translates it into Docker API calls. It resolves
+          <strong>service dependency order</strong> using a DAG (directed acyclic graph), creates a
+          <em>dedicated network</em> for inter-service communication, manages <strong>volume mounts</strong>
+          for persistent data, and monitors <strong>health checks</strong> to ensure services start in
+          the right order. Understanding these internals helps you debug startup failures, networking
+          issues, and data persistence problems.
+        </p>
+      </div>
+    </section>
+
+    <!-- Compose File Lifecycle -->
+    <section class="lifecycle-section">
+      <h2>🔄 Compose File Lifecycle</h2>
+      <p class="section-desc">Step through what happens when you run <code>docker compose up</code>.</p>
+
+      <div class="lifecycle-timeline" id="composeTimeline">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="lifecycle-controls">
+        <button class="action-btn primary-btn" id="composeNextBtn">▶ Next Step</button>
+        <button class="action-btn election-btn" id="composeAutoBtn">⏩ Auto Play</button>
+        <button class="action-btn reset-btn" id="composeResetBtn">🔄 Reset</button>
+      </div>
+
+      <div class="lifecycle-detail" id="composeDetail">
+        <div class="log-empty">Click "Next Step" to begin the compose lifecycle...</div>
+      </div>
+    </section>
+
+    <!-- DAG Dependency Resolution -->
+    <section class="dag-section">
+      <h2>🕸️ Service Dependency Resolution (DAG)</h2>
+      <p class="section-desc">Compose builds a directed acyclic graph from <code>depends_on</code> declarations and starts services in topological order. Click services to see their dependencies.</p>
+
+      <div class="dag-demo">
+        <div class="dag-canvas" id="dagCanvas">
+          <!-- SVG rendered by JS -->
+        </div>
+        <div class="dag-controls">
+          <div class="dag-yaml">
+            <h3>📄 docker-compose.yml</h3>
+            <pre class="code-block" id="dagYaml"></pre>
+          </div>
+          <div class="dag-actions">
+            <button class="action-btn primary-btn" id="dagResolveBtn">▶ Resolve Start Order</button>
+            <button class="action-btn chaos-btn" id="dagCycleBtn">💥 Add Circular Dep</button>
+            <button class="action-btn reset-btn" id="dagResetBtn">🔄 Reset</button>
+          </div>
+          <div class="dag-log" id="dagLog">
+            <div class="log-empty">Click "Resolve Start Order" to see topological sort...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Networking Between Services -->
+    <section class="network-section">
+      <h2>🌐 Inter-Service Networking</h2>
+      <p class="section-desc">Compose creates a bridge network for each project. Services discover each other by <strong>service name</strong> via Docker's embedded DNS server at <code>127.0.0.11</code>.</p>
+
+      <div class="network-demo">
+        <div class="network-viz" id="networkViz">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="network-controls">
+          <h3>🔍 DNS Resolution</h3>
+          <p class="section-desc">Select a source and destination service to trace DNS resolution and packet flow.</p>
+          <div class="dns-controls">
+            <select id="dnsSrc" class="config-select">
+              <option value="web">web (nginx)</option>
+              <option value="api">api (node)</option>
+              <option value="worker">worker (python)</option>
+            </select>
+            <span class="dns-arrow">→</span>
+            <select id="dnsDst" class="config-select">
+              <option value="db">db (postgres)</option>
+              <option value="redis">redis</option>
+              <option value="api">api (node)</option>
+            </select>
+            <button class="action-btn primary-btn" id="dnsResolveBtn">Resolve</button>
+          </div>
+          <div class="dns-result" id="dnsResult"></div>
+          <div class="network-info">
+            <h3>📋 Network Details</h3>
+            <div class="info-grid" id="networkInfo">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Volume Mounts -->
+    <section class="volume-section">
+      <h2>💾 Volume Mounts</h2>
+      <p class="section-desc">Compose supports three volume types. Understanding the difference is critical for data persistence.</p>
+
+      <div class="volume-demo">
+        <div class="volume-types" id="volumeTypes">
+          <div class="vol-tab-bar">
+            <button class="vol-tab active" data-vol="named">Named Volumes</button>
+            <button class="vol-tab" data-vol="bind">Bind Mounts</button>
+            <button class="vol-tab" data-vol="tmpfs">tmpfs</button>
+          </div>
+          <div class="vol-display" id="volDisplay">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <div class="volume-lifecycle">
+          <h3>♻️ Volume Lifecycle</h3>
+          <p class="section-desc">Named volumes survive <code>docker compose down</code>. Only <code>docker compose down -v</code> removes them.</p>
+          <div class="vol-lifecycle-demo" id="volLifecycle">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="vol-controls">
+            <button class="action-btn primary-btn" id="volUpBtn">docker compose up</button>
+            <button class="action-btn election-btn" id="volDownBtn">docker compose down</button>
+            <button class="action-btn chaos-btn" id="volDownVBtn">docker compose down -v</button>
+            <button class="action-btn reset-btn" id="volResetBtn">🔄 Reset</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Health Checks -->
+    <section class="health-section">
+      <h2>🏥 Health Checks &amp; Startup Order</h2>
+      <p class="section-desc"><code>depends_on</code> alone only waits for a container to <em>start</em>. With <code>condition: service_healthy</code>, Compose waits for the health check to pass before starting dependent services.</p>
+
+      <div class="health-demo">
+        <div class="health-services" id="healthServices">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="health-controls">
+          <button class="action-btn primary-btn" id="healthStartBtn">▶ Start Services</button>
+          <button class="action-btn chaos-btn" id="healthFailBtn">💥 Fail DB Health</button>
+          <button class="action-btn reset-btn" id="healthResetBtn">🔄 Reset</button>
+        </div>
+        <div class="health-log" id="healthLog">
+          <div class="log-empty">Click "Start Services" to watch health-check-aware startup...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Compose Architecture -->
+    <section class="explain-section">
+      <h2>🏗️ Compose Architecture</h2>
+      <p class="section-desc">Key concepts that power Docker Compose under the hood.</p>
+      <div class="explain-grid">
+        <div class="explain-card">
+          <h3>📋 Project = Isolation Unit</h3>
+          <p>
+            Each Compose project (directory name by default, or <code>-p</code> flag) gets its own
+            namespace: containers are prefixed with the project name, a dedicated network is created,
+            and volumes are scoped. This lets you run multiple copies of the same stack side by side.
+          </p>
+        </div>
+        <div class="explain-card">
+          <h3>🔄 Reconciliation Model</h3>
+          <p>
+            <code>docker compose up</code> is <strong>declarative</strong>: it compares the desired
+            state (YAML) with the current state (running containers) and only changes what's different.
+            If you modify a service's image, only that service restarts. Unchanged services keep running.
+          </p>
+        </div>
+        <div class="explain-card highlight-card">
+          <h3>📡 Docker API Under the Hood</h3>
+          <p>
+            Compose V2 is a Go binary that calls the Docker Engine API directly. Each service becomes
+            a <code>container create</code> + <code>container start</code> call. Networks use
+            <code>network create</code>. Volumes use <code>volume create</code>. There's no magic —
+            it's just API orchestration.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://docs.docker.com/compose/compose-file/" target="_blank">Compose Specification</a>, <a href="https://docs.docker.com/network/" target="_blank">Docker Networking</a>, and <a href="https://docs.docker.com/compose/startup-order/" target="_blank">Startup Order</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20Docker%20Compose%20Internals%20—%20DAG%20resolution%2C%20networking%2C%20volumes&url=https://systeminternals.dev/docker/docker-compose/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/docker/docker-compose/" target="_blank" class="share-btn">in LinkedIn</a>
+      <a href="https://news.ycombinator.com/submitlink?u=https://systeminternals.dev/docker/docker-compose/&t=Interactive%20Docker%20Compose%20Internals" target="_blank" class="share-btn">🟧 Hacker News</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #06b6d4, #3b82f6, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 1rem;
+  }
+
+  .section-desc code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #22c55e;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 50px;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(139, 92, 246, 0.05));
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    border-radius: 16px;
+    padding: 24px 28px;
+    font-size: 1.05rem;
+    line-height: 1.8;
+    color: #ccc;
+  }
+
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #06b6d4; font-style: normal; font-weight: 500; }
+
+  /* Lifecycle Section */
+  .lifecycle-section {
+    margin-bottom: 50px;
+  }
+
+  .lifecycle-timeline {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .lc-step {
+    flex: 1;
+    min-width: 100px;
+    padding: 14px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.4s;
+  }
+
+  .lc-step.active {
+    border-color: rgba(6, 182, 212, 0.6);
+    background: rgba(6, 182, 212, 0.1);
+    box-shadow: 0 0 25px rgba(6, 182, 212, 0.15);
+    transform: scale(1.03);
+  }
+
+  .lc-step.done {
+    border-color: rgba(74, 222, 128, 0.4);
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .lc-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .lc-label { font-size: 0.75rem; font-weight: 600; color: #fff; }
+  .lc-sub { font-size: 0.65rem; color: #888; margin-top: 2px; }
+
+  .lifecycle-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .lifecycle-detail {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px;
+    font-size: 0.9rem;
+    color: #aaa;
+    line-height: 1.7;
+    min-height: 80px;
+  }
+
+  .lifecycle-detail strong { color: #fff; }
+  .lifecycle-detail code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .log-empty { color: #555; }
+
+  /* DAG Section */
+  .dag-section {
+    margin-bottom: 50px;
+  }
+
+  .dag-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .dag-canvas {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    min-height: 350px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .dag-node {
+    position: absolute;
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.4s;
+    text-align: center;
+    z-index: 2;
+    min-width: 90px;
+  }
+
+  .dag-node.idle {
+    background: rgba(255,255,255,0.05);
+    border: 2px solid rgba(255,255,255,0.15);
+    color: #aaa;
+  }
+
+  .dag-node.starting {
+    background: rgba(251, 191, 36, 0.15);
+    border: 2px solid rgba(251, 191, 36, 0.5);
+    color: #fcd34d;
+    animation: dagPulse 1s infinite;
+  }
+
+  .dag-node.running {
+    background: rgba(74, 222, 128, 0.15);
+    border: 2px solid rgba(74, 222, 128, 0.5);
+    color: #4ade80;
+  }
+
+  .dag-node.error {
+    background: rgba(239, 68, 68, 0.15);
+    border: 2px solid rgba(239, 68, 68, 0.5);
+    color: #fca5a5;
+  }
+
+  .dag-node.selected {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+    border-color: rgba(6, 182, 212, 0.7);
+  }
+
+  .dag-node-label { font-size: 0.8rem; }
+  .dag-node-sub { font-size: 0.65rem; color: #888; margin-top: 2px; }
+
+  @keyframes dagPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .dag-yaml {
+    margin-bottom: 16px;
+  }
+
+  .dag-yaml h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .code-block {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #aaa;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .code-block .key { color: #06b6d4; }
+  .code-block .val { color: #4ade80; }
+  .code-block .comment { color: #555; }
+
+  .dag-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .dag-log {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #888;
+    line-height: 1.6;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .dag-controls {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Network Section */
+  .network-section {
+    margin-bottom: 50px;
+  }
+
+  .network-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .network-viz {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 20px;
+    min-height: 300px;
+    position: relative;
+  }
+
+  .net-service {
+    position: absolute;
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    z-index: 2;
+    min-width: 100px;
+    transition: all 0.3s;
+  }
+
+  .net-service .svc-name { font-size: 0.85rem; color: #fff; }
+  .net-service .svc-ip { font-size: 0.7rem; color: #888; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+
+  .net-bridge {
+    position: absolute;
+    border: 2px dashed rgba(6, 182, 212, 0.3);
+    border-radius: 16px;
+    z-index: 1;
+  }
+
+  .net-bridge-label {
+    position: absolute;
+    font-size: 0.7rem;
+    color: #06b6d4;
+    font-weight: 600;
+  }
+
+  .dns-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .dns-arrow {
+    color: #888;
+    font-size: 1.2rem;
+  }
+
+  .config-select {
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #ddd;
+    font-size: 0.85rem;
+    min-width: 120px;
+  }
+
+  .dns-result {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: #aaa;
+    line-height: 1.7;
+    min-height: 60px;
+    margin-bottom: 16px;
+  }
+
+  .network-info h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .info-grid {
+    display: grid;
+    gap: 8px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    font-size: 0.8rem;
+  }
+
+  .info-key { color: #888; }
+  .info-val { color: #06b6d4; font-family: 'JetBrains Mono', monospace; }
+
+  .network-controls {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Volume Section */
+  .volume-section {
+    margin-bottom: 50px;
+  }
+
+  .volume-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .vol-tab-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .vol-tab {
+    padding: 8px 18px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    color: #aaa;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .vol-tab:hover {
+    border-color: rgba(6, 182, 212, 0.4);
+    color: #fff;
+  }
+
+  .vol-tab.active {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: rgba(6, 182, 212, 0.5);
+    color: #67e8f9;
+  }
+
+  .vol-display {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+    min-height: 200px;
+  }
+
+  .vol-display h4 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .vol-display p {
+    color: #aaa;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    margin-bottom: 12px;
+  }
+
+  .vol-display strong { color: #fff; }
+  .vol-display code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .vol-diagram {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .vol-box {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .vol-box.host {
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: #fcd34d;
+  }
+
+  .vol-box.docker {
+    background: rgba(6, 182, 212, 0.15);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    color: #67e8f9;
+  }
+
+  .vol-box.container {
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #c4b5fd;
+  }
+
+  .vol-box.ram {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+
+  .vol-arrow {
+    color: #555;
+    font-size: 1.2rem;
+  }
+
+  .volume-lifecycle h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .vol-lifecycle-demo {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px;
+    min-height: 100px;
+    margin-bottom: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    color: #aaa;
+  }
+
+  .vol-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* Health Check Section */
+  .health-section {
+    margin-bottom: 50px;
+  }
+
+  .health-demo {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .health-services {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .health-svc {
+    flex: 1;
+    min-width: 150px;
+    padding: 16px;
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.4s;
+  }
+
+  .health-svc.waiting {
+    background: rgba(255,255,255,0.03);
+    border: 2px solid rgba(255,255,255,0.1);
+  }
+
+  .health-svc.starting {
+    background: rgba(251, 191, 36, 0.1);
+    border: 2px solid rgba(251, 191, 36, 0.4);
+    animation: dagPulse 1s infinite;
+  }
+
+  .health-svc.healthy {
+    background: rgba(74, 222, 128, 0.1);
+    border: 2px solid rgba(74, 222, 128, 0.4);
+  }
+
+  .health-svc.unhealthy {
+    background: rgba(239, 68, 68, 0.1);
+    border: 2px solid rgba(239, 68, 68, 0.4);
+  }
+
+  .health-svc-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .health-svc-name { font-size: 0.9rem; font-weight: 600; color: #fff; }
+  .health-svc-status { font-size: 0.75rem; color: #888; margin-top: 4px; }
+  .health-svc-check { font-size: 0.7rem; color: #555; margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+  .health-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .health-log {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    color: #888;
+    line-height: 1.6;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  /* Explain sections */
+  .explain-section {
+    margin-bottom: 50px;
+  }
+
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .explain-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .explain-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+
+  .explain-card p {
+    font-size: 0.95rem;
+    color: #aaa;
+    line-height: 1.7;
+  }
+
+  .explain-card strong { color: #fff; }
+  .explain-card em { color: #06b6d4; font-style: normal; }
+  .explain-card code {
+    background: rgba(0,0,0,0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #22c55e;
+  }
+
+  .highlight-card {
+    border-color: rgba(6, 182, 212, 0.3);
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(139, 92, 246, 0.04));
+  }
+
+  /* Action Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #06b6d4, #3b82f6);
+    color: white;
+  }
+
+  .primary-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(6, 182, 212, 0.4);
+  }
+
+  .election-btn {
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    color: white;
+  }
+
+  .election-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 197, 94, 0.4);
+  }
+
+  .chaos-btn {
+    background: linear-gradient(135deg, #f472b6, #ef4444);
+    color: white;
+  }
+
+  .chaos-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+  }
+
+  .reset-btn {
+    background: rgba(255,255,255,0.1);
+    color: #aaa;
+  }
+
+  .reset-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* Footer */
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+
+  .viz-footer a { color: #06b6d4; }
+
+  .share-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .share-buttons span { color: #666; }
+
+  .share-btn {
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.8rem; }
+    .dag-demo { grid-template-columns: 1fr; }
+    .network-demo { grid-template-columns: 1fr; }
+    .volume-demo { grid-template-columns: 1fr; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .lifecycle-timeline { flex-direction: column; }
+    .health-services { flex-direction: column; }
+  }
+</style>
+
+<script is:inline>
+  // ============================================================
+  // DOCKER COMPOSE INTERNALS INTERACTIVE VISUALIZATIONS
+  // ============================================================
+
+  // --- Compose Lifecycle ---
+  var composeSteps = [
+    {
+      icon: "📄", label: "Parse YAML", sub: "validate config",
+      detail: 'Compose reads and parses <code>docker-compose.yml</code> (or <code>compose.yaml</code>). It validates the schema, resolves <strong>variable interpolation</strong> (<code>${VAR}</code>), merges override files (<code>docker-compose.override.yml</code>), and normalizes all service definitions into an internal model.'
+    },
+    {
+      icon: "🕸️", label: "Build DAG", sub: "resolve dependencies",
+      detail: 'Compose analyzes <code>depends_on</code> declarations across all services and builds a <strong>directed acyclic graph</strong>. It performs a topological sort to determine the correct startup order. If a cycle is detected, Compose exits with an error — circular dependencies are forbidden.'
+    },
+    {
+      icon: "🌐", label: "Create Network", sub: "bridge + DNS",
+      detail: 'Compose creates a <strong>project-scoped bridge network</strong> (e.g., <code>myapp_default</code>). This network includes Docker\'s embedded DNS server at <code>127.0.0.11</code>, which resolves service names to container IPs. Each service gets a DNS A record matching its service name.'
+    },
+    {
+      icon: "💾", label: "Create Volumes", sub: "named volumes",
+      detail: 'Any <strong>named volumes</strong> declared in the top-level <code>volumes:</code> section are created if they don\'t already exist. Docker allocates storage under <code>/var/lib/docker/volumes/</code>. Existing volumes are reused — this is how data persists across <code>docker compose down</code> and <code>up</code> cycles.'
+    },
+    {
+      icon: "📥", label: "Pull / Build", sub: "images ready",
+      detail: 'For each service, Compose either <strong>pulls</strong> the specified image from a registry or <strong>builds</strong> it from a Dockerfile (if <code>build:</code> is specified). Images are pulled in parallel when possible. Build cache is used to skip unchanged layers.'
+    },
+    {
+      icon: "🚀", label: "Start Services", sub: "in DAG order",
+      detail: 'Services start in <strong>topological order</strong>. For each service, Compose calls <code>container create</code> then <code>container start</code>. If <code>depends_on</code> has <code>condition: service_healthy</code>, Compose waits for the dependency\'s health check to pass before starting the dependent service.'
+    }
+  ];
+
+  var composeCurrentStep = -1;
+  var composeAutoInterval = null;
+
+  function renderComposeTimeline() {
+    var el = document.getElementById("composeTimeline");
+    var html = "";
+    for (var i = 0; i < composeSteps.length; i++) {
+      var cls = "lc-step";
+      if (i === composeCurrentStep) cls += " active";
+      else if (i < composeCurrentStep) cls += " done";
+      html += '<div class="' + cls + '"><div class="lc-icon">' + composeSteps[i].icon + '</div><div class="lc-label">' + composeSteps[i].label + '</div><div class="lc-sub">' + composeSteps[i].sub + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function showComposeDetail() {
+    var el = document.getElementById("composeDetail");
+    if (composeCurrentStep < 0 || composeCurrentStep >= composeSteps.length) {
+      el.innerHTML = '<div class="log-empty">Click "Next Step" to begin the compose lifecycle...</div>';
+      return;
+    }
+    var s = composeSteps[composeCurrentStep];
+    el.innerHTML = '<strong>Step ' + (composeCurrentStep + 1) + '/' + composeSteps.length + ': ' + s.label + '</strong><br><br>' + s.detail;
+  }
+
+  document.getElementById("composeNextBtn").addEventListener("click", function() {
+    if (composeCurrentStep < composeSteps.length - 1) {
+      composeCurrentStep++;
+      renderComposeTimeline();
+      showComposeDetail();
+    }
+    if (composeCurrentStep >= composeSteps.length - 1) this.disabled = true;
+  });
+
+  document.getElementById("composeAutoBtn").addEventListener("click", function() {
+    if (composeAutoInterval) return;
+    var btn = this;
+    btn.disabled = true;
+    composeCurrentStep = -1;
+    function step() {
+      if (composeCurrentStep < composeSteps.length - 1) {
+        composeCurrentStep++;
+        renderComposeTimeline();
+        showComposeDetail();
+      } else {
+        clearInterval(composeAutoInterval);
+        composeAutoInterval = null;
+        btn.disabled = false;
+        document.getElementById("composeNextBtn").disabled = true;
+      }
+    }
+    composeAutoInterval = setInterval(step, 1800);
+    step();
+  });
+
+  document.getElementById("composeResetBtn").addEventListener("click", function() {
+    if (composeAutoInterval) { clearInterval(composeAutoInterval); composeAutoInterval = null; }
+    composeCurrentStep = -1;
+    renderComposeTimeline();
+    showComposeDetail();
+    document.getElementById("composeNextBtn").disabled = false;
+    document.getElementById("composeAutoBtn").disabled = false;
+  });
+
+  renderComposeTimeline();
+  showComposeDetail();
+
+  // --- DAG Dependency Resolution ---
+  var dagServices = {
+    db:     { x: 200, y: 20,  label: "db", sub: "postgres:15", deps: [] },
+    redis:  { x: 370, y: 20,  label: "redis", sub: "redis:7-alpine", deps: [] },
+    api:    { x: 120, y: 130, label: "api", sub: "node:20", deps: ["db", "redis"] },
+    worker: { x: 320, y: 130, label: "worker", sub: "python:3.11", deps: ["db", "redis"] },
+    web:    { x: 220, y: 240, label: "web", sub: "nginx:latest", deps: ["api"] }
+  };
+
+  var dagHasCycle = false;
+
+  function renderDagYaml() {
+    var el = document.getElementById("dagYaml");
+    var lines = '<span class="key">services:</span>\n';
+    var order = ["db", "redis", "api", "worker", "web"];
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i];
+      var s = dagServices[k];
+      lines += '  <span class="key">' + k + ':</span>\n';
+      lines += '    <span class="key">image:</span> <span class="val">' + s.sub + '</span>\n';
+      if (s.deps.length > 0) {
+        lines += '    <span class="key">depends_on:</span>\n';
+        for (var d = 0; d < s.deps.length; d++) {
+          lines += '      - <span class="val">' + s.deps[d] + '</span>\n';
+        }
+      }
+    }
+    el.innerHTML = lines;
+  }
+
+  function renderDag() {
+    var canvas = document.getElementById("dagCanvas");
+    var html = '<svg width="100%" height="100%" style="position:absolute;top:0;left:0;z-index:1;">';
+
+    // Draw edges
+    var order = ["db", "redis", "api", "worker", "web"];
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i];
+      var s = dagServices[k];
+      for (var d = 0; d < s.deps.length; d++) {
+        var dep = dagServices[s.deps[d]];
+        var x1 = dep.x + 45;
+        var y1 = dep.y + 40;
+        var x2 = s.x + 45;
+        var y2 = s.y;
+        html += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="rgba(255,255,255,0.15)" stroke-width="2" marker-end="url(#arrow)"/>';
+      }
+    }
+    html += '<defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.3)"/></marker></defs>';
+    html += '</svg>';
+
+    // Draw nodes
+    for (var j = 0; j < order.length; j++) {
+      var nk = order[j];
+      var ns = dagServices[nk];
+      var state = ns.state || "idle";
+      html += '<div class="dag-node ' + state + '" style="left:' + ns.x + 'px;top:' + ns.y + 'px;" data-svc="' + nk + '">';
+      html += '<div class="dag-node-label">' + ns.label + '</div>';
+      html += '<div class="dag-node-sub">' + ns.sub + '</div>';
+      html += '</div>';
+    }
+
+    canvas.innerHTML = html;
+  }
+
+  function dagResolve() {
+    var log = document.getElementById("dagLog");
+    log.innerHTML = "";
+
+    // Topological sort (Kahn's algorithm)
+    var inDegree = {};
+    var adj = {};
+    var order = ["db", "redis", "api", "worker", "web"];
+    for (var i = 0; i < order.length; i++) {
+      inDegree[order[i]] = 0;
+      adj[order[i]] = [];
+    }
+    for (var j = 0; j < order.length; j++) {
+      var deps = dagServices[order[j]].deps;
+      inDegree[order[j]] = deps.length;
+      for (var d = 0; d < deps.length; d++) {
+        adj[deps[d]].push(order[j]);
+      }
+    }
+
+    // Check for cycle
+    if (dagHasCycle) {
+      log.innerHTML = '<div style="color:#ef4444;">❌ ERROR: Circular dependency detected! db → api → db</div><div style="color:#ef4444;">Compose cannot start — dependency graph has a cycle.</div>';
+      for (var ci = 0; ci < order.length; ci++) dagServices[order[ci]].state = "error";
+      renderDag();
+      return;
+    }
+
+    var queue = [];
+    for (var k in inDegree) {
+      if (inDegree[k] === 0) queue.push(k);
+    }
+
+    var sorted = [];
+    var stepIdx = 0;
+
+    function processNext() {
+      if (queue.length === 0) {
+        if (sorted.length < order.length) {
+          log.innerHTML += '<div style="color:#ef4444;">Cycle detected!</div>';
+        } else {
+          log.innerHTML += '<div style="color:#4ade80;margin-top:8px;">✓ All services started successfully.</div>';
+          log.innerHTML += '<div style="color:#888;">Start order: ' + sorted.join(' → ') + '</div>';
+        }
+        return;
+      }
+
+      var batch = queue.slice();
+      queue = [];
+      var batchLabel = batch.join(", ");
+      log.innerHTML += '<div><span style="color:#06b6d4;">[batch ' + (stepIdx + 1) + ']</span> Starting: <span style="color:#fcd34d;">' + batchLabel + '</span></div>';
+
+      for (var b = 0; b < batch.length; b++) {
+        dagServices[batch[b]].state = "starting";
+      }
+      renderDag();
+
+      setTimeout(function() {
+        for (var b2 = 0; b2 < batch.length; b2++) {
+          var svc = batch[b2];
+          dagServices[svc].state = "running";
+          sorted.push(svc);
+          log.innerHTML += '<div><span style="color:#4ade80;">  ✓ ' + svc + ' is running</span></div>';
+
+          // Reduce in-degree of dependents
+          for (var a = 0; a < adj[svc].length; a++) {
+            inDegree[adj[svc][a]]--;
+            if (inDegree[adj[svc][a]] === 0) queue.push(adj[svc][a]);
+          }
+        }
+        renderDag();
+        log.scrollTop = log.scrollHeight;
+        stepIdx++;
+        setTimeout(processNext, 800);
+      }, 1000);
+    }
+
+    processNext();
+  }
+
+  document.getElementById("dagResolveBtn").addEventListener("click", function() {
+    var order = ["db", "redis", "api", "worker", "web"];
+    for (var i = 0; i < order.length; i++) dagServices[order[i]].state = "idle";
+    renderDag();
+    dagResolve();
+  });
+
+  document.getElementById("dagCycleBtn").addEventListener("click", function() {
+    dagHasCycle = true;
+    dagServices.db.deps = ["api"];
+    renderDagYaml();
+    document.getElementById("dagLog").innerHTML = '<div style="color:#f59e0b;">⚠️ Added circular dependency: db now depends on api (which depends on db). Click "Resolve" to see the error.</div>';
+  });
+
+  document.getElementById("dagResetBtn").addEventListener("click", function() {
+    dagHasCycle = false;
+    dagServices.db.deps = [];
+    dagServices.redis.deps = [];
+    dagServices.api.deps = ["db", "redis"];
+    dagServices.worker.deps = ["db", "redis"];
+    dagServices.web.deps = ["api"];
+    var order = ["db", "redis", "api", "worker", "web"];
+    for (var i = 0; i < order.length; i++) dagServices[order[i]].state = "idle";
+    renderDagYaml();
+    renderDag();
+    document.getElementById("dagLog").innerHTML = '<div class="log-empty">Click "Resolve Start Order" to see topological sort...</div>';
+  });
+
+  renderDagYaml();
+  renderDag();
+
+  // --- Inter-Service Networking ---
+  var netServices = {
+    web:    { x: 30,  y: 30,  ip: "172.20.0.2", color: "rgba(6, 182, 212, 0.15)", border: "rgba(6, 182, 212, 0.4)" },
+    api:    { x: 200, y: 30,  ip: "172.20.0.3", color: "rgba(139, 92, 246, 0.15)", border: "rgba(139, 92, 246, 0.4)" },
+    worker: { x: 30,  y: 140, ip: "172.20.0.4", color: "rgba(251, 191, 36, 0.15)", border: "rgba(251, 191, 36, 0.4)" },
+    db:     { x: 200, y: 140, ip: "172.20.0.5", color: "rgba(74, 222, 128, 0.15)", border: "rgba(74, 222, 128, 0.4)" },
+    redis:  { x: 120, y: 215, ip: "172.20.0.6", color: "rgba(239, 68, 68, 0.15)", border: "rgba(239, 68, 68, 0.4)" }
+  };
+
+  function renderNetwork() {
+    var el = document.getElementById("networkViz");
+    var html = '<div class="net-bridge" style="left:10px;top:10px;right:10px;bottom:10px;"></div>';
+    html += '<div class="net-bridge-label" style="left:16px;bottom:16px;">myapp_default (172.20.0.0/16)</div>';
+
+    var keys = ["web", "api", "worker", "db", "redis"];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var s = netServices[k];
+      html += '<div class="net-service" style="left:' + s.x + 'px;top:' + s.y + 'px;background:' + s.color + ';border:2px solid ' + s.border + ';">';
+      html += '<div class="svc-name">' + k + '</div>';
+      html += '<div class="svc-ip">' + s.ip + '</div>';
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+
+    // Network info
+    var info = document.getElementById("networkInfo");
+    info.innerHTML = '';
+    var rows = [
+      ["Network Name", "myapp_default"],
+      ["Driver", "bridge"],
+      ["Subnet", "172.20.0.0/16"],
+      ["Gateway", "172.20.0.1"],
+      ["DNS Server", "127.0.0.11"],
+      ["Scope", "local"]
+    ];
+    for (var r = 0; r < rows.length; r++) {
+      info.innerHTML += '<div class="info-row"><span class="info-key">' + rows[r][0] + '</span><span class="info-val">' + rows[r][1] + '</span></div>';
+    }
+  }
+
+  document.getElementById("dnsResolveBtn").addEventListener("click", function() {
+    var src = document.getElementById("dnsSrc").value;
+    var dst = document.getElementById("dnsDst").value;
+    var dstIp = netServices[dst] ? netServices[dst].ip : "?";
+    var result = document.getElementById("dnsResult");
+
+    result.innerHTML = '<span style="color:#fbbf24;">Resolving...</span>';
+
+    setTimeout(function() {
+      var html = '';
+      html += '<div><span style="color:#06b6d4;">1.</span> <span style="color:#fff;">' + src + '</span> calls <code>getaddrinfo("' + dst + '")</code></div>';
+      html += '<div><span style="color:#06b6d4;">2.</span> Request goes to Docker DNS at <span style="color:#22c55e;">127.0.0.11:53</span></div>';
+      html += '<div><span style="color:#06b6d4;">3.</span> DNS resolves <span style="color:#fff;">' + dst + '</span> → <span style="color:#4ade80;">' + dstIp + '</span> (A record)</div>';
+      html += '<div><span style="color:#06b6d4;">4.</span> TCP connection: <span style="color:#888;">' + netServices[src].ip + '</span> → <span style="color:#4ade80;">' + dstIp + '</span> via bridge <span style="color:#888;">myapp_default</span></div>';
+      result.innerHTML = html;
+    }, 600);
+  });
+
+  renderNetwork();
+
+  // --- Volume Mounts ---
+  var volData = {
+    named: {
+      title: "Named Volumes",
+      desc: '<strong>Managed by Docker.</strong> Data is stored in <code>/var/lib/docker/volumes/&lt;name&gt;/_data</code> on the host. Volumes persist across container restarts and <code>docker compose down</code>. Ideal for <strong>database data</strong>, application state, and anything that must survive container recreation.',
+      yaml: 'volumes:\n  db-data:    # ← top-level declaration\n\nservices:\n  db:\n    image: postgres:15\n    volumes:\n      - db-data:/var/lib/postgresql/data',
+      diagram: [
+        { label: "Docker Volume\ndb-data", cls: "docker" },
+        { label: "/var/lib/postgresql/data", cls: "container" }
+      ]
+    },
+    bind: {
+      title: "Bind Mounts",
+      desc: '<strong>Maps a host directory into the container.</strong> Changes are bidirectional — edits on the host appear in the container and vice versa. Perfect for <strong>development</strong> (live code reloading) but dangerous in production (host path must exist, no Docker management).',
+      yaml: 'services:\n  web:\n    image: nginx\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n      # host path : container path : options',
+      diagram: [
+        { label: "Host Dir\n./html", cls: "host" },
+        { label: "/usr/share/nginx/html", cls: "container" }
+      ]
+    },
+    tmpfs: {
+      title: "tmpfs Mounts",
+      desc: '<strong>In-memory filesystem.</strong> Data exists only in RAM and is <strong>lost when the container stops</strong>. Use for sensitive data (secrets, tokens) that should never be written to disk, or for scratch space that benefits from RAM speed.',
+      yaml: 'services:\n  api:\n    image: node:20\n    tmpfs:\n      - /tmp\n      - /run/secrets',
+      diagram: [
+        { label: "RAM\n(tmpfs)", cls: "ram" },
+        { label: "/tmp", cls: "container" }
+      ]
+    }
+  };
+
+  function renderVolDisplay(type) {
+    var el = document.getElementById("volDisplay");
+    var d = volData[type];
+    var html = '<h4>' + d.title + '</h4>';
+    html += '<p>' + d.desc + '</p>';
+    html += '<pre class="code-block" style="font-size:0.75rem;">' + d.yaml + '</pre>';
+    html += '<div class="vol-diagram">';
+    for (var i = 0; i < d.diagram.length; i++) {
+      if (i > 0) html += '<span class="vol-arrow">⟷</span>';
+      html += '<div class="vol-box ' + d.diagram[i].cls + '">' + d.diagram[i].label.replace('\n', '<br>') + '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  var volTabs = document.querySelectorAll(".vol-tab");
+  for (var vt = 0; vt < volTabs.length; vt++) {
+    volTabs[vt].addEventListener("click", function() {
+      for (var j = 0; j < volTabs.length; j++) volTabs[j].classList.remove("active");
+      this.classList.add("active");
+      renderVolDisplay(this.getAttribute("data-vol"));
+    });
+  }
+
+  renderVolDisplay("named");
+
+  // Volume lifecycle
+  var volState = { containers: false, volumes: false };
+
+  function renderVolLifecycle() {
+    var el = document.getElementById("volLifecycle");
+    var cColor = volState.containers ? "#4ade80" : "#555";
+    var vColor = volState.volumes ? "#06b6d4" : "#555";
+    var cLabel = volState.containers ? "● Running" : "○ Stopped";
+    var vLabel = volState.volumes ? "● Exists" : "○ Removed";
+    el.innerHTML = '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
+      '<div><span style="color:#888;">Containers:</span> <span style="color:' + cColor + ';">' + cLabel + '</span></div>' +
+      '<div><span style="color:#888;">Named Volumes:</span> <span style="color:' + vColor + ';">' + vLabel + '</span></div>' +
+      '</div>' +
+      (volState.volumes && !volState.containers ? '<div style="color:#fbbf24;margin-top:8px;">💡 Volume data persists! Next "up" will reuse existing data.</div>' : '') +
+      (!volState.volumes && !volState.containers ? '<div style="color:#ef4444;margin-top:8px;">⚠️ Volume data is gone forever. Database must be re-initialized.</div>' : '');
+  }
+
+  document.getElementById("volUpBtn").addEventListener("click", function() {
+    volState.containers = true;
+    volState.volumes = true;
+    renderVolLifecycle();
+  });
+
+  document.getElementById("volDownBtn").addEventListener("click", function() {
+    volState.containers = false;
+    renderVolLifecycle();
+  });
+
+  document.getElementById("volDownVBtn").addEventListener("click", function() {
+    volState.containers = false;
+    volState.volumes = false;
+    renderVolLifecycle();
+  });
+
+  document.getElementById("volResetBtn").addEventListener("click", function() {
+    volState = { containers: false, volumes: false };
+    renderVolLifecycle();
+  });
+
+  renderVolLifecycle();
+
+  // --- Health Checks ---
+  var healthSvcs = [
+    { name: "db", icon: "🗄️", check: "pg_isready -U postgres", deps: [], startTime: 3000, healthy: true },
+    { name: "redis", icon: "📮", check: "redis-cli ping", deps: [], startTime: 1000, healthy: true },
+    { name: "api", icon: "⚡", check: "curl -f http://localhost:3000/health", deps: ["db", "redis"], startTime: 2000, healthy: true },
+    { name: "worker", icon: "🔧", check: "celery inspect ping", deps: ["db", "redis"], startTime: 1500, healthy: true },
+    { name: "web", icon: "🌐", check: "curl -f http://localhost:80/", deps: ["api"], startTime: 500, healthy: true }
+  ];
+
+  var healthStates = {};
+  var healthInterval = null;
+  var dbFailed = false;
+
+  function resetHealthStates() {
+    for (var i = 0; i < healthSvcs.length; i++) {
+      healthStates[healthSvcs[i].name] = "waiting";
+    }
+    dbFailed = false;
+  }
+
+  function renderHealthServices() {
+    var el = document.getElementById("healthServices");
+    var html = "";
+    for (var i = 0; i < healthSvcs.length; i++) {
+      var s = healthSvcs[i];
+      var state = healthStates[s.name] || "waiting";
+      html += '<div class="health-svc ' + state + '">';
+      html += '<div class="health-svc-icon">' + s.icon + '</div>';
+      html += '<div class="health-svc-name">' + s.name + '</div>';
+      html += '<div class="health-svc-status">' + state + '</div>';
+      html += '<div class="health-svc-check">' + s.check + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function addHealthLog(msg) {
+    var log = document.getElementById("healthLog");
+    var ts = new Date().toLocaleTimeString();
+    log.innerHTML += "<div>[" + ts + "] " + msg + "</div>";
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function startHealthSequence() {
+    var log = document.getElementById("healthLog");
+    log.innerHTML = "";
+    resetHealthStates();
+    renderHealthServices();
+
+    // Start services with no deps first
+    var pending = healthSvcs.slice();
+    var started = {};
+
+    function tick() {
+      var anyStarted = false;
+      for (var i = 0; i < pending.length; i++) {
+        var s = pending[i];
+        if (started[s.name]) continue;
+
+        // Check if all deps are healthy
+        var depsReady = true;
+        for (var d = 0; d < s.deps.length; d++) {
+          if (healthStates[s.deps[d]] !== "healthy") {
+            depsReady = false;
+            break;
+          }
+        }
+
+        if (!depsReady) continue;
+
+        if (healthStates[s.name] === "waiting") {
+          healthStates[s.name] = "starting";
+          started[s.name] = Date.now();
+          addHealthLog('<span style="color:#fbbf24;">▶ Starting ' + s.name + '...</span>');
+          anyStarted = true;
+          renderHealthServices();
+        } else if (healthStates[s.name] === "starting") {
+          var elapsed = Date.now() - started[s.name];
+          if (elapsed >= s.startTime) {
+            if (s.name === "db" && dbFailed) {
+              healthStates[s.name] = "unhealthy";
+              addHealthLog('<span style="color:#ef4444;">✗ ' + s.name + ' health check FAILED: ' + s.check + '</span>');
+              renderHealthServices();
+              // Dependents will never start
+              addHealthLog('<span style="color:#ef4444;">⚠ Services depending on db are blocked!</span>');
+              clearInterval(healthInterval);
+              healthInterval = null;
+              return;
+            }
+            healthStates[s.name] = "healthy";
+            addHealthLog('<span style="color:#4ade80;">✓ ' + s.name + ' is healthy (' + s.check + ')</span>');
+            renderHealthServices();
+          }
+        }
+      }
+
+      // Check if all healthy
+      var allDone = true;
+      for (var k in healthStates) {
+        if (healthStates[k] !== "healthy") { allDone = false; break; }
+      }
+      if (allDone) {
+        addHealthLog('<span style="color:#4ade80;font-weight:700;">✓ All services healthy and running!</span>');
+        clearInterval(healthInterval);
+        healthInterval = null;
+      }
+    }
+
+    healthInterval = setInterval(tick, 300);
+  }
+
+  document.getElementById("healthStartBtn").addEventListener("click", startHealthSequence);
+
+  document.getElementById("healthFailBtn").addEventListener("click", function() {
+    dbFailed = true;
+    startHealthSequence();
+  });
+
+  document.getElementById("healthResetBtn").addEventListener("click", function() {
+    if (healthInterval) { clearInterval(healthInterval); healthInterval = null; }
+    resetHealthStates();
+    renderHealthServices();
+    document.getElementById("healthLog").innerHTML = '<div class="log-empty">Click "Start Services" to watch health-check-aware startup...</div>';
+  });
+
+  resetHealthStates();
+  renderHealthServices();
+</script>
