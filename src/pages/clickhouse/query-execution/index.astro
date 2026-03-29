@@ -1,0 +1,1232 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout 
+  title="ClickHouse Query Execution Pipeline: From SQL to Result" 
+  description="Interactive visualization of how ClickHouse executes queries: parsing, AST, query planning, column reads, parallel processing pipeline, and aggregation"
+  breadcrumbs={[
+    { label: "Home", href: "/" }, 
+    { label: "ClickHouse", href: "/clickhouse/" },
+    { label: "Query Execution", href: "/clickhouse/query-execution/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>⚡ Query Execution Pipeline</h1>
+      <p class="subtitle">From SQL Text to Columnar Result — How ClickHouse Processes Every Query</p>
+    </header>
+
+    <!-- ===== Section 1: Pipeline Overview ===== -->
+    <section class="demo-section">
+      <h2>🔄 The Pipeline at a Glance</h2>
+      <p class="section-desc">Every SELECT passes through these stages. Click a stage to learn more.</p>
+      <div class="pipeline-overview" id="pipelineOverview">
+        <div class="pipeline-stage" data-stage="parse">
+          <div class="stage-icon">📝</div>
+          <div class="stage-label">Parse</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" data-stage="analyze">
+          <div class="stage-icon">🔍</div>
+          <div class="stage-label">Analyze</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" data-stage="plan">
+          <div class="stage-icon">📋</div>
+          <div class="stage-label">Plan</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" data-stage="execute">
+          <div class="stage-icon">⚙️</div>
+          <div class="stage-label">Execute</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" data-stage="output">
+          <div class="stage-icon">📊</div>
+          <div class="stage-label">Output</div>
+        </div>
+      </div>
+      <div class="stage-detail" id="stageDetail">
+        <p>Click a stage above to see what happens inside.</p>
+      </div>
+    </section>
+
+    <!-- ===== Section 2: SQL → AST Interactive ===== -->
+    <section class="demo-section">
+      <h2>📝 Parsing: SQL → Abstract Syntax Tree</h2>
+      <p class="section-desc">ClickHouse uses a hand-written recursive descent parser (not yacc/bison). Type or pick a query to see its AST.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <select id="querySelect" class="codec-select">
+            <option value="simple">Simple SELECT</option>
+            <option value="agg">GROUP BY Aggregation</option>
+            <option value="join">JOIN Query</option>
+            <option value="subquery">Subquery</option>
+            <option value="window">Window Function</option>
+          </select>
+          <button id="parseBtn" class="action-btn insert-btn">🌳 Parse to AST</button>
+        </div>
+        <div class="query-display" id="queryDisplay">
+          <code>SELECT url, count() FROM hits WHERE date = '2024-03-01' GROUP BY url ORDER BY count() DESC LIMIT 10</code>
+        </div>
+      </div>
+      <div class="ast-viz" id="astViz">
+        <div class="ast-placeholder">Click "Parse to AST" to visualize the query tree</div>
+      </div>
+    </section>
+
+    <!-- ===== Section 3: Query Plan / Processors DAG ===== -->
+    <section class="demo-section">
+      <h2>📋 Query Plan: The Processor DAG</h2>
+      <p class="section-desc">ClickHouse builds a DAG of <strong>processors</strong> — each transforms data chunks. This replaces the old BlockInputStream model since v21.6+.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="showPlanBtn" class="action-btn search-btn">📋 Show Plan</button>
+          <button id="animatePlanBtn" class="action-btn merge-action-btn">▶️ Animate Execution</button>
+          <button id="resetPlanBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+      </div>
+      <div class="plan-viz" id="planViz">
+        <canvas id="planCanvas" width="900" height="500"></canvas>
+      </div>
+      <div class="plan-legend">
+        <span class="legend-item"><span class="dot source"></span> Source (ReadFromMergeTree)</span>
+        <span class="legend-item"><span class="dot transform"></span> Transform (Filter / Expression)</span>
+        <span class="legend-item"><span class="dot aggregate"></span> Aggregate (GroupBy)</span>
+        <span class="legend-item"><span class="dot sort"></span> Sort / Limit</span>
+        <span class="legend-item"><span class="dot output"></span> Output</span>
+      </div>
+    </section>
+
+    <!-- ===== Section 4: Parallel Reading ===== -->
+    <section class="demo-section">
+      <h2>🚀 Parallel Column Reading</h2>
+      <p class="section-desc">ClickHouse reads columns in parallel across parts and granules. Adjust thread count to see throughput change.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <label class="slider-label">Threads: <span id="threadCount">4</span></label>
+          <input type="range" id="threadSlider" min="1" max="16" value="4" class="thread-slider" />
+          <label class="slider-label">Parts: <span id="partCountRead">8</span></label>
+          <input type="range" id="partSlider" min="1" max="32" value="8" class="thread-slider" />
+          <button id="runReadBtn" class="action-btn insert-btn">▶️ Simulate Read</button>
+        </div>
+      </div>
+      <div class="parallel-viz" id="parallelViz">
+        <div class="thread-lanes" id="threadLanes"></div>
+        <div class="read-stats" id="readStats">
+          <div class="stat">
+            <span class="stat-label">Granules Read</span>
+            <span class="stat-value" id="granulesRead">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Throughput</span>
+            <span class="stat-value" id="readThroughput">0 GB/s</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Elapsed</span>
+            <span class="stat-value" id="readElapsed">0 ms</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 5: Two-Level Aggregation ===== -->
+    <section class="demo-section">
+      <h2>🧮 Two-Level Aggregation</h2>
+      <p class="section-desc">For large GROUP BY, ClickHouse uses a two-level hash table: each thread aggregates locally (level 1), then results merge (level 2). This avoids lock contention.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="runAggBtn" class="action-btn insert-btn">▶️ Run Aggregation</button>
+          <button id="resetAggBtn" class="action-btn reset-btn">↺ Reset</button>
+        </div>
+        <div class="stats-row">
+          <div class="stat">
+            <span class="stat-label">Unique Keys</span>
+            <span class="stat-value" id="uniqueKeys">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Hash Table Level</span>
+            <span class="stat-value" id="htLevel">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Buckets</span>
+            <span class="stat-value" id="htBuckets">256</span>
+          </div>
+        </div>
+      </div>
+      <div class="agg-viz" id="aggViz">
+        <div class="agg-level level-1">
+          <h4>Level 1: Per-Thread Hash Tables</h4>
+          <div class="ht-grid" id="htLevel1"></div>
+        </div>
+        <div class="agg-arrow">⬇️ Merge by bucket</div>
+        <div class="agg-level level-2">
+          <h4>Level 2: Merged Result</h4>
+          <div class="ht-grid" id="htLevel2"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 6: Pipeline Backpressure ===== -->
+    <section class="demo-section">
+      <h2>🌊 Backpressure & Streaming</h2>
+      <p class="section-desc">ClickHouse streams results in <strong>chunks</strong> (~65K rows). If a downstream processor is slow, backpressure pauses upstream — no unbounded memory growth.</p>
+      <div class="controls-section">
+        <div class="control-group">
+          <button id="runStreamBtn" class="action-btn insert-btn">▶️ Stream Query</button>
+          <label class="slider-label">Client Speed: <span id="clientSpeed">Fast</span></label>
+          <input type="range" id="clientSlider" min="1" max="3" value="3" class="thread-slider" />
+        </div>
+      </div>
+      <div class="stream-viz" id="streamViz">
+        <div class="stream-pipeline">
+          <div class="stream-node" id="streamSource">
+            <div class="node-label">Source</div>
+            <div class="node-buffer" id="srcBuffer"></div>
+            <div class="node-rate" id="srcRate">0 chunks/s</div>
+          </div>
+          <div class="stream-pipe" id="pipe1">
+            <div class="pipe-chunks" id="pipeChunks1"></div>
+          </div>
+          <div class="stream-node" id="streamFilter">
+            <div class="node-label">Filter+Agg</div>
+            <div class="node-buffer" id="filterBuffer"></div>
+            <div class="node-rate" id="filterRate">0 chunks/s</div>
+          </div>
+          <div class="stream-pipe" id="pipe2">
+            <div class="pipe-chunks" id="pipeChunks2"></div>
+          </div>
+          <div class="stream-node" id="streamClient">
+            <div class="node-label">Client</div>
+            <div class="node-buffer" id="clientBuffer"></div>
+            <div class="node-rate" id="clientRate">0 chunks/s</div>
+          </div>
+        </div>
+        <div class="backpressure-indicator" id="bpIndicator">Normal flow</div>
+      </div>
+    </section>
+
+    <!-- ===== Section 7: EXPLAIN Demo ===== -->
+    <section class="demo-section">
+      <h2>🔬 EXPLAIN in Practice</h2>
+      <p class="section-desc">ClickHouse offers multiple EXPLAIN variants. Click each to see what it reveals.</p>
+      <div class="explain-grid">
+        <div class="explain-card" data-explain="ast">
+          <h4>EXPLAIN AST</h4>
+          <p>Shows the parsed abstract syntax tree</p>
+          <div class="explain-output" id="explainAst">
+            <pre>SelectWithUnionQuery
+└── SelectQuery
+    ├── ExpressionList (select)
+    │   ├── Identifier: url
+    │   └── Function: count
+    ├── TablesInSelectQuery
+    │   └── TableIdentifier: hits
+    ├── ExpressionList (where)
+    │   └── Function: equals
+    │       ├── Identifier: date
+    │       └── Literal: '2024-03-01'
+    ├── ExpressionList (group by)
+    │   └── Identifier: url
+    ├── ExpressionList (order by)
+    │   └── OrderByElement: desc
+    └── Literal (limit): 10</pre>
+          </div>
+        </div>
+        <div class="explain-card" data-explain="syntax">
+          <h4>EXPLAIN SYNTAX</h4>
+          <p>Shows the optimized/rewritten SQL</p>
+          <div class="explain-output" id="explainSyntax">
+            <pre>SELECT
+    url,
+    count() AS `count()`
+FROM hits
+WHERE date = '2024-03-01'
+GROUP BY url
+ORDER BY `count()` DESC
+LIMIT 10</pre>
+          </div>
+        </div>
+        <div class="explain-card" data-explain="plan">
+          <h4>EXPLAIN PLAN</h4>
+          <p>Shows the logical query plan</p>
+          <div class="explain-output" id="explainPlan">
+            <pre>Expression ((Projection + Before ORDER BY))
+  Limit (preliminary LIMIT)
+    Sorting (Sorting for ORDER BY)
+      Expression (Before GROUP BY)
+        Aggregating
+          Expression (Before WHERE)
+            Filter (WHERE)
+              ReadFromMergeTree (hits)
+                Parts: 24, Granules: 1847
+                PK filter: date = '2024-03-01'</pre>
+          </div>
+        </div>
+        <div class="explain-card" data-explain="pipeline">
+          <h4>EXPLAIN PIPELINE</h4>
+          <p>Shows physical processors with parallelism</p>
+          <div class="explain-output" id="explainPipeline">
+            <pre>(Expression)
+ExpressionTransform × 1
+  (Limit)
+  LimitTransform
+    (Sorting)
+    MergeSortingTransform
+      (Expression)
+      ExpressionTransform × 4
+        (Aggregating)
+        Resize 4 → 4
+          AggregatingTransform × 4
+            (Expression)
+            ExpressionTransform × 4
+              (Filter)
+              FilterTransform × 4
+                (ReadFromMergeTree)
+                MergeTreeThread × 4 0→1</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Section 8: Performance Tips ===== -->
+    <section class="tuning-section">
+      <h2>🎛️ Query Performance Settings</h2>
+      <div class="tuning-grid">
+        <div class="tuning-card">
+          <h4>max_threads</h4>
+          <p>Number of threads for query execution. Defaults to CPU cores. Reduce for multi-tenant setups.</p>
+          <code>SET max_threads = 8</code>
+        </div>
+        <div class="tuning-card">
+          <h4>max_memory_usage</h4>
+          <p>Per-query memory limit. Prevents one query from killing the server.</p>
+          <code>SET max_memory_usage = 10000000000</code>
+        </div>
+        <div class="tuning-card">
+          <h4>optimize_read_in_order</h4>
+          <p>If ORDER BY matches primary key, read in-order instead of sorting. Huge for top-N queries.</p>
+          <code>SET optimize_read_in_order = 1</code>
+        </div>
+        <div class="tuning-card">
+          <h4>group_by_two_level_threshold</h4>
+          <p>Switch from single to two-level hash table when keys exceed this. Default: 100,000.</p>
+          <code>SET group_by_two_level_threshold = 100000</code>
+        </div>
+        <div class="tuning-card">
+          <h4>max_bytes_before_external_sort</h4>
+          <p>Spill sort to disk when memory exceeds this. Essential for large ORDER BY on constrained memory.</p>
+          <code>SET max_bytes_before_external_sort = 5000000000</code>
+        </div>
+        <div class="tuning-card">
+          <h4>allow_experimental_parallel_reading_from_replicas</h4>
+          <p>Distribute reads across replicas for faster scans. Experimental but powerful for large tables.</p>
+          <code>SET allow_experimental_parallel_reading_from_replicas = 1</code>
+        </div>
+      </div>
+    </section>
+
+    <footer class="viz-footer">
+      <p>Based on <a href="https://clickhouse.com/docs/en/development/architecture" target="_blank">ClickHouse architecture docs</a>, source code analysis, and <a href="https://presentations.clickhouse.com/" target="_blank">ClickHouse presentations</a></p>
+      <p style="margin-top: 8px;">Related: <a href="/clickhouse/mergetree/">MergeTree Engine</a> · <a href="/clickhouse/materialized-views/">Materialized Views</a> · <a href="/clickhouse/distributed-tables/">Distributed Tables</a></p>
+    </footer>
+
+    <div class="share-buttons">
+      <span>Share this visualization:</span>
+      <a href="https://twitter.com/intent/tweet?text=Interactive%20ClickHouse%20Query%20Execution%20Pipeline%20visualization%20-%20see%20how%20SQL%20becomes%20parallel%20columnar%20reads&url=https://systeminternals.dev/clickhouse/query-execution/" target="_blank" class="share-btn">𝕏 Twitter</a>
+      <a href="https://www.linkedin.com/sharing/share-offsite/?url=https://systeminternals.dev/clickhouse/query-execution/" target="_blank" class="share-btn">in LinkedIn</a>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .viz-container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  .viz-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .viz-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    color: #888;
+    font-size: 1.1rem;
+  }
+  .demo-section {
+    background: rgba(255,255,255,0.02);
+    border-radius: 20px;
+    padding: 30px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 30px;
+  }
+  .demo-section h2 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .section-desc {
+    color: #999;
+    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+  .controls-section {
+    margin-bottom: 20px;
+  }
+  .control-group {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .action-btn {
+    padding: 8px 20px;
+    border-radius: 10px;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+  .insert-btn { background: #22c55e; color: #000; }
+  .insert-btn:hover { background: #16a34a; transform: translateY(-1px); }
+  .search-btn { background: #3b82f6; color: #fff; }
+  .search-btn:hover { background: #2563eb; }
+  .merge-action-btn { background: #a855f7; color: #fff; }
+  .merge-action-btn:hover { background: #9333ea; }
+  .reset-btn { background: #374151; color: #ccc; }
+  .reset-btn:hover { background: #4b5563; }
+  .codec-select {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 0.9rem;
+  }
+  .stats-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-label { font-size: 0.75rem; color: #888; text-transform: uppercase; }
+  .stat-value { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+  /* Pipeline overview */
+  .pipeline-overview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .pipeline-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 24px;
+    background: rgba(59,130,246,0.1);
+    border: 2px solid rgba(59,130,246,0.3);
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.3s;
+    min-width: 90px;
+  }
+  .pipeline-stage:hover, .pipeline-stage.active {
+    background: rgba(59,130,246,0.25);
+    border-color: #3b82f6;
+    transform: translateY(-3px);
+  }
+  .stage-icon { font-size: 1.8rem; }
+  .stage-label { font-size: 0.85rem; color: #ccc; margin-top: 6px; font-weight: 600; }
+  .pipeline-arrow { color: #555; font-size: 1.5rem; }
+  .stage-detail {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    color: #bbb;
+    line-height: 1.7;
+    min-height: 60px;
+  }
+  .stage-detail h4 { color: #fff; margin-bottom: 8px; }
+  .stage-detail code { background: rgba(59,130,246,0.2); padding: 2px 6px; border-radius: 4px; color: #93c5fd; }
+
+  /* AST */
+  .query-display {
+    background: rgba(0,0,0,0.4);
+    padding: 14px;
+    border-radius: 10px;
+    margin-top: 10px;
+    overflow-x: auto;
+  }
+  .query-display code { color: #93c5fd; font-size: 0.9rem; }
+  .ast-viz {
+    margin-top: 16px;
+    min-height: 200px;
+  }
+  .ast-placeholder { color: #555; text-align: center; padding: 40px; }
+  .ast-node {
+    padding: 6px 14px;
+    border-radius: 8px;
+    display: inline-block;
+    margin: 3px 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.3s;
+  }
+  .ast-node:hover { transform: scale(1.05); }
+  .ast-tree { padding-left: 24px; border-left: 2px solid rgba(255,255,255,0.1); }
+  .node-select { background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+  .node-from { background: rgba(34,197,94,0.2); color: #86efac; border: 1px solid rgba(34,197,94,0.3); }
+  .node-where { background: rgba(249,115,22,0.2); color: #fdba74; border: 1px solid rgba(249,115,22,0.3); }
+  .node-group { background: rgba(168,85,247,0.2); color: #d8b4fe; border: 1px solid rgba(168,85,247,0.3); }
+  .node-order { background: rgba(236,72,153,0.2); color: #f9a8d4; border: 1px solid rgba(236,72,153,0.3); }
+  .node-limit { background: rgba(234,179,8,0.2); color: #fde047; border: 1px solid rgba(234,179,8,0.3); }
+  .node-func { background: rgba(6,182,212,0.2); color: #67e8f9; border: 1px solid rgba(6,182,212,0.3); }
+  .node-ident { background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.15); }
+
+  /* Plan canvas */
+  .plan-viz {
+    margin-top: 16px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  #planCanvas { width: 100%; height: auto; display: block; }
+  .plan-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    font-size: 0.8rem;
+    color: #999;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%; display: inline-block;
+  }
+  .dot.source { background: #22c55e; }
+  .dot.transform { background: #3b82f6; }
+  .dot.aggregate { background: #a855f7; }
+  .dot.sort { background: #f97316; }
+  .dot.output { background: #ef4444; }
+
+  /* Parallel reading */
+  .thread-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .thread-lane {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .thread-label {
+    width: 70px;
+    font-size: 0.75rem;
+    color: #888;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .lane-bar {
+    flex: 1;
+    height: 28px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .lane-chunk {
+    position: absolute;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s, left 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.8);
+    font-weight: 600;
+  }
+  .slider-label {
+    font-size: 0.85rem;
+    color: #ccc;
+  }
+  .thread-slider {
+    width: 120px;
+    accent-color: #3b82f6;
+  }
+
+  /* Aggregation */
+  .agg-viz {
+    margin-top: 16px;
+  }
+  .agg-level {
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .agg-level h4 { color: #fff; margin-bottom: 12px; font-size: 0.95rem; }
+  .level-1 { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); }
+  .level-2 { background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.2); }
+  .agg-arrow { text-align: center; padding: 8px; color: #888; font-size: 1.2rem; }
+  .ht-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    gap: 4px;
+  }
+  .ht-cell {
+    height: 24px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.05);
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: #999;
+  }
+  .ht-cell.filled { background: rgba(59,130,246,0.3); color: #93c5fd; }
+  .ht-cell.merged { background: rgba(168,85,247,0.3); color: #d8b4fe; }
+
+  /* Streaming / backpressure */
+  .stream-pipeline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 20px 0;
+  }
+  .stream-node {
+    width: 140px;
+    padding: 16px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s;
+  }
+  .stream-node.busy { border-color: #f97316; }
+  .stream-node.blocked { border-color: #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.3); }
+  .node-label { font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .node-buffer {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .node-buffer-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.2s;
+    background: #22c55e;
+  }
+  .node-rate { font-size: 0.75rem; color: #888; }
+  .stream-pipe {
+    width: 80px;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    position: relative;
+    overflow: hidden;
+  }
+  .pipe-chunks {
+    position: absolute;
+    top: -4px;
+    left: 0;
+    width: 100%;
+    height: 12px;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .pipe-chunk {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: #3b82f6;
+    animation: flowRight 1s linear infinite;
+  }
+  .backpressure-indicator {
+    text-align: center;
+    padding: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 8px;
+  }
+  .bp-normal { color: #22c55e; }
+  .bp-slow { color: #f97316; }
+  .bp-blocked { color: #ef4444; }
+
+  @keyframes flowRight {
+    from { transform: translateX(-20px); opacity: 0; }
+    50% { opacity: 1; }
+    to { transform: translateX(60px); opacity: 0; }
+  }
+
+  /* EXPLAIN */
+  .explain-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 16px;
+  }
+  .explain-card {
+    background: rgba(0,0,0,0.3);
+    border-radius: 14px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  .explain-card:hover {
+    border-color: rgba(59,130,246,0.4);
+    transform: translateY(-2px);
+  }
+  .explain-card h4 { color: #93c5fd; margin-bottom: 4px; }
+  .explain-card p { color: #888; font-size: 0.85rem; margin-bottom: 12px; }
+  .explain-output {
+    background: rgba(0,0,0,0.4);
+    border-radius: 8px;
+    padding: 12px;
+    overflow-x: auto;
+    max-height: 0;
+    opacity: 0;
+    transition: all 0.4s;
+  }
+  .explain-card.expanded .explain-output {
+    max-height: 400px;
+    opacity: 1;
+  }
+  .explain-output pre {
+    color: #bbb;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    margin: 0;
+    white-space: pre;
+  }
+
+  /* Tuning */
+  .tuning-section {
+    margin-bottom: 30px;
+  }
+  .tuning-section h2 {
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+  .tuning-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .tuning-card {
+    background: rgba(255,255,255,0.03);
+    border-radius: 14px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .tuning-card h4 { color: #facc15; margin-bottom: 6px; }
+  .tuning-card p { color: #999; font-size: 0.85rem; margin-bottom: 10px; }
+  .tuning-card code { color: #93c5fd; font-size: 0.8rem; }
+
+  .viz-footer {
+    text-align: center;
+    color: #666;
+    font-size: 0.85rem;
+    margin-top: 10px;
+    margin-bottom: 20px;
+  }
+  .viz-footer a { color: #93c5fd; }
+
+  .share-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    align-items: center;
+    padding: 20px 0 40px;
+    color: #666;
+    font-size: 0.85rem;
+  }
+  .share-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.08);
+    color: #ccc;
+    text-decoration: none;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+  }
+  .share-btn:hover { background: rgba(255,255,255,0.15); }
+
+  @media (max-width: 700px) {
+    .pipeline-overview { gap: 4px; }
+    .pipeline-stage { padding: 10px 14px; min-width: 60px; }
+    .stage-icon { font-size: 1.3rem; }
+    .pipeline-arrow { font-size: 1rem; }
+    .explain-grid { grid-template-columns: 1fr; }
+    .stream-pipeline { flex-direction: column; }
+    .stream-pipe { width: 4px; height: 40px; }
+  }
+</style>
+
+<script>
+  // ===== Pipeline Stage Details =====
+  const stageInfo = {
+    parse: { title: "📝 Parse", html: `<h4>SQL → AST</h4><p>A hand-written <strong>recursive descent parser</strong> tokenizes the SQL and builds an Abstract Syntax Tree. ClickHouse doesn't use lex/yacc — the custom parser handles ClickHouse-specific syntax like <code>ARRAY JOIN</code>, <code>SAMPLE</code>, and lambda expressions. The parser is in <code>Parsers/</code> and runs in ~microseconds for typical queries.</p>` },
+    analyze: { title: "🔍 Analyze", html: `<h4>Type Resolution & Optimization</h4><p>The <strong>analyzer</strong> (TreeRewriter + QueryNormalizer) resolves column types, expands <code>*</code>, applies aliases, inlines CTEs, and runs AST-level optimizations: constant folding, predicate pushdown, removing redundant ORDER BY, and converting <code>IN (subquery)</code> to joins when beneficial. Since v23.1+, the new analyzer (<code>enable_analyzer=1</code>) handles correlated subqueries and complex scoping correctly.</p>` },
+    plan: { title: "📋 Plan", html: `<h4>Query Plan → Processor DAG</h4><p>The planner converts the optimized AST into a <strong>QueryPlan</strong> — a tree of steps like ReadFromMergeTree, FilterStep, AggregatingStep. Then it's lowered into a <strong>Processor DAG</strong> (directed acyclic graph) of <code>IProcessor</code> objects connected by ports. Each processor does one thing: read columns, filter rows, aggregate, sort, etc. The DAG naturally expresses parallelism.</p>` },
+    execute: { title: "⚙️ Execute", html: `<h4>PipelineExecutor — Pull-Based Parallel Execution</h4><p>The <code>PipelineExecutor</code> schedules processors across threads. It's <strong>pull-based</strong>: output ports request data from input ports, propagating demand upstream. This gives natural backpressure — if the client reads slowly, the pipeline pauses. Each thread picks an available processor, runs it, and moves to the next. Zero-copy <code>Chunk</code> objects (columns + metadata) flow between processors.</p>` },
+    output: { title: "📊 Output", html: `<h4>Serialization & Delivery</h4><p>The final processor serializes chunks into the requested format: <code>TabSeparated</code>, <code>JSON</code>, <code>Arrow</code>, <code>Parquet</code>, <code>Native</code> (binary columnar), etc. For HTTP, chunks stream as they're produced. For TCP (native protocol), the server sends blocks progressively. Format serialization runs on a dedicated thread to avoid blocking the pipeline.</p>` }
+  };
+
+  document.querySelectorAll('.pipeline-stage').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.pipeline-stage').forEach(s => s.classList.remove('active'));
+      el.classList.add('active');
+      const info = stageInfo[el.dataset.stage];
+      document.getElementById('stageDetail').innerHTML = info.html;
+    });
+  });
+
+  // ===== AST Visualization =====
+  const queries = {
+    simple: {
+      sql: `SELECT url, status FROM hits WHERE date = '2024-03-01' LIMIT 100`,
+      tree: `<div class="ast-node node-select">SelectQuery</div>
+<div class="ast-tree">
+  <div class="ast-node node-select">SELECT</div>
+  <div class="ast-tree">
+    <div class="ast-node node-ident">url</div>
+    <div class="ast-node node-ident">status</div>
+  </div>
+  <div class="ast-node node-from">FROM hits</div>
+  <div class="ast-node node-where">WHERE</div>
+  <div class="ast-tree">
+    <div class="ast-node node-func">equals(date, '2024-03-01')</div>
+  </div>
+  <div class="ast-node node-limit">LIMIT 100</div>
+</div>`
+    },
+    agg: {
+      sql: `SELECT url, count() FROM hits WHERE date = '2024-03-01' GROUP BY url ORDER BY count() DESC LIMIT 10`,
+      tree: `<div class="ast-node node-select">SelectQuery</div>
+<div class="ast-tree">
+  <div class="ast-node node-select">SELECT</div>
+  <div class="ast-tree">
+    <div class="ast-node node-ident">url</div>
+    <div class="ast-node node-func">count()</div>
+  </div>
+  <div class="ast-node node-from">FROM hits</div>
+  <div class="ast-node node-where">WHERE</div>
+  <div class="ast-tree">
+    <div class="ast-node node-func">equals(date, '2024-03-01')</div>
+  </div>
+  <div class="ast-node node-group">GROUP BY</div>
+  <div class="ast-tree">
+    <div class="ast-node node-ident">url</div>
+  </div>
+  <div class="ast-node node-order">ORDER BY count() DESC</div>
+  <div class="ast-node node-limit">LIMIT 10</div>
+</div>`
+    },
+    join: {
+      sql: `SELECT h.url, d.title FROM hits h JOIN domains d ON h.domain = d.name WHERE h.date = today()`,
+      tree: `<div class="ast-node node-select">SelectQuery</div>
+<div class="ast-tree">
+  <div class="ast-node node-select">SELECT</div>
+  <div class="ast-tree">
+    <div class="ast-node node-ident">h.url</div>
+    <div class="ast-node node-ident">d.title</div>
+  </div>
+  <div class="ast-node node-from">FROM hits AS h</div>
+  <div class="ast-node node-from">JOIN domains AS d</div>
+  <div class="ast-tree">
+    <div class="ast-node node-func">ON equals(h.domain, d.name)</div>
+  </div>
+  <div class="ast-node node-where">WHERE</div>
+  <div class="ast-tree">
+    <div class="ast-node node-func">equals(h.date, today())</div>
+  </div>
+</div>`
+    },
+    subquery: {
+      sql: `SELECT url FROM hits WHERE domain IN (SELECT name FROM domains WHERE category = 'tech')`,
+      tree: `<div class="ast-node node-select">SelectQuery</div>
+<div class="ast-tree">
+  <div class="ast-node node-select">SELECT</div>
+  <div class="ast-tree"><div class="ast-node node-ident">url</div></div>
+  <div class="ast-node node-from">FROM hits</div>
+  <div class="ast-node node-where">WHERE</div>
+  <div class="ast-tree">
+    <div class="ast-node node-func">IN</div>
+    <div class="ast-tree">
+      <div class="ast-node node-ident">domain</div>
+      <div class="ast-node node-select">SubQuery</div>
+      <div class="ast-tree">
+        <div class="ast-node node-select">SELECT name</div>
+        <div class="ast-node node-from">FROM domains</div>
+        <div class="ast-node node-where">WHERE equals(category, 'tech')</div>
+      </div>
+    </div>
+  </div>
+</div>`
+    },
+    window: {
+      sql: `SELECT url, count() OVER (PARTITION BY domain ORDER BY date ROWS BETWEEN 7 PRECEDING AND CURRENT ROW) FROM hits`,
+      tree: `<div class="ast-node node-select">SelectQuery</div>
+<div class="ast-tree">
+  <div class="ast-node node-select">SELECT</div>
+  <div class="ast-tree">
+    <div class="ast-node node-ident">url</div>
+    <div class="ast-node node-func">WindowFunction: count()</div>
+    <div class="ast-tree">
+      <div class="ast-node node-group">PARTITION BY domain</div>
+      <div class="ast-node node-order">ORDER BY date</div>
+      <div class="ast-node node-limit">ROWS 7 PRECEDING → CURRENT ROW</div>
+    </div>
+  </div>
+  <div class="ast-node node-from">FROM hits</div>
+</div>`
+    }
+  };
+
+  const querySelect = document.getElementById('querySelect');
+  const queryDisplay = document.getElementById('queryDisplay');
+  const astViz = document.getElementById('astViz');
+
+  querySelect.addEventListener('change', () => {
+    const q = queries[querySelect.value];
+    queryDisplay.innerHTML = `<code>${q.sql}</code>`;
+  });
+
+  document.getElementById('parseBtn').addEventListener('click', () => {
+    const q = queries[querySelect.value];
+    queryDisplay.innerHTML = `<code>${q.sql}</code>`;
+    astViz.innerHTML = '';
+    // Animate nodes appearing
+    const tmp = document.createElement('div');
+    tmp.innerHTML = q.tree;
+    const nodes = tmp.querySelectorAll('.ast-node');
+    astViz.innerHTML = q.tree;
+    const realNodes = astViz.querySelectorAll('.ast-node');
+    realNodes.forEach((n, i) => {
+      n.style.opacity = '0';
+      n.style.transform = 'translateX(-10px)';
+      setTimeout(() => {
+        n.style.transition = 'all 0.3s';
+        n.style.opacity = '1';
+        n.style.transform = 'translateX(0)';
+      }, i * 80);
+    });
+  });
+
+  // ===== Processor DAG Canvas =====
+  const canvas = document.getElementById('planCanvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 900 * dpr;
+  canvas.height = 500 * dpr;
+  ctx.scale(dpr, dpr);
+
+  const processors = [
+    { id: 'read1', label: 'ReadFromMergeTree\nThread 1', x: 80, y: 60, type: 'source' },
+    { id: 'read2', label: 'ReadFromMergeTree\nThread 2', x: 80, y: 160, type: 'source' },
+    { id: 'read3', label: 'ReadFromMergeTree\nThread 3', x: 80, y: 260, type: 'source' },
+    { id: 'read4', label: 'ReadFromMergeTree\nThread 4', x: 80, y: 360, type: 'source' },
+    { id: 'filter1', label: 'FilterTransform', x: 300, y: 60, type: 'transform' },
+    { id: 'filter2', label: 'FilterTransform', x: 300, y: 160, type: 'transform' },
+    { id: 'filter3', label: 'FilterTransform', x: 300, y: 260, type: 'transform' },
+    { id: 'filter4', label: 'FilterTransform', x: 300, y: 360, type: 'transform' },
+    { id: 'agg1', label: 'AggregatingTransform', x: 500, y: 110, type: 'aggregate' },
+    { id: 'agg2', label: 'AggregatingTransform', x: 500, y: 310, type: 'aggregate' },
+    { id: 'merge', label: 'MergeSorting', x: 660, y: 210, type: 'sort' },
+    { id: 'limit', label: 'LimitTransform', x: 790, y: 210, type: 'sort' },
+  ];
+
+  const edges = [
+    ['read1','filter1'],['read2','filter2'],['read3','filter3'],['read4','filter4'],
+    ['filter1','agg1'],['filter2','agg1'],['filter3','agg2'],['filter4','agg2'],
+    ['agg1','merge'],['agg2','merge'],['merge','limit']
+  ];
+
+  const typeColors = { source: '#22c55e', transform: '#3b82f6', aggregate: '#a855f7', sort: '#f97316', output: '#ef4444' };
+  let planDrawn = false;
+  let animating = false;
+
+  function drawPlan(highlightEdge) {
+    ctx.clearRect(0, 0, 900, 500);
+    // edges
+    edges.forEach(([from, to], i) => {
+      const a = processors.find(p => p.id === from);
+      const b = processors.find(p => p.id === to);
+      ctx.beginPath();
+      ctx.moveTo(a.x + 80, a.y + 20);
+      ctx.lineTo(b.x, b.y + 20);
+      ctx.strokeStyle = highlightEdge === i ? '#facc15' : 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = highlightEdge === i ? 3 : 1.5;
+      ctx.stroke();
+    });
+    // nodes
+    processors.forEach(p => {
+      const w = 130, h = 40, r = 10;
+      ctx.beginPath();
+      ctx.roundRect(p.x - 10, p.y, w, h, r);
+      ctx.fillStyle = typeColors[p.type] + '33';
+      ctx.fill();
+      ctx.strokeStyle = typeColors[p.type];
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px Inter, sans-serif';
+      const lines = p.label.split('\n');
+      lines.forEach((line, i) => {
+        ctx.fillText(line, p.x, p.y + 16 + i * 14);
+      });
+    });
+  }
+
+  document.getElementById('showPlanBtn').addEventListener('click', () => {
+    drawPlan(-1);
+    planDrawn = true;
+  });
+
+  document.getElementById('animatePlanBtn').addEventListener('click', () => {
+    if (animating) return;
+    if (!planDrawn) drawPlan(-1);
+    animating = true;
+    let i = 0;
+    const interval = setInterval(() => {
+      drawPlan(i);
+      i++;
+      if (i >= edges.length) {
+        clearInterval(interval);
+        setTimeout(() => { drawPlan(-1); animating = false; }, 600);
+      }
+    }, 400);
+  });
+
+  document.getElementById('resetPlanBtn').addEventListener('click', () => {
+    ctx.clearRect(0, 0, 900, 500);
+    planDrawn = false;
+  });
+
+  // ===== Parallel Reading =====
+  const threadSlider = document.getElementById('threadSlider');
+  const threadCountEl = document.getElementById('threadCount');
+  const partSlider = document.getElementById('partSlider');
+  const partCountReadEl = document.getElementById('partCountRead');
+
+  threadSlider.addEventListener('input', () => { threadCountEl.textContent = threadSlider.value; });
+  partSlider.addEventListener('input', () => { partCountReadEl.textContent = partSlider.value; });
+
+  document.getElementById('runReadBtn').addEventListener('click', () => {
+    const threads = parseInt(threadSlider.value);
+    const parts = parseInt(partSlider.value);
+    const lanes = document.getElementById('threadLanes');
+    lanes.innerHTML = '';
+
+    const colors = ['#22c55e','#3b82f6','#a855f7','#f97316','#ef4444','#06b6d4','#ec4899','#eab308',
+                     '#14b8a6','#f43f5e','#8b5cf6','#10b981','#f59e0b','#6366f1','#84cc16','#fb923c'];
+
+    for (let t = 0; t < threads; t++) {
+      const lane = document.createElement('div');
+      lane.className = 'thread-lane';
+      lane.innerHTML = `<div class="thread-label">Thread ${t+1}</div><div class="lane-bar" id="lane${t}"></div>`;
+      lanes.appendChild(lane);
+    }
+
+    // Assign parts to threads round-robin and animate
+    const assignments = Array.from({length: threads}, () => []);
+    for (let p = 0; p < parts; p++) {
+      assignments[p % threads].push(p);
+    }
+
+    let totalGranules = 0;
+    const granPerPart = Math.floor(40 + Math.random() * 60);
+
+    assignments.forEach((partList, t) => {
+      const bar = document.getElementById(`lane${t}`);
+      const chunkWidth = 100 / Math.max(parts / threads, 1);
+      partList.forEach((p, i) => {
+        const chunk = document.createElement('div');
+        chunk.className = 'lane-chunk';
+        chunk.style.background = colors[p % colors.length] + 'cc';
+        chunk.style.left = '0%';
+        chunk.style.width = '0%';
+        chunk.textContent = `P${p+1}`;
+        bar.appendChild(chunk);
+        const g = granPerPart + Math.floor(Math.random() * 20);
+        totalGranules += g;
+        setTimeout(() => {
+          chunk.style.left = `${i * chunkWidth}%`;
+          chunk.style.width = `${chunkWidth - 1}%`;
+        }, 100 + i * 200 + t * 50);
+      });
+    });
+
+    const elapsed = Math.round(50 + (parts * granPerPart * 8192 * 100) / (threads * 2e9) * 1000);
+    const throughput = ((parts * granPerPart * 8192 * 100) / elapsed / 1e6).toFixed(1);
+
+    setTimeout(() => {
+      document.getElementById('granulesRead').textContent = totalGranules;
+      document.getElementById('readThroughput').textContent = `${throughput} GB/s`;
+      document.getElementById('readElapsed').textContent = `${elapsed} ms`;
+    }, 300);
+  });
+
+  // ===== Two-Level Aggregation =====
+  document.getElementById('runAggBtn').addEventListener('click', () => {
+    const grid1 = document.getElementById('htLevel1');
+    const grid2 = document.getElementById('htLevel2');
+    grid1.innerHTML = '';
+    grid2.innerHTML = '';
+
+    const buckets = 64;
+    const keys = Math.floor(50000 + Math.random() * 150000);
+    document.getElementById('uniqueKeys').textContent = keys.toLocaleString();
+    document.getElementById('htBuckets').textContent = buckets;
+
+    // Level 1: 4 per-thread hash tables
+    for (let t = 0; t < 4; t++) {
+      const label = document.createElement('div');
+      label.style.cssText = 'grid-column: 1 / -1; font-size: 0.75rem; color: #888; margin-top: 8px;';
+      label.textContent = `Thread ${t+1}`;
+      grid1.appendChild(label);
+      for (let b = 0; b < buckets; b++) {
+        const cell = document.createElement('div');
+        cell.className = 'ht-cell';
+        const filled = Math.random() < 0.6;
+        setTimeout(() => {
+          if (filled) {
+            cell.classList.add('filled');
+            cell.textContent = Math.floor(Math.random() * 999);
+          }
+        }, 50 + t * 100 + b * 5);
+        grid1.appendChild(cell);
+      }
+    }
+
+    document.getElementById('htLevel').textContent = 'Single → Two-Level';
+
+    // Level 2: merged
+    setTimeout(() => {
+      for (let b = 0; b < buckets; b++) {
+        const cell = document.createElement('div');
+        cell.className = 'ht-cell';
+        setTimeout(() => {
+          cell.classList.add('merged');
+          cell.textContent = Math.floor(Math.random() * 9999);
+        }, b * 15);
+        grid2.appendChild(cell);
+      }
+    }, 800);
+  });
+
+  document.getElementById('resetAggBtn').addEventListener('click', () => {
+    document.getElementById('htLevel1').innerHTML = '';
+    document.getElementById('htLevel2').innerHTML = '';
+    document.getElementById('uniqueKeys').textContent = '0';
+    document.getElementById('htLevel').textContent = '—';
+  });
+
+  // ===== Streaming / Backpressure =====
+  const clientSlider = document.getElementById('clientSlider');
+  const clientSpeedEl = document.getElementById('clientSpeed');
+  const speedLabels = { '1': 'Slow', '2': 'Medium', '3': 'Fast' };
+  clientSlider.addEventListener('input', () => { clientSpeedEl.textContent = speedLabels[clientSlider.value]; });
+
+  let streamInterval = null;
+  document.getElementById('runStreamBtn').addEventListener('click', () => {
+    if (streamInterval) { clearInterval(streamInterval); }
+    const speed = parseInt(clientSlider.value);
+    const srcBuf = document.getElementById('srcBuffer');
+    const filterBuf = document.getElementById('filterBuffer');
+    const clientBuf = document.getElementById('clientBuffer');
+    const indicator = document.getElementById('bpIndicator');
+    const srcRate = document.getElementById('srcRate');
+    const filterRate = document.getElementById('filterRate');
+    const clientRate = document.getElementById('clientRate');
+    const streamSrc = document.getElementById('streamSource');
+    const streamFilter = document.getElementById('streamFilter');
+    const streamClient = document.getElementById('streamClient');
+
+    // Init buffers
+    [srcBuf, filterBuf, clientBuf].forEach(b => {
+      b.innerHTML = '<div class="node-buffer-fill" style="width:0%"></div>';
+    });
+
+    let srcLevel = 0, filterLevel = 0, clientLevel = 0;
+    const produceRate = 10;
+    const consumeRates = { 1: 3, 2: 7, 3: 12 };
+
+    let tick = 0;
+    streamInterval = setInterval(() => {
+      tick++;
+      // Source produces
+      srcLevel = Math.min(100, srcLevel + produceRate);
+      // Filter consumes from source, produces to client buffer
+      const filterTake = Math.min(srcLevel, 8);
+      srcLevel -= filterTake;
+      filterLevel = Math.min(100, filterLevel + filterTake);
+      // Client consumes
+      const clientTake = Math.min(filterLevel, consumeRates[speed]);
+      filterLevel -= clientTake;
+      clientLevel = Math.min(100, clientLevel + clientTake);
+      // Drain client
+      clientLevel = Math.max(0, clientLevel - consumeRates[speed]);
+
+      srcBuf.querySelector('.node-buffer-fill').style.width = srcLevel + '%';
+      filterBuf.querySelector('.node-buffer-fill').style.width = filterLevel + '%';
+      clientBuf.querySelector('.node-buffer-fill').style.width = clientLevel + '%';
+
+      srcRate.textContent = `${produceRate} chunks/s`;
+      filterRate.textContent = `${filterTake} chunks/s`;
+      clientRate.textContent = `${consumeRates[speed]} chunks/s`;
+
+      // Backpressure
+      [streamSrc, streamFilter, streamClient].forEach(n => n.classList.remove('busy','blocked'));
+      if (filterLevel > 80) {
+        streamFilter.classList.add('busy');
+        indicator.textContent = '⚠️ Backpressure: filter buffer filling up';
+        indicator.className = 'backpressure-indicator bp-slow';
+        // slow down source
+        if (filterLevel > 95) {
+          streamSrc.classList.add('blocked');
+          indicator.textContent = '🛑 Source BLOCKED — waiting for downstream';
+          indicator.className = 'backpressure-indicator bp-blocked';
+          srcLevel = Math.max(0, srcLevel - 5);
+        }
+      } else {
+        indicator.textContent = '✅ Normal flow — all processors running';
+        indicator.className = 'backpressure-indicator bp-normal';
+      }
+
+      if (tick > 100) { clearInterval(streamInterval); streamInterval = null; }
+    }, 200);
+  });
+
+  // ===== EXPLAIN cards toggle =====
+  document.querySelectorAll('.explain-card').forEach(card => {
+    card.addEventListener('click', () => {
+      card.classList.toggle('expanded');
+    });
+  });
+</script>
+</BaseLayout>

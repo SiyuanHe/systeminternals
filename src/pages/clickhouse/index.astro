@@ -5,12 +5,13 @@ const topics = [
   { title: "MergeTree Engine", description: "Parts, merges, sparse indexes, and column-oriented storage", href: "/clickhouse/mergetree/", status: "live" },
   { title: "Distributed Tables", description: "Sharding, replication, and cross-shard queries", href: "/clickhouse/distributed-tables/", status: "live" },
   { title: "Materialized Views", description: "Real-time aggregation pipelines and projection chains", href: "/clickhouse/materialized-views/", status: "live" },
-  { title: "Query Execution Pipeline", description: "Vectorized execution, parallel processing, and pipeline stages", href: "#", status: "coming" },
+  { title: "Query Execution Pipeline", description: "Parsing, processor DAG, parallel reads, two-level aggregation, and backpressure", href: "/clickhouse/query-execution/", status: "live" },
   { title: "Data Compression", description: "Codec stacking, per-column compression, and storage efficiency", href: "#", status: "coming" },
   { title: "Joins & Dictionaries", description: "Hash joins, external dictionaries, and lookup strategies", href: "#", status: "coming" },
   { title: "Buffer & Kafka Engines", description: "Streaming ingestion and buffered writes", href: "#", status: "coming" },
-  { title: "ReplicatedMergeTree", description: "ZooKeeper coordination, insert deduplication, and quorum writes", href: "#", status: "coming" },
+  { title: "ReplicatedMergeTree", description: "ZooKeeper coordination, insert deduplication, and quorum writes", href: "/clickhouse/replicated-mergetree/", status: "live" },
   { title: "Mutations & ALTER", description: "Lazy column mutations, lightweight deletes, and TTL", href: "#", status: "coming" },
+  { title: "ClickHouse vs DuckDB", description: "Architecture comparison, benchmarks, and when to use each columnar engine", href: "/clickhouse/vs-duckdb/", status: "live" },
   { title: "Performance Tuning", description: "Profiling queries, system tables, and optimization patterns", href: "#", status: "coming" },
 ];
 ---

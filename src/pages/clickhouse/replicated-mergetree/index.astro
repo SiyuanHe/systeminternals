@@ -1,0 +1,825 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="ReplicatedMergeTree: ZooKeeper Coordination, Deduplication & Quorum Writes"
+  description="Interactive visualization of ClickHouse ReplicatedMergeTree internals: ZooKeeper log, insert deduplication, quorum writes, replica recovery, and part fetching"
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "ClickHouse", href: "/clickhouse/" },
+    { label: "ReplicatedMergeTree", href: "/clickhouse/replicated-mergetree/" }
+  ]}
+>
+<div class="viz-container">
+  <header class="viz-header">
+    <h1>🔄 ReplicatedMergeTree</h1>
+    <p class="subtitle">ZooKeeper Coordination, Insert Deduplication & Quorum Writes</p>
+  </header>
+
+  <section class="overview-section">
+    <div class="overview-card">
+      <p>
+        <strong>ReplicatedMergeTree</strong> is ClickHouse's built-in replication engine. Unlike Kafka or Cassandra which
+        replicate at the storage layer, ClickHouse replicates at the <em>log level</em> — each replica independently
+        applies the same ordered sequence of operations (INSERT, MERGE, MUTATE) coordinated through
+        <strong>ZooKeeper</strong> (or ClickHouse Keeper). This means replicas are <em>eventually identical</em>:
+        they all converge to the same set of parts, even if they apply operations at different speeds.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== Section 1: Replication Architecture ===== -->
+  <section class="demo-section">
+    <h2>🏗️ How Replication Works</h2>
+    <p class="section-desc">INSERT hits one replica, which writes the log entry to ZooKeeper. Other replicas see the entry and fetch the part. Click "Insert" to watch the flow.</p>
+
+    <div class="controls-section">
+      <div class="control-group">
+        <button id="insertReplicaBtn" class="action-btn insert-btn">✏️ INSERT Data</button>
+        <button id="insertMultiBtn" class="action-btn insert-btn-secondary">⚡ INSERT ×3</button>
+        <button id="failReplicaBtn" class="action-btn danger-btn">💥 Fail Replica 3</button>
+        <button id="recoverBtn" class="action-btn merge-action-btn">🔧 Recover Replica 3</button>
+        <button id="resetReplicationBtn" class="action-btn reset-btn">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="replication-viz" id="replicationViz">
+      <canvas id="replicationCanvas" width="900" height="420"></canvas>
+    </div>
+
+    <div class="log-section">
+      <h3>📜 Replication Log</h3>
+      <div class="log-container" id="replicationLog">
+        <div class="log-entry">System ready. Click "INSERT Data" to begin.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Section 2: ZooKeeper Path Structure ===== -->
+  <section class="demo-section">
+    <h2>🌲 ZooKeeper Path Structure</h2>
+    <p class="section-desc">Each replicated table creates a tree of znodes. Click any node to see what it stores.</p>
+
+    <div class="zk-tree" id="zkTree"></div>
+    <div class="zk-detail" id="zkDetail">
+      <div class="zk-detail-placeholder">Click a ZooKeeper node to inspect its contents</div>
+    </div>
+  </section>
+
+  <!-- ===== Section 3: Insert Deduplication ===== -->
+  <section class="demo-section">
+    <h2>🔑 Insert Deduplication</h2>
+    <p class="section-desc">ClickHouse computes a hash of each inserted block. Retried inserts with the same hash are silently deduplicated. Try inserting the same data twice.</p>
+
+    <div class="controls-section">
+      <div class="control-group">
+        <button id="dedupInsertBtn" class="action-btn insert-btn">✏️ Insert Block A</button>
+        <button id="dedupRetryBtn" class="action-btn insert-btn-secondary">🔁 Retry Block A</button>
+        <button id="dedupNewBtn" class="action-btn merge-action-btn">✏️ Insert Block B</button>
+        <button id="resetDedupBtn" class="action-btn reset-btn">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="dedup-viz">
+      <div class="dedup-panel">
+        <h3>Block Hash Log</h3>
+        <div class="hash-log" id="hashLog"></div>
+      </div>
+      <div class="dedup-panel">
+        <h3>Parts on Disk</h3>
+        <div class="parts-list" id="dedupParts"></div>
+      </div>
+      <div class="dedup-panel">
+        <h3>Dedup Stats</h3>
+        <div class="dedup-stats" id="dedupStats">
+          <div class="stat"><span class="stat-label">Inserts Attempted</span><span class="stat-value" id="dedupAttempted">0</span></div>
+          <div class="stat"><span class="stat-label">Deduplicated</span><span class="stat-value" id="dedupSkipped">0</span></div>
+          <div class="stat"><span class="stat-label">Parts Written</span><span class="stat-value" id="dedupWritten">0</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Section 4: Quorum Writes ===== -->
+  <section class="demo-section">
+    <h2>✅ Quorum Writes</h2>
+    <p class="section-desc">With <code>insert_quorum = N</code>, an INSERT only succeeds after N replicas confirm they have the part. Adjust the quorum size and watch what happens.</p>
+
+    <div class="controls-section">
+      <div class="control-group">
+        <div class="slider-group">
+          <label>Replicas: <strong id="quorumReplicaLabel">3</strong></label>
+          <input type="range" id="quorumReplicaSlider" min="2" max="5" value="3" class="slot-slider">
+        </div>
+        <div class="slider-group">
+          <label>Quorum: <strong id="quorumSizeLabel">2</strong></label>
+          <input type="range" id="quorumSizeSlider" min="1" max="5" value="2" class="slot-slider">
+        </div>
+      </div>
+      <div class="control-group">
+        <button id="quorumInsertBtn" class="action-btn insert-btn">✏️ Quorum INSERT</button>
+        <button id="quorumFailBtn" class="action-btn danger-btn">💥 Kill One Replica</button>
+        <button id="resetQuorumBtn" class="action-btn reset-btn">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="quorum-viz">
+      <canvas id="quorumCanvas" width="900" height="300"></canvas>
+    </div>
+    <div class="quorum-status" id="quorumStatus"></div>
+  </section>
+
+  <!-- ===== Section 5: Replica Sync & Recovery ===== -->
+  <section class="demo-section">
+    <h2>🔧 Replica Recovery</h2>
+    <p class="section-desc">When a replica comes back online, it reads the ZooKeeper log from where it left off and fetches missing parts from active replicas. This is the "catch-up" protocol.</p>
+
+    <div class="recovery-timeline" id="recoveryTimeline">
+      <div class="timeline-header">
+        <div class="timeline-label">ZK Log Pointer</div>
+        <div class="timeline-label">Replica 1 (Leader)</div>
+        <div class="timeline-label">Replica 2 (Active)</div>
+        <div class="timeline-label">Replica 3 (Recovering)</div>
+      </div>
+      <div class="timeline-entries" id="timelineEntries"></div>
+    </div>
+
+    <div class="controls-section">
+      <button id="playRecoveryBtn" class="action-btn insert-btn">▶️ Play Recovery Scenario</button>
+      <button id="resetRecoveryBtn" class="action-btn reset-btn">↺ Reset</button>
+    </div>
+  </section>
+
+  <!-- ===== Section 6: Best Practices ===== -->
+  <section class="demo-section">
+    <h2>💡 Production Tips</h2>
+    <div class="tips-grid">
+      <div class="tip-card">
+        <h4>Use ClickHouse Keeper</h4>
+        <p>Since v22.3+, ClickHouse ships its own Raft-based Keeper — no external ZooKeeper needed. It's lighter, faster, and easier to operate. Use <code>&lt;keeper_server&gt;</code> in config.</p>
+      </div>
+      <div class="tip-card">
+        <h4>insert_quorum = 2</h4>
+        <p>For critical data, set <code>insert_quorum = 2</code> to ensure at least 2 replicas confirm before INSERT succeeds. This prevents data loss if the writer crashes.</p>
+      </div>
+      <div class="tip-card">
+        <h4>Monitor Replication Lag</h4>
+        <p>Query <code>system.replicas</code> and check <code>log_pointer</code> vs <code>log_max_index</code>. Alert when the gap exceeds a threshold — it means a replica is falling behind.</p>
+        <code class="tip-code">SELECT database, table, log_pointer, log_max_index,<br>  log_max_index - log_pointer AS lag<br>FROM system.replicas<br>WHERE lag > 10</code>
+      </div>
+      <div class="tip-card">
+        <h4>Dedup Window</h4>
+        <p>Default dedup keeps the last 100 block hashes (<code>replicated_deduplication_window</code>). Increase for bursty retries, but watch ZK memory. Set <code>replicated_deduplication_window_seconds</code> for time-based expiry.</p>
+      </div>
+      <div class="tip-card">
+        <h4>Avoid Tiny Inserts</h4>
+        <p>Each INSERT creates a part and a ZK log entry. Thousands of small inserts per second overwhelm Keeper. Batch to ≥1000 rows per insert, or use a Buffer table.</p>
+      </div>
+      <div class="tip-card">
+        <h4>ON CLUSTER for DDL</h4>
+        <p>Use <code>ALTER TABLE ... ON CLUSTER</code> to propagate schema changes to all replicas via the DDL queue. Without it, you'd need to run ALTER on each node manually.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Related Pages ===== -->
+  <section class="demo-section">
+    <h2>📚 Related Topics</h2>
+    <div class="related-grid">
+      <a href="/clickhouse/mergetree/" class="related-card">
+        <h4>🌲 MergeTree Engine</h4>
+        <p>How parts, merges, sparse indexes, and compression work under the hood</p>
+      </a>
+      <a href="/clickhouse/distributed-tables/" class="related-card">
+        <h4>🌐 Distributed Tables</h4>
+        <p>Sharding keys, cross-shard queries, and two-level aggregation</p>
+      </a>
+      <a href="/clickhouse/materialized-views/" class="related-card">
+        <h4>📊 Materialized Views</h4>
+        <p>Real-time aggregation pipelines using AggregatingMergeTree</p>
+      </a>
+      <a href="/clickhouse/query-execution/" class="related-card">
+        <h4>⚡ Query Execution</h4>
+        <p>Processor DAG, parallel reads, and the query pipeline</p>
+      </a>
+    </div>
+  </section>
+</div>
+</BaseLayout>
+
+<style>
+  .viz-container { max-width: 960px; margin: 0 auto; }
+  .viz-header { text-align: center; margin-bottom: 48px; }
+  .viz-header h1 { font-size: 2.5rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 1.15rem; }
+
+  .overview-section { margin-bottom: 48px; }
+  .overview-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 24px;
+    line-height: 1.8;
+    color: #ccc;
+    font-size: 1rem;
+  }
+  .overview-card strong { color: #fff; }
+  .overview-card em { color: #7dd3fc; }
+
+  .demo-section {
+    margin-bottom: 56px;
+    padding: 32px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+  }
+  .demo-section h2 { font-size: 1.5rem; font-weight: 600; color: #fff; margin-bottom: 8px; }
+  .section-desc { color: #888; margin-bottom: 20px; line-height: 1.6; }
+
+  .controls-section { margin-bottom: 20px; }
+  .control-group { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+
+  .action-btn {
+    padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+    font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
+  }
+  .insert-btn { background: #22c55e; color: #000; }
+  .insert-btn:hover { background: #16a34a; }
+  .insert-btn-secondary { background: #3b82f6; color: #fff; }
+  .insert-btn-secondary:hover { background: #2563eb; }
+  .merge-action-btn { background: #f59e0b; color: #000; }
+  .merge-action-btn:hover { background: #d97706; }
+  .danger-btn { background: #ef4444; color: #fff; }
+  .danger-btn:hover { background: #dc2626; }
+  .reset-btn { background: rgba(255,255,255,0.1); color: #ccc; }
+  .reset-btn:hover { background: rgba(255,255,255,0.15); }
+
+  .slider-group { display: flex; align-items: center; gap: 8px; }
+  .slider-group label { color: #ccc; font-size: 0.9rem; }
+  .slot-slider { width: 120px; accent-color: #3b82f6; }
+
+  .stat { display: flex; flex-direction: column; align-items: center; padding: 8px 16px; }
+  .stat-label { font-size: 0.75rem; color: #888; text-transform: uppercase; }
+  .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
+
+  .log-section { margin-top: 20px; }
+  .log-section h3 { font-size: 1rem; color: #ccc; margin-bottom: 8px; }
+  .log-container {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px; padding: 12px; max-height: 200px; overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
+  }
+  .log-entry { color: #888; padding: 2px 0; }
+  .log-entry.success { color: #22c55e; }
+  .log-entry.warn { color: #f59e0b; }
+  .log-entry.error { color: #ef4444; }
+  .log-entry.info { color: #3b82f6; }
+
+  #replicationCanvas, #quorumCanvas {
+    width: 100%; border-radius: 8px;
+    background: rgba(0,0,0,0.2);
+  }
+
+  /* ZK Tree */
+  .zk-tree {
+    display: flex; flex-direction: column; gap: 2px;
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 16px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem;
+    margin-bottom: 12px;
+  }
+  .zk-node {
+    padding: 4px 8px; color: #7dd3fc; cursor: pointer; border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .zk-node:hover { background: rgba(125,211,252,0.1); }
+  .zk-node.selected { background: rgba(125,211,252,0.15); color: #fff; }
+  .zk-detail {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px; padding: 16px; min-height: 80px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; color: #ccc;
+  }
+  .zk-detail-placeholder { color: #666; }
+
+  /* Dedup */
+  .dedup-viz { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .dedup-panel {
+    background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .dedup-panel h3 { font-size: 0.9rem; color: #ccc; margin-bottom: 12px; }
+  .hash-log, .parts-list { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; color: #888; }
+  .dedup-stats .stat { padding: 4px 0; }
+
+  /* Quorum */
+  .quorum-viz { margin-bottom: 12px; }
+  .quorum-status {
+    text-align: center; padding: 8px; font-size: 0.9rem; color: #888;
+    background: rgba(0,0,0,0.2); border-radius: 8px;
+  }
+
+  /* Recovery Timeline */
+  .recovery-timeline {
+    background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px;
+    border: 1px solid rgba(255,255,255,0.06); overflow-x: auto;
+  }
+  .timeline-header {
+    display: grid; grid-template-columns: 120px 1fr 1fr 1fr;
+    gap: 8px; margin-bottom: 12px;
+  }
+  .timeline-label { font-size: 0.75rem; color: #888; text-transform: uppercase; font-weight: 600; text-align: center; }
+  .timeline-entries { display: flex; flex-direction: column; gap: 4px; }
+  .timeline-row {
+    display: grid; grid-template-columns: 120px 1fr 1fr 1fr; gap: 8px; align-items: center;
+  }
+  .timeline-cell {
+    text-align: center; padding: 6px; border-radius: 4px; font-size: 0.8rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .cell-synced { background: rgba(34,197,94,0.15); color: #22c55e; }
+  .cell-behind { background: rgba(245,158,11,0.15); color: #f59e0b; }
+  .cell-down { background: rgba(239,68,68,0.15); color: #ef4444; }
+  .cell-fetching { background: rgba(59,130,246,0.15); color: #3b82f6; }
+
+  /* Tips */
+  .tips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .tip-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 20px;
+  }
+  .tip-card h4 { color: #fff; margin-bottom: 8px; font-size: 1rem; }
+  .tip-card p { color: #888; font-size: 0.9rem; line-height: 1.6; }
+  .tip-card code { color: #7dd3fc; font-size: 0.85rem; }
+  .tip-code { display: block; margin-top: 8px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; line-height: 1.5; }
+
+  /* Related */
+  .related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+  .related-card {
+    display: block; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 20px; text-decoration: none; transition: all 0.2s;
+  }
+  .related-card:hover { border-color: rgba(125,211,252,0.3); background: rgba(255,255,255,0.05); }
+  .related-card h4 { color: #fff; margin-bottom: 6px; }
+  .related-card p { color: #888; font-size: 0.85rem; line-height: 1.5; }
+
+  @media (max-width: 768px) {
+    .dedup-viz { grid-template-columns: 1fr; }
+    .timeline-header, .timeline-row { grid-template-columns: 80px 1fr 1fr 1fr; }
+  }
+</style>
+
+<script>
+  // ==========================================
+  // Section 1: Replication Architecture Canvas
+  // ==========================================
+  const repCanvas = document.getElementById('replicationCanvas') as HTMLCanvasElement;
+  const repCtx = repCanvas.getContext('2d')!;
+  const repLog = document.getElementById('replicationLog')!;
+
+  interface Replica { x: number; y: number; label: string; parts: string[]; alive: boolean; }
+  interface ZKEntry { id: string; op: string; ts: number; }
+
+  const DPR = window.devicePixelRatio || 1;
+  repCanvas.width = 900 * DPR;
+  repCanvas.height = 420 * DPR;
+  repCtx.scale(DPR, DPR);
+
+  let replicas: Replica[] = [
+    { x: 150, y: 320, label: 'Replica 1 (Leader)', parts: [], alive: true },
+    { x: 450, y: 320, label: 'Replica 2', parts: [], alive: true },
+    { x: 750, y: 320, label: 'Replica 3', parts: [], alive: true },
+  ];
+  const zkPos = { x: 450, y: 80 };
+  let zkLog: ZKEntry[] = [];
+  let animations: { from: {x:number,y:number}; to: {x:number,y:number}; progress: number; label: string; color: string; }[] = [];
+  let partCounter = 0;
+
+  function addRepLog(msg: string, cls = '') {
+    const el = document.createElement('div');
+    el.className = 'log-entry ' + cls;
+    el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    repLog.appendChild(el);
+    repLog.scrollTop = repLog.scrollHeight;
+  }
+
+  function drawReplication() {
+    repCtx.clearRect(0, 0, 900, 420);
+
+    // ZooKeeper box
+    repCtx.fillStyle = 'rgba(125,211,252,0.1)';
+    repCtx.strokeStyle = 'rgba(125,211,252,0.4)';
+    repCtx.lineWidth = 2;
+    repCtx.beginPath();
+    repCtx.roundRect(zkPos.x - 80, zkPos.y - 30, 160, 60, 10);
+    repCtx.fill(); repCtx.stroke();
+    repCtx.fillStyle = '#7dd3fc';
+    repCtx.font = '14px system-ui';
+    repCtx.textAlign = 'center';
+    repCtx.fillText('🌲 ZooKeeper', zkPos.x, zkPos.y - 5);
+    repCtx.fillStyle = '#888';
+    repCtx.font = '11px system-ui';
+    repCtx.fillText(`Log entries: ${zkLog.length}`, zkPos.x, zkPos.y + 15);
+
+    // Lines from ZK to replicas
+    for (const r of replicas) {
+      repCtx.strokeStyle = r.alive ? 'rgba(255,255,255,0.1)' : 'rgba(239,68,68,0.2)';
+      repCtx.lineWidth = 1;
+      repCtx.setLineDash([4, 4]);
+      repCtx.beginPath();
+      repCtx.moveTo(zkPos.x, zkPos.y + 30);
+      repCtx.lineTo(r.x, r.y - 45);
+      repCtx.stroke();
+      repCtx.setLineDash([]);
+    }
+
+    // Replicas
+    for (const r of replicas) {
+      const bgColor = r.alive ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
+      const borderColor = r.alive ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)';
+      repCtx.fillStyle = bgColor;
+      repCtx.strokeStyle = borderColor;
+      repCtx.lineWidth = 2;
+      repCtx.beginPath();
+      repCtx.roundRect(r.x - 70, r.y - 45, 140, 90, 10);
+      repCtx.fill(); repCtx.stroke();
+
+      repCtx.fillStyle = r.alive ? '#22c55e' : '#ef4444';
+      repCtx.font = 'bold 12px system-ui';
+      repCtx.textAlign = 'center';
+      repCtx.fillText(r.label, r.x, r.y - 20);
+
+      repCtx.fillStyle = '#888';
+      repCtx.font = '11px SF Mono, monospace';
+      repCtx.fillText(`Parts: [${r.parts.slice(-3).join(', ')}]`, r.x, r.y + 2);
+      repCtx.fillText(r.alive ? '● Online' : '✕ Offline', r.x, r.y + 22);
+    }
+
+    // Animations
+    for (const a of animations) {
+      const cx = a.from.x + (a.to.x - a.from.x) * a.progress;
+      const cy = a.from.y + (a.to.y - a.from.y) * a.progress;
+      repCtx.fillStyle = a.color;
+      repCtx.beginPath();
+      repCtx.arc(cx, cy, 6, 0, Math.PI * 2);
+      repCtx.fill();
+      repCtx.fillStyle = '#fff';
+      repCtx.font = '9px system-ui';
+      repCtx.textAlign = 'center';
+      repCtx.fillText(a.label, cx, cy - 10);
+    }
+  }
+
+  function animate() {
+    let active = false;
+    for (const a of animations) {
+      if (a.progress < 1) { a.progress = Math.min(1, a.progress + 0.02); active = true; }
+    }
+    drawReplication();
+    if (active) requestAnimationFrame(animate);
+  }
+
+  function doInsert() {
+    partCounter++;
+    const partName = `part_${partCounter}`;
+    const target = replicas[0]; // Leader receives insert
+
+    // 1. Write to leader
+    target.parts.push(partName);
+    addRepLog(`INSERT → ${target.label}: created ${partName}`, 'success');
+
+    // 2. Log to ZK
+    zkLog.push({ id: partName, op: 'get_part', ts: Date.now() });
+    animations.push({
+      from: { x: target.x, y: target.y - 45 },
+      to: { x: zkPos.x, y: zkPos.y + 30 },
+      progress: 0, label: 'log', color: '#7dd3fc'
+    });
+    addRepLog(`ZK log entry: get_part(${partName})`, 'info');
+
+    // 3. Replicas fetch (after delay)
+    setTimeout(() => {
+      for (let i = 1; i < replicas.length; i++) {
+        const r = replicas[i];
+        if (!r.alive) {
+          addRepLog(`${r.label}: OFFLINE — skipped fetch`, 'error');
+          continue;
+        }
+        r.parts.push(partName);
+        animations.push({
+          from: { x: target.x, y: target.y },
+          to: { x: r.x, y: r.y },
+          progress: 0, label: partName, color: '#22c55e'
+        });
+        addRepLog(`${r.label}: fetched ${partName} from leader`, 'success');
+      }
+      drawReplication();
+      requestAnimationFrame(animate);
+    }, 600);
+
+    drawReplication();
+    requestAnimationFrame(animate);
+  }
+
+  document.getElementById('insertReplicaBtn')!.addEventListener('click', doInsert);
+  document.getElementById('insertMultiBtn')!.addEventListener('click', () => {
+    doInsert(); setTimeout(doInsert, 800); setTimeout(doInsert, 1600);
+  });
+  document.getElementById('failReplicaBtn')!.addEventListener('click', () => {
+    replicas[2].alive = false;
+    addRepLog('Replica 3 is DOWN!', 'error');
+    drawReplication();
+  });
+  document.getElementById('recoverBtn')!.addEventListener('click', () => {
+    replicas[2].alive = true;
+    // Catch up missing parts
+    const leaderParts = replicas[0].parts;
+    const missing = leaderParts.filter(p => !replicas[2].parts.includes(p));
+    addRepLog(`Replica 3 recovering — ${missing.length} parts to fetch`, 'warn');
+    missing.forEach((p, i) => {
+      setTimeout(() => {
+        replicas[2].parts.push(p);
+        animations.push({
+          from: { x: replicas[0].x, y: replicas[0].y },
+          to: { x: replicas[2].x, y: replicas[2].y },
+          progress: 0, label: p, color: '#f59e0b'
+        });
+        addRepLog(`Replica 3: fetched ${p} (catch-up)`, 'warn');
+        drawReplication();
+        requestAnimationFrame(animate);
+      }, (i + 1) * 400);
+    });
+    drawReplication();
+  });
+  document.getElementById('resetReplicationBtn')!.addEventListener('click', () => {
+    replicas = [
+      { x: 150, y: 320, label: 'Replica 1 (Leader)', parts: [], alive: true },
+      { x: 450, y: 320, label: 'Replica 2', parts: [], alive: true },
+      { x: 750, y: 320, label: 'Replica 3', parts: [], alive: true },
+    ];
+    zkLog = []; animations = []; partCounter = 0;
+    repLog.innerHTML = '<div class="log-entry">System reset. Click "INSERT Data" to begin.</div>';
+    drawReplication();
+  });
+
+  drawReplication();
+
+  // ==========================================
+  // Section 2: ZooKeeper Path Structure
+  // ==========================================
+  const zkPaths: Record<string, string> = {
+    '/clickhouse/tables/01/events': 'Table root — contains metadata for the "events" ReplicatedMergeTree table on shard 01.',
+    '/clickhouse/tables/01/events/metadata': '{\n  "engine": "ReplicatedMergeTree",\n  "columns": "event_date Date, user_id UInt64, event String, ...",\n  "primary_key": "event_date, user_id"\n}',
+    '/clickhouse/tables/01/events/log': 'Ordered list of replication operations. Each entry is: LogEntry { type: get_part | merge_parts | mutate_part, part_name, ... }',
+    '/clickhouse/tables/01/events/log/log-0000000001': '{ "type": "get_part", "source": "replica1", "part_name": "20260329_1_1_0", "create_time": "2026-03-29 09:00:00" }',
+    '/clickhouse/tables/01/events/log/log-0000000002': '{ "type": "merge_parts", "source": "replica1", "parts": ["20260329_1_1_0", "20260329_2_2_0"], "result_part": "20260329_1_2_1" }',
+    '/clickhouse/tables/01/events/replicas': 'List of replicas registered for this table shard.',
+    '/clickhouse/tables/01/events/replicas/replica1': 'Replica metadata for replica1.',
+    '/clickhouse/tables/01/events/replicas/replica1/log_pointer': '"2" — this replica has processed up to log entry #2. Compared with /log max to detect lag.',
+    '/clickhouse/tables/01/events/replicas/replica1/parts': 'Set of parts currently held by replica1.',
+    '/clickhouse/tables/01/events/replicas/replica2': 'Replica metadata for replica2.',
+    '/clickhouse/tables/01/events/replicas/replica2/log_pointer': '"2" — in sync with replica1.',
+    '/clickhouse/tables/01/events/block_numbers': 'Monotonic block number allocator. Each INSERT increments this to get a unique part name prefix.',
+    '/clickhouse/tables/01/events/blocks': 'Hash → part_name map for deduplication. When INSERT arrives, hash is checked here first.',
+    '/clickhouse/tables/01/events/quorum': 'Tracks in-progress quorum inserts. Contains part name waiting for quorum acknowledgment.',
+    '/clickhouse/tables/01/events/leader_election': 'Ephemeral node — whichever replica creates this first becomes leader. Leader assigns merges.',
+  };
+
+  const zkTreeEl = document.getElementById('zkTree')!;
+  const zkDetailEl = document.getElementById('zkDetail')!;
+
+  function renderZkTree() {
+    zkTreeEl.innerHTML = '';
+    const sorted = Object.keys(zkPaths).sort();
+    for (const path of sorted) {
+      const depth = (path.match(/\//g) || []).length - 1;
+      const label = path.split('/').pop()!;
+      const el = document.createElement('div');
+      el.className = 'zk-node';
+      el.style.paddingLeft = `${depth * 20 + 8}px`;
+      el.textContent = (depth > 0 ? '├── ' : '') + label;
+      el.dataset.path = path;
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.zk-node').forEach(n => n.classList.remove('selected'));
+        el.classList.add('selected');
+        zkDetailEl.innerHTML = `<div style="color:#7dd3fc;margin-bottom:8px;">${path}</div><pre style="color:#ccc;white-space:pre-wrap;">${zkPaths[path]}</pre>`;
+      });
+      zkTreeEl.appendChild(el);
+    }
+  }
+  renderZkTree();
+
+  // ==========================================
+  // Section 3: Insert Deduplication
+  // ==========================================
+  let dedupHashes: { hash: string; block: string; accepted: boolean }[] = [];
+  let dedupPartsList: string[] = [];
+  let dedupAttempted = 0;
+  let dedupSkipped = 0;
+
+  const hashLogEl = document.getElementById('hashLog')!;
+  const dedupPartsEl = document.getElementById('dedupParts')!;
+
+  function blockHash(name: string) {
+    // Simulated hash
+    let h = 0;
+    for (let i = 0; i < name.length; i++) { h = ((h << 5) - h + name.charCodeAt(i)) | 0; }
+    return 'hash_' + Math.abs(h).toString(16).padStart(8, '0');
+  }
+
+  function updateDedupUI() {
+    hashLogEl.innerHTML = dedupHashes.map(h =>
+      `<div style="color:${h.accepted ? '#22c55e' : '#ef4444'}">${h.hash} → ${h.block} ${h.accepted ? '✓' : '(dedup!)'}</div>`
+    ).join('');
+    dedupPartsEl.innerHTML = dedupPartsList.map(p =>
+      `<div style="color:#7dd3fc">📦 ${p}</div>`
+    ).join('') || '<div style="color:#666">No parts yet</div>';
+    document.getElementById('dedupAttempted')!.textContent = String(dedupAttempted);
+    document.getElementById('dedupSkipped')!.textContent = String(dedupSkipped);
+    document.getElementById('dedupWritten')!.textContent = String(dedupPartsList.length);
+  }
+
+  function dedupInsert(blockName: string) {
+    dedupAttempted++;
+    const hash = blockHash(blockName);
+    const exists = dedupHashes.some(h => h.hash === hash && h.accepted);
+    if (exists) {
+      dedupSkipped++;
+      dedupHashes.push({ hash, block: blockName, accepted: false });
+    } else {
+      dedupHashes.push({ hash, block: blockName, accepted: true });
+      dedupPartsList.push(blockName);
+    }
+    updateDedupUI();
+  }
+
+  document.getElementById('dedupInsertBtn')!.addEventListener('click', () => dedupInsert('block_A'));
+  document.getElementById('dedupRetryBtn')!.addEventListener('click', () => dedupInsert('block_A'));
+  document.getElementById('dedupNewBtn')!.addEventListener('click', () => dedupInsert('block_B_' + Date.now()));
+  document.getElementById('resetDedupBtn')!.addEventListener('click', () => {
+    dedupHashes = []; dedupPartsList = []; dedupAttempted = 0; dedupSkipped = 0;
+    updateDedupUI();
+  });
+  updateDedupUI();
+
+  // ==========================================
+  // Section 4: Quorum Writes Canvas
+  // ==========================================
+  const qCanvas = document.getElementById('quorumCanvas') as HTMLCanvasElement;
+  const qCtx = qCanvas.getContext('2d')!;
+  qCanvas.width = 900 * DPR; qCanvas.height = 300 * DPR; qCtx.scale(DPR, DPR);
+  const qStatus = document.getElementById('quorumStatus')!;
+
+  let qReplicas = 3;
+  let qQuorum = 2;
+  let qStates: ('idle' | 'writing' | 'ack' | 'down')[] = [];
+  let qInsertResult = '';
+
+  function initQuorum() {
+    qStates = Array(qReplicas).fill('idle');
+    qInsertResult = '';
+    drawQuorum();
+    qStatus.textContent = `Quorum: ${qQuorum} of ${qReplicas} replicas must acknowledge. Ready.`;
+  }
+
+  function drawQuorum() {
+    qCtx.clearRect(0, 0, 900, 300);
+    const spacing = 900 / (qReplicas + 1);
+
+    // Client
+    qCtx.fillStyle = 'rgba(168,85,247,0.15)';
+    qCtx.strokeStyle = 'rgba(168,85,247,0.5)';
+    qCtx.lineWidth = 2;
+    qCtx.beginPath(); qCtx.roundRect(400, 20, 100, 40, 8); qCtx.fill(); qCtx.stroke();
+    qCtx.fillStyle = '#a855f7'; qCtx.font = '13px system-ui'; qCtx.textAlign = 'center';
+    qCtx.fillText('Client', 450, 45);
+
+    for (let i = 0; i < qReplicas; i++) {
+      const x = spacing * (i + 1);
+      const y = 200;
+      const colors: Record<string, { bg: string; border: string; text: string }> = {
+        idle: { bg: 'rgba(255,255,255,0.05)', border: 'rgba(255,255,255,0.2)', text: '#888' },
+        writing: { bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.5)', text: '#3b82f6' },
+        ack: { bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.5)', text: '#22c55e' },
+        down: { bg: 'rgba(239,68,68,0.15)', border: 'rgba(239,68,68,0.5)', text: '#ef4444' },
+      };
+      const c = colors[qStates[i]];
+
+      // Line from client
+      qCtx.strokeStyle = c.border; qCtx.lineWidth = 1; qCtx.setLineDash([3, 3]);
+      qCtx.beginPath(); qCtx.moveTo(450, 60); qCtx.lineTo(x, y - 30); qCtx.stroke();
+      qCtx.setLineDash([]);
+
+      // Replica box
+      qCtx.fillStyle = c.bg; qCtx.strokeStyle = c.border; qCtx.lineWidth = 2;
+      qCtx.beginPath(); qCtx.roundRect(x - 50, y - 30, 100, 60, 8); qCtx.fill(); qCtx.stroke();
+      qCtx.fillStyle = c.text; qCtx.font = 'bold 12px system-ui';
+      qCtx.fillText(`Replica ${i + 1}`, x, y - 5);
+      qCtx.font = '11px system-ui';
+      const stateText = { idle: '● Idle', writing: '⏳ Writing…', ack: '✓ ACK', down: '✕ Down' };
+      qCtx.fillText(stateText[qStates[i]], x, y + 15);
+    }
+
+    // Result
+    if (qInsertResult) {
+      const isSuccess = qInsertResult.includes('SUCCESS');
+      qCtx.fillStyle = isSuccess ? '#22c55e' : '#ef4444';
+      qCtx.font = 'bold 14px system-ui';
+      qCtx.fillText(qInsertResult, 450, 280);
+    }
+  }
+
+  const qReplicaSlider = document.getElementById('quorumReplicaSlider') as HTMLInputElement;
+  const qQuorumSlider = document.getElementById('quorumSizeSlider') as HTMLInputElement;
+  qReplicaSlider.addEventListener('input', () => {
+    qReplicas = +qReplicaSlider.value;
+    document.getElementById('quorumReplicaLabel')!.textContent = String(qReplicas);
+    qQuorumSlider.max = String(qReplicas);
+    if (qQuorum > qReplicas) { qQuorum = qReplicas; qQuorumSlider.value = String(qQuorum); document.getElementById('quorumSizeLabel')!.textContent = String(qQuorum); }
+    initQuorum();
+  });
+  qQuorumSlider.addEventListener('input', () => {
+    qQuorum = +qQuorumSlider.value;
+    document.getElementById('quorumSizeLabel')!.textContent = String(qQuorum);
+    initQuorum();
+  });
+
+  document.getElementById('quorumInsertBtn')!.addEventListener('click', () => {
+    qStates = Array(qReplicas).fill('writing');
+    qInsertResult = '';
+    drawQuorum();
+    let acks = 0;
+    for (let i = 0; i < qReplicas; i++) {
+      if (qStates[i] === 'down') continue;
+      setTimeout(() => {
+        if (qStates[i] === 'down') return;
+        qStates[i] = 'ack';
+        acks++;
+        if (acks === qQuorum && !qInsertResult) {
+          qInsertResult = `✅ SUCCESS — quorum reached (${acks}/${qReplicas})`;
+        }
+        drawQuorum();
+      }, 500 + Math.random() * 1500);
+    }
+    // Timeout check
+    setTimeout(() => {
+      if (!qInsertResult) {
+        const ackCount = qStates.filter(s => s === 'ack').length;
+        qInsertResult = `❌ TIMEOUT — only ${ackCount}/${qQuorum} acks received`;
+        drawQuorum();
+      }
+    }, 3000);
+  });
+
+  document.getElementById('quorumFailBtn')!.addEventListener('click', () => {
+    const alive = qStates.map((s, i) => ({ s, i })).filter(x => x.s !== 'down');
+    if (alive.length > 0) {
+      const victim = alive[alive.length - 1].i;
+      qStates[victim] = 'down';
+      qStatus.textContent = `Replica ${victim + 1} killed. ${alive.length - 1} alive, quorum needs ${qQuorum}.`;
+      drawQuorum();
+    }
+  });
+
+  document.getElementById('resetQuorumBtn')!.addEventListener('click', initQuorum);
+  initQuorum();
+
+  // ==========================================
+  // Section 5: Recovery Timeline
+  // ==========================================
+  const timelineEl = document.getElementById('timelineEntries')!;
+
+  function renderRecovery(steps: { log: string; r1: string; r2: string; r3: string; r1c: string; r2c: string; r3c: string }[]) {
+    timelineEl.innerHTML = '';
+    steps.forEach((s, i) => {
+      setTimeout(() => {
+        const row = document.createElement('div');
+        row.className = 'timeline-row';
+        row.innerHTML = `
+          <div class="timeline-cell" style="color:#7dd3fc;font-weight:600">${s.log}</div>
+          <div class="timeline-cell ${s.r1c}">${s.r1}</div>
+          <div class="timeline-cell ${s.r2c}">${s.r2}</div>
+          <div class="timeline-cell ${s.r3c}">${s.r3}</div>
+        `;
+        timelineEl.appendChild(row);
+      }, i * 600);
+    });
+  }
+
+  const recoverySteps = [
+    { log: 'Log #1', r1: '✓ part_1', r1c: 'cell-synced', r2: '✓ part_1', r2c: 'cell-synced', r3: '✓ part_1', r3c: 'cell-synced' },
+    { log: 'Log #2', r1: '✓ part_2', r1c: 'cell-synced', r2: '✓ part_2', r2c: 'cell-synced', r3: '✓ part_2', r3c: 'cell-synced' },
+    { log: '⚡ Crash', r1: '● online', r1c: 'cell-synced', r2: '● online', r2c: 'cell-synced', r3: '✕ DOWN', r3c: 'cell-down' },
+    { log: 'Log #3', r1: '✓ part_3', r1c: 'cell-synced', r2: '✓ part_3', r2c: 'cell-synced', r3: '✕ missed', r3c: 'cell-down' },
+    { log: 'Log #4', r1: '✓ merge', r1c: 'cell-synced', r2: '✓ merge', r2c: 'cell-synced', r3: '✕ missed', r3c: 'cell-down' },
+    { log: '🔧 Recover', r1: '● online', r1c: 'cell-synced', r2: '● online', r2c: 'cell-synced', r3: '⏳ catching up', r3c: 'cell-fetching' },
+    { log: 'Fetch #3', r1: '● online', r1c: 'cell-synced', r2: '● online', r2c: 'cell-synced', r3: '📥 part_3', r3c: 'cell-fetching' },
+    { log: 'Fetch merge', r1: '● online', r1c: 'cell-synced', r2: '● online', r2c: 'cell-synced', r3: '📥 merged part', r3c: 'cell-fetching' },
+    { log: '✅ Synced', r1: '✓ in sync', r1c: 'cell-synced', r2: '✓ in sync', r2c: 'cell-synced', r3: '✓ in sync', r3c: 'cell-synced' },
+  ];
+
+  document.getElementById('playRecoveryBtn')!.addEventListener('click', () => {
+    timelineEl.innerHTML = '';
+    renderRecovery(recoverySteps);
+  });
+  document.getElementById('resetRecoveryBtn')!.addEventListener('click', () => { timelineEl.innerHTML = ''; });
+</script>
