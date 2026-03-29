@@ -1,0 +1,2106 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Design a Ride-Sharing Service — Interactive Visualization"
+  description="Understand ride-sharing architecture: driver matching, geospatial indexing, ETA calculation, surge pricing. Interactive simulation."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Ride Sharing", href: "/system-design/ride-sharing/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>🚗 Design a Ride-Sharing Service</h1>
+      <p class="subtitle">Driver matching, geospatial indexing, ETA calculation, and surge pricing — interactive exploration</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A ride-sharing service like Uber or Lyft connects <strong>riders</strong> with nearby <strong>drivers</strong> in real time.
+          The core challenges: <strong>efficient driver matching</strong> using geospatial indexes,
+          <strong>accurate ETA calculation</strong> factoring in traffic and road networks,
+          <strong>dynamic surge pricing</strong> to balance supply and demand,
+          and <strong>scaling to millions</strong> of concurrent rides across cities worldwide.
+          This page explores each component interactively.
+        </p>
+        <div class="overview-stats">
+          <div class="stat-item">
+            <span class="stat-value">~20M</span>
+            <span class="stat-label">Daily trips (Uber)</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">&lt;3s</span>
+            <span class="stat-label">Match latency target</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">~5M</span>
+            <span class="stat-label">Active drivers</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">10K+</span>
+            <span class="stat-label">Cities served</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 1: Interactive Map with Driver Matching -->
+    <section class="controls-section">
+      <h2>🗺️ Interactive Map — Driver Matching</h2>
+      <p class="section-desc">Click on the map to place a <strong>rider</strong>, then click <strong>Find Nearest Driver</strong> to watch the matching algorithm in action. Drivers are shown as blue dots. The matched driver highlights green with an animated route.</p>
+      <div class="map-controls">
+        <button id="placeRiderBtn" class="action-btn primary-btn">📍 Place Rider (click map)</button>
+        <button id="matchDriverBtn" class="action-btn primary-btn-secondary" disabled>🔍 Find Nearest Driver</button>
+        <button id="resetMapBtn" class="action-btn primary-btn-secondary">🔄 Reset Map</button>
+        <button id="addDriverBtn" class="action-btn primary-btn-secondary">➕ Add Random Driver</button>
+      </div>
+      <div class="map-wrapper">
+        <canvas id="mapCanvas" width="800" height="500"></canvas>
+        <div id="mapInfo" class="map-info-panel">
+          <div class="info-row"><span class="info-label">Rider Position:</span> <span id="riderPos">Not placed</span></div>
+          <div class="info-row"><span class="info-label">Drivers Nearby:</span> <span id="driverCount">0</span></div>
+          <div class="info-row"><span class="info-label">Matched Driver:</span> <span id="matchedDriver">—</span></div>
+          <div class="info-row"><span class="info-label">Distance:</span> <span id="matchDistance">—</span></div>
+          <div class="info-row"><span class="info-label">Match Time:</span> <span id="matchTime">—</span></div>
+        </div>
+      </div>
+      <div id="distanceList" class="distance-list"></div>
+    </section>
+
+    <!-- Section 2: Geospatial Indexing -->
+    <section class="controls-section">
+      <h2>🌐 Geospatial Indexing Visualization</h2>
+      <p class="section-desc">Ride-sharing services need to quickly find nearby drivers. Two common approaches: <strong>Quadtree</strong> (recursive spatial subdivision) and <strong>Geohash</strong> (hierarchical grid cells with string-based hashing). Toggle between views below.</p>
+      <div class="geo-toggle">
+        <button id="quadtreeViewBtn" class="action-btn toggle-btn active">Quadtree</button>
+        <button id="geohashViewBtn" class="action-btn toggle-btn">Geohash</button>
+      </div>
+      <div class="geo-controls">
+        <button id="addGeoPointBtn" class="action-btn primary-btn-secondary">➕ Add Driver</button>
+        <button id="removeGeoPointBtn" class="action-btn primary-btn-secondary">➖ Remove Last</button>
+        <button id="clearGeoBtn" class="action-btn primary-btn-secondary">🗑️ Clear All</button>
+        <button id="bulkAddBtn" class="action-btn primary-btn">⚡ Add 20 Drivers</button>
+      </div>
+      <div class="geo-wrapper">
+        <canvas id="geoCanvas" width="600" height="600"></canvas>
+        <div class="geo-info-panel">
+          <h4 id="geoInfoTitle">Quadtree Info</h4>
+          <div class="info-row"><span class="info-label">Total Points:</span> <span id="geoPointCount">0</span></div>
+          <div class="info-row"><span class="info-label">Tree Depth:</span> <span id="geoDepth">0</span></div>
+          <div class="info-row"><span class="info-label">Leaf Nodes:</span> <span id="geoLeaves">0</span></div>
+          <div id="geoExplanation" class="geo-explanation">
+            <p><strong>Quadtree:</strong> The space is recursively divided into 4 quadrants. When a quadrant has more than <code>MAX_POINTS</code> drivers, it splits. Searching for nearby drivers only examines relevant quadrants — O(log n) instead of O(n).</p>
+          </div>
+          <div id="geohashInfo" class="geo-explanation" style="display:none;">
+            <p><strong>Geohash:</strong> The map is divided into grid cells, each identified by a base32 string. Nearby locations share common prefixes. To find nearby drivers, query the same cell and its 8 neighbors. Precision level controls cell size.</p>
+            <div class="geohash-precision">
+              <label>Precision Level: <span id="precisionVal">4</span></label>
+              <input type="range" id="precisionSlider" min="2" max="6" value="4" step="1">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: ETA Calculation -->
+    <section class="controls-section">
+      <h2>⏱️ ETA Calculation Pipeline</h2>
+      <p class="section-desc">ETA goes through multiple refinement stages. Drag the <strong>driver</strong> (blue) and <strong>rider</strong> (red) markers on the mini-map. Adjust traffic and road network factors with the sliders to see how ETA changes in real time.</p>
+      <div class="eta-layout">
+        <div class="eta-map-col">
+          <canvas id="etaCanvas" width="400" height="400"></canvas>
+          <div class="eta-positions">
+            <span class="eta-legend driver-legend">● Driver</span>
+            <span class="eta-legend rider-legend">● Rider</span>
+            <span class="eta-note">Drag markers to reposition</span>
+          </div>
+        </div>
+        <div class="eta-pipeline-col">
+          <div class="eta-stage" id="etaStage1">
+            <div class="stage-header">
+              <span class="stage-num">1</span>
+              <span class="stage-title">Straight-Line Distance</span>
+            </div>
+            <div class="stage-value" id="etaStraight">—</div>
+            <div class="stage-desc">Haversine / Euclidean distance between driver and rider</div>
+          </div>
+          <div class="eta-arrow">↓</div>
+          <div class="eta-stage" id="etaStage2">
+            <div class="stage-header">
+              <span class="stage-num">2</span>
+              <span class="stage-title">Road Network Adjustment</span>
+            </div>
+            <div class="stage-value" id="etaRoad">—</div>
+            <div class="stage-desc">
+              Multiply by road factor:
+              <input type="range" id="roadFactor" min="1.1" max="2.0" step="0.1" value="1.4">
+              <span id="roadFactorVal">1.4x</span>
+            </div>
+          </div>
+          <div class="eta-arrow">↓</div>
+          <div class="eta-stage" id="etaStage3">
+            <div class="stage-header">
+              <span class="stage-num">3</span>
+              <span class="stage-title">Traffic Adjustment</span>
+            </div>
+            <div class="stage-value" id="etaTraffic">—</div>
+            <div class="stage-desc">
+              Traffic multiplier:
+              <input type="range" id="trafficFactor" min="1.0" max="3.0" step="0.1" value="1.2">
+              <span id="trafficFactorVal">1.2x</span>
+            </div>
+          </div>
+          <div class="eta-arrow">↓</div>
+          <div class="eta-stage" id="etaStage4">
+            <div class="stage-header">
+              <span class="stage-num">4</span>
+              <span class="stage-title">Historical Data Correction</span>
+            </div>
+            <div class="stage-value" id="etaHistorical">—</div>
+            <div class="stage-desc">
+              ML model correction:
+              <input type="range" id="historicalFactor" min="0.8" max="1.3" step="0.05" value="1.0">
+              <span id="historicalFactorVal">1.0x</span>
+            </div>
+          </div>
+          <div class="eta-arrow">↓</div>
+          <div class="eta-final">
+            <span class="final-label">Final ETA</span>
+            <span class="final-value" id="etaFinal">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: Surge Pricing -->
+    <section class="controls-section">
+      <h2>💰 Surge Pricing Visualization</h2>
+      <p class="section-desc">When demand exceeds supply, surge pricing kicks in. Click on the heat map to <strong>increase demand</strong> in that area. Watch the surge multiplier update dynamically. The formula: <code>surge = max(1.0, demand / supply * weight)</code>.</p>
+      <div class="surge-controls">
+        <button id="surgeResetBtn" class="action-btn primary-btn-secondary">🔄 Reset</button>
+        <button id="surgeRainBtn" class="action-btn primary-btn-secondary">🌧️ Rain Event (+demand)</button>
+        <button id="surgeConcertBtn" class="action-btn primary-btn-secondary">🎵 Concert Ends (+demand)</button>
+        <div class="surge-supply-ctrl">
+          <label>Base Supply Level: <span id="supplyVal">50</span></label>
+          <input type="range" id="supplySlider" min="10" max="100" value="50" step="5">
+        </div>
+      </div>
+      <div class="surge-layout">
+        <div class="surge-map-col">
+          <canvas id="surgeCanvas" width="500" height="500"></canvas>
+          <div class="surge-legend">
+            <span class="legend-item"><span class="legend-color" style="background:#22c55e"></span>1.0x</span>
+            <span class="legend-item"><span class="legend-color" style="background:#eab308"></span>1.5x</span>
+            <span class="legend-item"><span class="legend-color" style="background:#f97316"></span>2.0x</span>
+            <span class="legend-item"><span class="legend-color" style="background:#ef4444"></span>2.5x+</span>
+          </div>
+        </div>
+        <div class="surge-info-col">
+          <div class="surge-stat">
+            <span class="surge-stat-label">Avg Surge Multiplier</span>
+            <span class="surge-stat-value" id="avgSurge">1.0x</span>
+          </div>
+          <div class="surge-stat">
+            <span class="surge-stat-label">Max Surge</span>
+            <span class="surge-stat-value" id="maxSurge">1.0x</span>
+          </div>
+          <div class="surge-stat">
+            <span class="surge-stat-label">Total Demand</span>
+            <span class="surge-stat-value" id="totalDemand">0</span>
+          </div>
+          <div class="surge-stat">
+            <span class="surge-stat-label">Total Supply</span>
+            <span class="surge-stat-value" id="totalSupply">0</span>
+          </div>
+          <div class="surge-formula">
+            <h4>Pricing Formula</h4>
+            <code>base_fare = $2.50 + $1.75/mile + $0.35/min</code><br>
+            <code>final_fare = base_fare × surge_multiplier</code><br>
+            <div class="surge-example" id="surgeExample">
+              <p>Example: 5-mile, 15-min ride</p>
+              <p>Base: $2.50 + $8.75 + $5.25 = <strong>$16.50</strong></p>
+              <p>With 1.0x surge: <strong id="surgeFareExample">$16.50</strong></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 5: Trip Lifecycle State Machine -->
+    <section class="controls-section">
+      <h2>🔄 Trip Lifecycle — State Machine</h2>
+      <p class="section-desc">A ride goes through multiple stages from request to rating. Click <strong>Next Step</strong> to advance through the lifecycle. Each state triggers specific backend operations.</p>
+      <div class="lifecycle-controls">
+        <button id="lifecycleNextBtn" class="action-btn primary-btn">▶ Next Step</button>
+        <button id="lifecycleResetBtn" class="action-btn primary-btn-secondary">🔄 Reset</button>
+        <button id="lifecycleAutoBtn" class="action-btn primary-btn-secondary">⏩ Auto-Play</button>
+      </div>
+      <div class="lifecycle-wrapper">
+        <div class="lifecycle-states">
+          <div class="lc-state" data-state="request" id="lcRequest">
+            <div class="lc-icon">📱</div>
+            <div class="lc-name">Request</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="matching" id="lcMatching">
+            <div class="lc-icon">🔍</div>
+            <div class="lc-name">Matching</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="enroute" id="lcEnroute">
+            <div class="lc-icon">🚗</div>
+            <div class="lc-name">En Route</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="pickup" id="lcPickup">
+            <div class="lc-icon">📍</div>
+            <div class="lc-name">Pickup</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="intrip" id="lcIntrip">
+            <div class="lc-icon">🛣️</div>
+            <div class="lc-name">In Trip</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="dropoff" id="lcDropoff">
+            <div class="lc-icon">🏁</div>
+            <div class="lc-name">Dropoff</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="payment" id="lcPayment">
+            <div class="lc-icon">💳</div>
+            <div class="lc-name">Payment</div>
+          </div>
+          <div class="lc-arrow">→</div>
+          <div class="lc-state" data-state="rating" id="lcRating">
+            <div class="lc-icon">⭐</div>
+            <div class="lc-name">Rating</div>
+          </div>
+        </div>
+        <div class="lc-details" id="lcDetails">
+          <div class="lc-detail-title" id="lcDetailTitle">Click "Next Step" to begin</div>
+          <div class="lc-detail-body" id="lcDetailBody">
+            <p>The trip lifecycle follows a strict state machine. Each transition triggers specific backend operations, notifications, and data updates.</p>
+          </div>
+          <div class="lc-backend-ops" id="lcBackendOps"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 6: Architecture Deep Dive -->
+    <section class="controls-section">
+      <h2>🏗️ Architecture Deep Dive</h2>
+      <p class="section-desc">The ride-sharing platform is composed of many microservices working in concert. Click on any component to learn more about its design and scaling challenges.</p>
+      <div class="arch-diagram">
+        <div class="arch-layer">
+          <div class="arch-layer-label">Client Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node client-node" data-component="rider-app">
+              <div class="arch-node-icon">📱</div>
+              <div class="arch-node-name">Rider App</div>
+            </div>
+            <div class="arch-node client-node" data-component="driver-app">
+              <div class="arch-node-icon">🚗</div>
+              <div class="arch-node-name">Driver App</div>
+            </div>
+          </div>
+        </div>
+        <div class="arch-connector">↕ WebSocket / HTTPS</div>
+        <div class="arch-layer">
+          <div class="arch-layer-label">API Gateway & Load Balancer</div>
+          <div class="arch-nodes">
+            <div class="arch-node gateway-node" data-component="api-gateway">
+              <div class="arch-node-icon">🌐</div>
+              <div class="arch-node-name">API Gateway</div>
+            </div>
+          </div>
+        </div>
+        <div class="arch-connector">↕</div>
+        <div class="arch-layer">
+          <div class="arch-layer-label">Core Services</div>
+          <div class="arch-nodes">
+            <div class="arch-node service-node" data-component="location-service">
+              <div class="arch-node-icon">📡</div>
+              <div class="arch-node-name">Location Tracking</div>
+            </div>
+            <div class="arch-node service-node" data-component="matching-service">
+              <div class="arch-node-icon">🔗</div>
+              <div class="arch-node-name">Matching Engine</div>
+            </div>
+            <div class="arch-node service-node" data-component="dispatch-service">
+              <div class="arch-node-icon">📋</div>
+              <div class="arch-node-name">Dispatch</div>
+            </div>
+            <div class="arch-node service-node" data-component="pricing-service">
+              <div class="arch-node-icon">💲</div>
+              <div class="arch-node-name">Pricing / Surge</div>
+            </div>
+            <div class="arch-node service-node" data-component="eta-service">
+              <div class="arch-node-icon">⏱️</div>
+              <div class="arch-node-name">ETA Service</div>
+            </div>
+            <div class="arch-node service-node" data-component="payment-service">
+              <div class="arch-node-icon">💳</div>
+              <div class="arch-node-name">Payment</div>
+            </div>
+          </div>
+        </div>
+        <div class="arch-connector">↕</div>
+        <div class="arch-layer">
+          <div class="arch-layer-label">Data Layer</div>
+          <div class="arch-nodes">
+            <div class="arch-node data-node" data-component="location-db">
+              <div class="arch-node-icon">🗄️</div>
+              <div class="arch-node-name">Redis (Location Cache)</div>
+            </div>
+            <div class="arch-node data-node" data-component="trip-db">
+              <div class="arch-node-icon">🗃️</div>
+              <div class="arch-node-name">PostgreSQL (Trips)</div>
+            </div>
+            <div class="arch-node data-node" data-component="geo-index">
+              <div class="arch-node-icon">🌍</div>
+              <div class="arch-node-name">Geo Index (S2/H3)</div>
+            </div>
+            <div class="arch-node data-node" data-component="kafka-bus">
+              <div class="arch-node-icon">📨</div>
+              <div class="arch-node-name">Kafka (Events)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="arch-detail-panel" id="archDetailPanel">
+        <h4 id="archDetailTitle">Select a component above</h4>
+        <div id="archDetailBody">
+          <p>Click on any component in the architecture diagram to learn about its design, responsibilities, and scaling considerations.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 7: Scaling Strategy -->
+    <section class="controls-section">
+      <h2>📈 Scaling Strategies</h2>
+      <p class="section-desc">A ride-sharing platform must handle millions of location updates per second, match riders in under 3 seconds, and maintain five-nines uptime.</p>
+      <div class="scaling-cards">
+        <div class="scaling-card">
+          <h4>📡 Location Tracking</h4>
+          <ul>
+            <li>Drivers send GPS pings every <strong>3-4 seconds</strong></li>
+            <li>5M drivers × 0.25 updates/sec = <strong>1.25M writes/sec</strong></li>
+            <li>Use <strong>Redis Geo</strong> or <strong>in-memory store</strong> for current positions</li>
+            <li>Shard by <strong>city + geohash prefix</strong></li>
+            <li>TTL-based eviction for offline drivers</li>
+          </ul>
+        </div>
+        <div class="scaling-card">
+          <h4>🔗 Matching Algorithm</h4>
+          <ul>
+            <li><strong>Nearest-neighbor</strong> as baseline, <strong>batch matching</strong> for optimization</li>
+            <li>Consider driver heading, ETA, not just distance</li>
+            <li>Batch window: 2-5 seconds to accumulate requests</li>
+            <li><strong>Hungarian algorithm</strong> for optimal batch assignment</li>
+            <li>Fallback to greedy matching under high load</li>
+          </ul>
+        </div>
+        <div class="scaling-card">
+          <h4>🌐 Real-Time Communication</h4>
+          <ul>
+            <li><strong>WebSocket</strong> connections for live updates</li>
+            <li>Connection multiplexing via <strong>API gateway</strong></li>
+            <li><strong>Server-Sent Events</strong> as fallback</li>
+            <li>~10M concurrent WebSocket connections</li>
+            <li>Use <strong>Pub/Sub</strong> for cross-server messaging</li>
+          </ul>
+        </div>
+        <div class="scaling-card">
+          <h4>💳 Payment Processing</h4>
+          <ul>
+            <li><strong>Pre-authorize</strong> payment at ride request</li>
+            <li><strong>Capture</strong> after trip completion</li>
+            <li>Handle partial refunds, promo codes, split fares</li>
+            <li><strong>Event sourcing</strong> for audit trail</li>
+            <li>Idempotency keys prevent double charges</li>
+          </ul>
+        </div>
+        <div class="scaling-card">
+          <h4>🗺️ Map & Routing</h4>
+          <ul>
+            <li>Use <strong>OSRM</strong> or custom routing engine</li>
+            <li>Pre-compute routes for popular corridors</li>
+            <li><strong>A* / Dijkstra</strong> on road graph</li>
+            <li>Update traffic weights every 30-60 seconds</li>
+            <li>Cache hot routes with short TTL</li>
+          </ul>
+        </div>
+        <div class="scaling-card">
+          <h4>🛡️ Reliability</h4>
+          <ul>
+            <li><strong>Multi-region</strong> deployment per city cluster</li>
+            <li>Circuit breakers between services</li>
+            <li>Graceful degradation: simple matching if complex fails</li>
+            <li><strong>Saga pattern</strong> for distributed transactions</li>
+            <li>Ride state replicated across AZs</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 8: Key Design Decisions -->
+    <section class="controls-section">
+      <h2>⚖️ Key Design Decisions & Tradeoffs</h2>
+      <p class="section-desc">Every design choice involves tradeoffs. Click on a card to explore the considerations.</p>
+      <div class="tradeoff-cards">
+        <div class="tradeoff-card" data-tradeoff="accuracy-speed">
+          <div class="tradeoff-header">
+            <span class="tradeoff-icon">🎯</span>
+            <h4>Accuracy vs. Speed in Matching</h4>
+          </div>
+          <div class="tradeoff-body">
+            <div class="tradeoff-side pro">
+              <h5>Optimize for Accuracy</h5>
+              <ul>
+                <li>Consider ETA, not just distance</li>
+                <li>Factor in driver heading and route</li>
+                <li>Batch requests for global optimum</li>
+                <li>Better rider/driver experience</li>
+              </ul>
+            </div>
+            <div class="tradeoff-side con">
+              <h5>Optimize for Speed</h5>
+              <ul>
+                <li>Simple nearest-driver wins</li>
+                <li>Sub-second match time</li>
+                <li>Less compute per match</li>
+                <li>Lower perceived wait time</li>
+              </ul>
+            </div>
+            <div class="tradeoff-verdict">
+              <strong>In practice:</strong> Batch matching with a 2-3 second window achieves near-optimal matches while keeping latency acceptable.
+            </div>
+          </div>
+        </div>
+        <div class="tradeoff-card" data-tradeoff="fairness-efficiency">
+          <div class="tradeoff-header">
+            <span class="tradeoff-icon">⚖️</span>
+            <h4>Fairness vs. Efficiency</h4>
+          </div>
+          <div class="tradeoff-body">
+            <div class="tradeoff-side pro">
+              <h5>Maximize Fairness</h5>
+              <ul>
+                <li>Round-robin driver assignment</li>
+                <li>Limit consecutive idle time</li>
+                <li>Priority queue for longest-waiting</li>
+                <li>Equal earning opportunity</li>
+              </ul>
+            </div>
+            <div class="tradeoff-side con">
+              <h5>Maximize Efficiency</h5>
+              <ul>
+                <li>Always pick nearest driver</li>
+                <li>Minimize empty miles</li>
+                <li>Optimize fleet utilization</li>
+                <li>Reduce rider wait times</li>
+              </ul>
+            </div>
+            <div class="tradeoff-verdict">
+              <strong>In practice:</strong> A hybrid approach — nearest-first with fairness constraints (e.g., max idle time before priority boost).
+            </div>
+          </div>
+        </div>
+        <div class="tradeoff-card" data-tradeoff="realtime-batch">
+          <div class="tradeoff-header">
+            <span class="tradeoff-icon">⚡</span>
+            <h4>Real-Time vs. Batch Processing</h4>
+          </div>
+          <div class="tradeoff-body">
+            <div class="tradeoff-side pro">
+              <h5>Real-Time Processing</h5>
+              <ul>
+                <li>Instant match on each request</li>
+                <li>Lower average latency</li>
+                <li>Simpler implementation</li>
+                <li>Better for low-demand areas</li>
+              </ul>
+            </div>
+            <div class="tradeoff-side con">
+              <h5>Batch Processing</h5>
+              <ul>
+                <li>Accumulate requests over window</li>
+                <li>Global optimization possible</li>
+                <li>Better matches overall</li>
+                <li>Higher throughput</li>
+              </ul>
+            </div>
+            <div class="tradeoff-verdict">
+              <strong>In practice:</strong> Use real-time for sparse areas, batch matching for dense urban zones where many requests arrive simultaneously.
+            </div>
+          </div>
+        </div>
+        <div class="tradeoff-card" data-tradeoff="push-pull">
+          <div class="tradeoff-header">
+            <span class="tradeoff-icon">📡</span>
+            <h4>Push vs. Pull for Location Updates</h4>
+          </div>
+          <div class="tradeoff-body">
+            <div class="tradeoff-side pro">
+              <h5>Push Model</h5>
+              <ul>
+                <li>Drivers push updates on interval</li>
+                <li>Server always has latest position</li>
+                <li>Predictable write load</li>
+                <li>Simple client implementation</li>
+              </ul>
+            </div>
+            <div class="tradeoff-side con">
+              <h5>Pull Model</h5>
+              <ul>
+                <li>Query driver location on demand</li>
+                <li>Less bandwidth when idle</li>
+                <li>Fresher data at query time</li>
+                <li>Scales with reads not writes</li>
+              </ul>
+            </div>
+            <div class="tradeoff-verdict">
+              <strong>In practice:</strong> Push model for active drivers (every 3-4s), with adaptive frequency based on driver state (slower when idle, faster during active trip).
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</BaseLayout>
+
+<style>
+  /* Base */
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  .viz-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .viz-header h1 {
+    font-size: 2.2rem;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    color: #888;
+    font-size: 1.05rem;
+    max-width: 700px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* Overview */
+  .overview-section {
+    margin-bottom: 28px;
+  }
+  .overview-card {
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 12px;
+    padding: 20px 24px;
+    color: #ccc;
+    line-height: 1.7;
+  }
+  .overview-card code {
+    background: rgba(255,255,255,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .overview-stats {
+    display: flex;
+    gap: 20px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 14px 20px;
+    flex: 1;
+    min-width: 120px;
+  }
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #60a5fa;
+  }
+  .stat-label {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 4px;
+  }
+
+  /* Controls sections */
+  .controls-section {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .controls-section h2 { font-size: 1.4rem; color: #fff; margin-bottom: 12px; }
+  .section-desc { color: #888; margin-bottom: 16px; line-height: 1.6; }
+  .section-desc code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+
+  /* Buttons */
+  .action-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+  .primary-btn { background: #3b82f6; color: #fff; }
+  .primary-btn:hover { background: #2563eb; }
+  .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .primary-btn-secondary { background: rgba(96,165,250,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+  .primary-btn-secondary:hover { background: rgba(96,165,250,0.25); }
+  .toggle-btn { background: rgba(255,255,255,0.06); color: #888; }
+  .toggle-btn.active { background: rgba(96,165,250,0.25); color: #60a5fa; border: 1px solid rgba(96,165,250,0.4); }
+
+  /* Map section */
+  .map-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .map-wrapper {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  #mapCanvas {
+    background: #0d1117;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: crosshair;
+    flex: 1;
+    min-width: 300px;
+    max-width: 100%;
+  }
+  .map-info-panel {
+    background: rgba(0,0,0,0.4);
+    border-radius: 12px;
+    padding: 16px;
+    min-width: 220px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 0.88rem;
+  }
+  .info-label { color: #888; }
+  .info-row span:last-child { color: #ccc; font-weight: 600; }
+  .distance-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .distance-tag {
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    color: #aaa;
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: all 0.3s;
+  }
+  .distance-tag.matched {
+    background: rgba(34,197,94,0.15);
+    border-color: rgba(34,197,94,0.4);
+    color: #22c55e;
+    font-weight: 700;
+  }
+
+  /* Geospatial section */
+  .geo-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .geo-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .geo-wrapper {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  #geoCanvas {
+    background: #0d1117;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    max-width: 100%;
+  }
+  .geo-info-panel {
+    flex: 1;
+    min-width: 220px;
+    background: rgba(0,0,0,0.4);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .geo-info-panel h4 { color: #fff; margin-bottom: 12px; }
+  .geo-explanation {
+    margin-top: 12px;
+    color: #888;
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+  .geo-explanation code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; }
+  .geohash-precision { margin-top: 12px; }
+  .geohash-precision label { color: #aaa; font-size: 0.88rem; }
+  .geohash-precision input[type="range"] { width: 100%; margin-top: 6px; }
+
+  /* ETA section */
+  .eta-layout {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .eta-map-col {
+    flex: 0 0 400px;
+    max-width: 100%;
+  }
+  #etaCanvas {
+    background: #0d1117;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: grab;
+    max-width: 100%;
+  }
+  .eta-positions {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    align-items: center;
+  }
+  .eta-legend { font-size: 0.85rem; }
+  .driver-legend { color: #3b82f6; }
+  .rider-legend { color: #ef4444; }
+  .eta-note { color: #666; font-size: 0.78rem; margin-left: auto; }
+  .eta-pipeline-col { flex: 1; min-width: 280px; }
+  .eta-stage {
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: all 0.3s;
+  }
+  .eta-stage.active-stage {
+    border-color: rgba(96,165,250,0.5);
+    background: rgba(96,165,250,0.08);
+  }
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .stage-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(96,165,250,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #60a5fa;
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+  .stage-title { color: #ddd; font-weight: 600; font-size: 0.95rem; }
+  .stage-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #60a5fa;
+    margin-bottom: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .stage-desc {
+    color: #888;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .stage-desc input[type="range"] {
+    width: 100%;
+    margin-top: 6px;
+  }
+  .eta-arrow {
+    text-align: center;
+    color: #444;
+    font-size: 1.2rem;
+    padding: 4px 0;
+  }
+  .eta-final {
+    background: rgba(34,197,94,0.1);
+    border: 2px solid rgba(34,197,94,0.3);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .final-label { color: #22c55e; font-weight: 700; font-size: 1.1rem; }
+  .final-value { color: #22c55e; font-size: 1.8rem; font-weight: 700; font-family: 'SF Mono', monospace; }
+
+  /* Surge section */
+  .surge-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .surge-supply-ctrl {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .surge-supply-ctrl label { color: #aaa; font-size: 0.88rem; white-space: nowrap; }
+  .surge-supply-ctrl input[type="range"] { width: 120px; }
+  .surge-layout {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .surge-map-col { flex: 0 0 500px; max-width: 100%; }
+  #surgeCanvas {
+    background: #0d1117;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    max-width: 100%;
+  }
+  .surge-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    justify-content: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #888; }
+  .legend-color { width: 14px; height: 14px; border-radius: 3px; }
+  .surge-info-col { flex: 1; min-width: 240px; }
+  .surge-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .surge-stat-label { color: #888; font-size: 0.9rem; }
+  .surge-stat-value { color: #fff; font-weight: 700; font-size: 1.1rem; }
+  .surge-formula {
+    margin-top: 16px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .surge-formula h4 { color: #ccc; margin-bottom: 8px; }
+  .surge-formula code {
+    display: block;
+    color: #aaa;
+    font-size: 0.82rem;
+    line-height: 1.8;
+    background: none;
+  }
+  .surge-example {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    color: #888;
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .surge-example strong { color: #eab308; }
+
+  /* Trip Lifecycle */
+  .lifecycle-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .lifecycle-wrapper {}
+  .lifecycle-states {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .lc-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    min-width: 80px;
+    transition: all 0.4s;
+    cursor: default;
+  }
+  .lc-state.active-lc {
+    border-color: #3b82f6;
+    background: rgba(59,130,246,0.12);
+    transform: scale(1.08);
+  }
+  .lc-state.done-lc {
+    border-color: rgba(34,197,94,0.4);
+    background: rgba(34,197,94,0.08);
+  }
+  .lc-icon { font-size: 1.5rem; }
+  .lc-name { font-size: 0.75rem; color: #aaa; font-weight: 600; white-space: nowrap; }
+  .lc-state.active-lc .lc-name { color: #60a5fa; }
+  .lc-state.done-lc .lc-name { color: #22c55e; }
+  .lc-arrow { color: #444; font-size: 1.1rem; flex-shrink: 0; }
+  .lc-details {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .lc-detail-title { color: #fff; font-size: 1.1rem; font-weight: 700; margin-bottom: 10px; }
+  .lc-detail-body { color: #aaa; font-size: 0.9rem; line-height: 1.7; }
+  .lc-detail-body strong { color: #ccc; }
+  .lc-backend-ops {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .lc-op-tag {
+    background: rgba(96,165,250,0.12);
+    border: 1px solid rgba(96,165,250,0.25);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    color: #60a5fa;
+    font-weight: 600;
+  }
+
+  /* Architecture */
+  .arch-diagram {
+    margin-bottom: 20px;
+  }
+  .arch-layer {
+    margin-bottom: 4px;
+  }
+  .arch-layer-label {
+    color: #666;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .arch-nodes {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 4px;
+  }
+  .arch-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.3s;
+    min-width: 100px;
+  }
+  .arch-node:hover { transform: translateY(-2px); }
+  .client-node { background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.25); }
+  .client-node:hover { background: rgba(168,85,247,0.2); }
+  .gateway-node { background: rgba(234,179,8,0.1); border-color: rgba(234,179,8,0.25); }
+  .gateway-node:hover { background: rgba(234,179,8,0.2); }
+  .service-node { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.25); }
+  .service-node:hover { background: rgba(59,130,246,0.2); }
+  .data-node { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); }
+  .data-node:hover { background: rgba(34,197,94,0.2); }
+  .arch-node-icon { font-size: 1.5rem; }
+  .arch-node-name { font-size: 0.78rem; color: #aaa; font-weight: 600; text-align: center; }
+  .arch-node.selected-node { box-shadow: 0 0 20px rgba(96,165,250,0.3); transform: translateY(-3px); }
+  .arch-connector {
+    text-align: center;
+    color: #444;
+    font-size: 0.8rem;
+    padding: 6px 0;
+  }
+  .arch-detail-panel {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .arch-detail-panel h4 { color: #fff; margin-bottom: 10px; }
+  #archDetailBody { color: #aaa; font-size: 0.9rem; line-height: 1.7; }
+  #archDetailBody strong { color: #ccc; }
+  #archDetailBody ul { margin-top: 8px; padding-left: 20px; }
+  #archDetailBody li { margin-bottom: 4px; }
+
+  /* Scaling cards */
+  .scaling-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  .scaling-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 20px;
+    transition: border-color 0.3s;
+  }
+  .scaling-card:hover { border-color: rgba(96,165,250,0.3); }
+  .scaling-card h4 { color: #fff; margin-bottom: 10px; font-size: 1rem; }
+  .scaling-card ul { padding-left: 18px; color: #aaa; font-size: 0.88rem; line-height: 1.8; }
+  .scaling-card li { margin-bottom: 2px; }
+  .scaling-card strong { color: #60a5fa; }
+
+  /* Tradeoff cards */
+  .tradeoff-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .tradeoff-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+  .tradeoff-card:hover { border-color: rgba(96,165,250,0.3); }
+  .tradeoff-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.02);
+  }
+  .tradeoff-icon { font-size: 1.3rem; }
+  .tradeoff-header h4 { color: #fff; font-size: 1rem; margin: 0; }
+  .tradeoff-body {
+    padding: 0 20px 20px;
+    display: none;
+  }
+  .tradeoff-card.open .tradeoff-body { display: block; }
+  .tradeoff-side {
+    display: inline-block;
+    vertical-align: top;
+    width: 48%;
+    margin-bottom: 12px;
+  }
+  .tradeoff-side h5 { color: #ddd; margin-bottom: 8px; font-size: 0.9rem; }
+  .tradeoff-side ul { padding-left: 16px; color: #888; font-size: 0.85rem; line-height: 1.7; }
+  .tradeoff-side.pro h5 { color: #22c55e; }
+  .tradeoff-side.con h5 { color: #f97316; }
+  .tradeoff-verdict {
+    background: rgba(96,165,250,0.08);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #aaa;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    clear: both;
+  }
+  .tradeoff-verdict strong { color: #60a5fa; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .viz-header h1 { font-size: 1.6rem; }
+    .controls-section { padding: 18px; }
+    .eta-layout, .surge-layout, .map-wrapper { flex-direction: column; }
+    .eta-map-col, .surge-map-col { flex: 1; }
+    .tradeoff-side { width: 100%; display: block; }
+    .overview-stats { flex-direction: column; }
+  }
+
+  /* Animations */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  @keyframes matchGlow {
+    0% { box-shadow: 0 0 5px rgba(34,197,94,0.3); }
+    50% { box-shadow: 0 0 20px rgba(34,197,94,0.6); }
+    100% { box-shadow: 0 0 5px rgba(34,197,94,0.3); }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-in { animation: slideUp 0.4s ease-out; }
+</style>
+
+<script>
+  // ==========================================
+  // SECTION 1: Interactive Map + Driver Matching
+  // ==========================================
+  const mapCanvas = document.getElementById('mapCanvas');
+  const mapCtx = mapCanvas?.getContext('2d');
+
+  const GRID_SIZE = 20;
+  let drivers = [];
+  let rider = null;
+  let matchedDriverIdx = -1;
+  let routeProgress = 0;
+  let routeAnimId = null;
+  let placingRider = false;
+
+  function initDrivers() {
+    drivers = [];
+    for (let i = 0; i < 12; i++) {
+      drivers.push({
+        x: 40 + Math.random() * (mapCanvas.width - 80),
+        y: 40 + Math.random() * (mapCanvas.height - 80),
+        id: `D${i + 1}`,
+        heading: Math.random() * Math.PI * 2,
+        speed: 0.3 + Math.random() * 0.5,
+      });
+    }
+  }
+
+  function drawGrid(ctx, w, h) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const cellW = w / GRID_SIZE;
+    const cellH = h / GRID_SIZE;
+    for (let i = 0; i <= GRID_SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellW, 0);
+      ctx.lineTo(i * cellW, h);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cellH);
+      ctx.lineTo(w, i * cellH);
+      ctx.stroke();
+    }
+    // Roads (thicker lines every 5 cells)
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= GRID_SIZE; i += 5) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellW, 0);
+      ctx.lineTo(i * cellW, h);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cellH);
+      ctx.lineTo(w, i * cellH);
+      ctx.stroke();
+    }
+  }
+
+  function drawDriver(ctx, d, idx) {
+    const isMatched = idx === matchedDriverIdx;
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(d.heading);
+    // Car body
+    ctx.fillStyle = isMatched ? '#22c55e' : '#3b82f6';
+    ctx.shadowColor = isMatched ? 'rgba(34,197,94,0.5)' : 'rgba(59,130,246,0.3)';
+    ctx.shadowBlur = isMatched ? 12 : 6;
+    ctx.beginPath();
+    ctx.roundRect(-10, -6, 20, 12, 3);
+    ctx.fill();
+    // Windshield
+    ctx.fillStyle = isMatched ? 'rgba(34,197,94,0.3)' : 'rgba(96,165,250,0.3)';
+    ctx.fillRect(5, -4, 4, 8);
+    ctx.restore();
+    // Label
+    ctx.fillStyle = isMatched ? '#22c55e' : '#60a5fa';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.id, d.x, d.y - 12);
+  }
+
+  function drawRider(ctx, r) {
+    if (!r) return;
+    ctx.save();
+    // Pin
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = 'rgba(239,68,68,0.5)';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y - 10, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // Pin point
+    ctx.beginPath();
+    ctx.moveTo(r.x - 5, r.y - 5);
+    ctx.lineTo(r.x, r.y + 4);
+    ctx.lineTo(r.x + 5, r.y - 5);
+    ctx.fill();
+    // Inner circle
+    ctx.fillStyle = '#fff';
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y - 10, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#ef4444';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Rider', r.x, r.y + 16);
+  }
+
+  function drawRoute(ctx, from, to, progress) {
+    if (progress <= 0) return;
+    // Manhattan-style route
+    const midX = from.x;
+    const midY = to.y;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(34,197,94,0.6)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    const totalDist = Math.abs(from.y - midY) + Math.abs(midX - to.x);
+    const leg1 = Math.abs(from.y - midY);
+    const leg1Ratio = totalDist > 0 ? leg1 / totalDist : 0.5;
+    if (progress <= leg1Ratio) {
+      const p = progress / leg1Ratio;
+      ctx.lineTo(from.x, from.y + (midY - from.y) * p);
+    } else {
+      ctx.lineTo(midX, midY);
+      const p = (progress - leg1Ratio) / (1 - leg1Ratio);
+      ctx.lineTo(midX + (to.x - midX) * Math.min(p, 1), midY);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMap() {
+    if (!mapCtx || !mapCanvas) return;
+    const w = mapCanvas.width;
+    const h = mapCanvas.height;
+    mapCtx.clearRect(0, 0, w, h);
+    drawGrid(mapCtx, w, h);
+    // Draw route if matched
+    if (matchedDriverIdx >= 0 && rider) {
+      drawRoute(mapCtx, drivers[matchedDriverIdx], rider, routeProgress);
+    }
+    // Distance circles if rider placed but not matched
+    if (rider && matchedDriverIdx < 0) {
+      mapCtx.strokeStyle = 'rgba(239,68,68,0.15)';
+      mapCtx.lineWidth = 1;
+      [50, 100, 150, 200].forEach(r => {
+        mapCtx.beginPath();
+        mapCtx.arc(rider.x, rider.y, r, 0, Math.PI * 2);
+        mapCtx.stroke();
+      });
+    }
+    drivers.forEach((d, i) => drawDriver(mapCtx, d, i));
+    drawRider(mapCtx, rider);
+  }
+
+  function dist(a, b) {
+    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+  }
+
+  function matchDriver() {
+    if (!rider || drivers.length === 0) return;
+    const startTime = performance.now();
+    let minDist = Infinity;
+    let minIdx = -1;
+    const distances = [];
+    drivers.forEach((d, i) => {
+      const dd = dist(d, rider);
+      distances.push({ id: d.id, dist: dd, idx: i });
+      if (dd < minDist) {
+        minDist = dd;
+        minIdx = i;
+      }
+    });
+    distances.sort((a, b) => a.dist - b.dist);
+    matchedDriverIdx = minIdx;
+    const elapsed = (performance.now() - startTime).toFixed(2);
+    // Update info
+    document.getElementById('matchedDriver').textContent = drivers[minIdx].id;
+    document.getElementById('matchDistance').textContent = `${(minDist / 20).toFixed(1)} km`;
+    document.getElementById('matchTime').textContent = `${elapsed} ms`;
+    // Show distance list
+    const listEl = document.getElementById('distanceList');
+    if (listEl) {
+      listEl.innerHTML = distances.map(d =>
+        `<div class="distance-tag ${d.idx === minIdx ? 'matched' : ''}">${d.id}: ${(d.dist / 20).toFixed(1)} km</div>`
+      ).join('');
+    }
+    // Animate route
+    routeProgress = 0;
+    if (routeAnimId) cancelAnimationFrame(routeAnimId);
+    function animateRoute() {
+      routeProgress += 0.015;
+      if (routeProgress > 1) routeProgress = 1;
+      drawMap();
+      if (routeProgress < 1) {
+        routeAnimId = requestAnimationFrame(animateRoute);
+      }
+    }
+    animateRoute();
+  }
+
+  // Map click handler
+  mapCanvas?.addEventListener('click', (e) => {
+    if (!placingRider) return;
+    const rect = mapCanvas.getBoundingClientRect();
+    const scaleX = mapCanvas.width / rect.width;
+    const scaleY = mapCanvas.height / rect.height;
+    rider = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+    matchedDriverIdx = -1;
+    routeProgress = 0;
+    document.getElementById('riderPos').textContent = `(${rider.x.toFixed(0)}, ${rider.y.toFixed(0)})`;
+    document.getElementById('matchedDriver').textContent = '—';
+    document.getElementById('matchDistance').textContent = '—';
+    document.getElementById('matchTime').textContent = '—';
+    document.getElementById('distanceList').innerHTML = '';
+    document.getElementById('matchDriverBtn').disabled = false;
+    placingRider = false;
+    document.getElementById('placeRiderBtn').textContent = '📍 Place Rider (click map)';
+    drawMap();
+  });
+
+  document.getElementById('placeRiderBtn')?.addEventListener('click', () => {
+    placingRider = true;
+    document.getElementById('placeRiderBtn').textContent = '📍 Click on map...';
+  });
+
+  document.getElementById('matchDriverBtn')?.addEventListener('click', () => {
+    if (rider) matchDriver();
+  });
+
+  document.getElementById('resetMapBtn')?.addEventListener('click', () => {
+    rider = null;
+    matchedDriverIdx = -1;
+    routeProgress = 0;
+    if (routeAnimId) cancelAnimationFrame(routeAnimId);
+    initDrivers();
+    document.getElementById('riderPos').textContent = 'Not placed';
+    document.getElementById('driverCount').textContent = drivers.length.toString();
+    document.getElementById('matchedDriver').textContent = '—';
+    document.getElementById('matchDistance').textContent = '—';
+    document.getElementById('matchTime').textContent = '—';
+    document.getElementById('matchDriverBtn').disabled = true;
+    document.getElementById('distanceList').innerHTML = '';
+    drawMap();
+  });
+
+  document.getElementById('addDriverBtn')?.addEventListener('click', () => {
+    drivers.push({
+      x: 40 + Math.random() * (mapCanvas.width - 80),
+      y: 40 + Math.random() * (mapCanvas.height - 80),
+      id: `D${drivers.length + 1}`,
+      heading: Math.random() * Math.PI * 2,
+      speed: 0.3 + Math.random() * 0.5,
+    });
+    document.getElementById('driverCount').textContent = drivers.length.toString();
+    drawMap();
+  });
+
+  // ==========================================
+  // SECTION 2: Geospatial Indexing
+  // ==========================================
+  const geoCanvas = document.getElementById('geoCanvas');
+  const geoCtx = geoCanvas?.getContext('2d');
+  let geoMode = 'quadtree'; // 'quadtree' | 'geohash'
+  let geoPoints = [];
+  let geohashPrecision = 4;
+
+  // Quadtree
+  class QuadTree {
+    constructor(x, y, w, h, maxPoints = 4, depth = 0) {
+      this.x = x; this.y = y; this.w = w; this.h = h;
+      this.maxPoints = maxPoints;
+      this.depth = depth;
+      this.points = [];
+      this.children = null;
+    }
+    insert(p) {
+      if (p.x < this.x || p.x > this.x + this.w || p.y < this.y || p.y > this.y + this.h) return false;
+      if (!this.children && this.points.length < this.maxPoints) {
+        this.points.push(p);
+        return true;
+      }
+      if (!this.children) this.subdivide();
+      for (const c of this.children) {
+        if (c.insert(p)) return true;
+      }
+      return false;
+    }
+    subdivide() {
+      const hw = this.w / 2, hh = this.h / 2;
+      const d = this.depth + 1;
+      this.children = [
+        new QuadTree(this.x, this.y, hw, hh, this.maxPoints, d),
+        new QuadTree(this.x + hw, this.y, hw, hh, this.maxPoints, d),
+        new QuadTree(this.x, this.y + hh, hw, hh, this.maxPoints, d),
+        new QuadTree(this.x + hw, this.y + hh, hw, hh, this.maxPoints, d),
+      ];
+      for (const p of this.points) {
+        for (const c of this.children) {
+          if (c.insert(p)) break;
+        }
+      }
+      this.points = [];
+    }
+    getMaxDepth() {
+      if (!this.children) return this.depth;
+      return Math.max(...this.children.map(c => c.getMaxDepth()));
+    }
+    getLeafCount() {
+      if (!this.children) return 1;
+      return this.children.reduce((s, c) => s + c.getLeafCount(), 0);
+    }
+  }
+
+  function drawQuadTree(ctx, qt, maxDepth) {
+    const hue = qt.depth * 50;
+    const alpha = 0.15 + (qt.depth / Math.max(maxDepth, 1)) * 0.3;
+    ctx.strokeStyle = `hsla(${hue}, 70%, 60%, ${alpha})`;
+    ctx.lineWidth = Math.max(1, 3 - qt.depth * 0.5);
+    ctx.strokeRect(qt.x, qt.y, qt.w, qt.h);
+    if (qt.children) {
+      qt.children.forEach(c => drawQuadTree(ctx, c, maxDepth));
+    }
+  }
+
+  function drawGeohash(ctx, size, precision) {
+    const divisions = Math.pow(2, precision);
+    const cellW = size / divisions;
+    const cellH = size / divisions;
+    const chars = '0123456789bcdefghjkmnpqrstuvwxyz';
+    for (let i = 0; i < divisions; i++) {
+      for (let j = 0; j < divisions; j++) {
+        const hash = [];
+        let tempI = i, tempJ = j;
+        for (let p = 0; p < Math.min(precision, 3); p++) {
+          const bit = ((tempI >> (precision - 1 - p)) & 1) * 2 + ((tempJ >> (precision - 1 - p)) & 1);
+          hash.push(chars[bit % chars.length]);
+        }
+        const hue = ((i * divisions + j) * 137) % 360;
+        ctx.fillStyle = `hsla(${hue}, 50%, 30%, 0.15)`;
+        ctx.fillRect(i * cellW, j * cellH, cellW, cellH);
+        ctx.strokeStyle = `hsla(${hue}, 50%, 50%, 0.3)`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(i * cellW, j * cellH, cellW, cellH);
+        if (cellW > 30) {
+          ctx.fillStyle = `hsla(${hue}, 60%, 70%, 0.5)`;
+          ctx.font = `${Math.min(10, cellW / 4)}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText(hash.join(''), i * cellW + cellW / 2, j * cellH + cellH / 2 + 4);
+        }
+      }
+    }
+  }
+
+  function drawGeoViz() {
+    if (!geoCtx || !geoCanvas) return;
+    const size = geoCanvas.width;
+    geoCtx.clearRect(0, 0, size, size);
+    if (geoMode === 'quadtree') {
+      const qt = new QuadTree(0, 0, size, size, 4);
+      geoPoints.forEach(p => qt.insert(p));
+      const maxD = qt.getMaxDepth();
+      drawQuadTree(geoCtx, qt, maxD);
+      document.getElementById('geoDepth').textContent = maxD.toString();
+      document.getElementById('geoLeaves').textContent = qt.getLeafCount().toString();
+    } else {
+      drawGeohash(geoCtx, size, geohashPrecision);
+      document.getElementById('geoDepth').textContent = geohashPrecision.toString();
+      document.getElementById('geoLeaves').textContent = Math.pow(4, geohashPrecision).toString();
+    }
+    // Draw points
+    geoPoints.forEach((p, i) => {
+      geoCtx.fillStyle = '#3b82f6';
+      geoCtx.shadowColor = 'rgba(59,130,246,0.5)';
+      geoCtx.shadowBlur = 6;
+      geoCtx.beginPath();
+      geoCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      geoCtx.fill();
+      geoCtx.shadowBlur = 0;
+      geoCtx.fillStyle = '#fff';
+      geoCtx.font = '9px sans-serif';
+      geoCtx.textAlign = 'center';
+      geoCtx.fillText(`${i + 1}`, p.x, p.y - 9);
+    });
+    document.getElementById('geoPointCount').textContent = geoPoints.length.toString();
+  }
+
+  document.getElementById('quadtreeViewBtn')?.addEventListener('click', () => {
+    geoMode = 'quadtree';
+    document.getElementById('quadtreeViewBtn').classList.add('active');
+    document.getElementById('geohashViewBtn').classList.remove('active');
+    document.getElementById('geoInfoTitle').textContent = 'Quadtree Info';
+    document.getElementById('geoExplanation').style.display = '';
+    document.getElementById('geohashInfo').style.display = 'none';
+    drawGeoViz();
+  });
+  document.getElementById('geohashViewBtn')?.addEventListener('click', () => {
+    geoMode = 'geohash';
+    document.getElementById('geohashViewBtn').classList.add('active');
+    document.getElementById('quadtreeViewBtn').classList.remove('active');
+    document.getElementById('geoInfoTitle').textContent = 'Geohash Info';
+    document.getElementById('geoExplanation').style.display = 'none';
+    document.getElementById('geohashInfo').style.display = '';
+    drawGeoViz();
+  });
+  document.getElementById('addGeoPointBtn')?.addEventListener('click', () => {
+    geoPoints.push({ x: 30 + Math.random() * 540, y: 30 + Math.random() * 540 });
+    drawGeoViz();
+  });
+  document.getElementById('removeGeoPointBtn')?.addEventListener('click', () => {
+    geoPoints.pop();
+    drawGeoViz();
+  });
+  document.getElementById('clearGeoBtn')?.addEventListener('click', () => {
+    geoPoints = [];
+    drawGeoViz();
+  });
+  document.getElementById('bulkAddBtn')?.addEventListener('click', () => {
+    for (let i = 0; i < 20; i++) {
+      geoPoints.push({ x: 30 + Math.random() * 540, y: 30 + Math.random() * 540 });
+    }
+    drawGeoViz();
+  });
+  geoCanvas?.addEventListener('click', (e) => {
+    const rect = geoCanvas.getBoundingClientRect();
+    const scaleX = geoCanvas.width / rect.width;
+    const scaleY = geoCanvas.height / rect.height;
+    geoPoints.push({
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    });
+    drawGeoViz();
+  });
+  document.getElementById('precisionSlider')?.addEventListener('input', (e) => {
+    geohashPrecision = parseInt(e.target.value);
+    document.getElementById('precisionVal').textContent = geohashPrecision.toString();
+    drawGeoViz();
+  });
+
+  // ==========================================
+  // SECTION 3: ETA Calculation
+  // ==========================================
+  const etaCanvas = document.getElementById('etaCanvas');
+  const etaCtx = etaCanvas?.getContext('2d');
+  let etaDriver = { x: 80, y: 80 };
+  let etaRider = { x: 320, y: 320 };
+  let dragging = null; // 'driver' | 'rider' | null
+
+  function drawEtaMap() {
+    if (!etaCtx || !etaCanvas) return;
+    const s = etaCanvas.width;
+    etaCtx.clearRect(0, 0, s, s);
+    // Grid
+    etaCtx.strokeStyle = 'rgba(255,255,255,0.04)';
+    etaCtx.lineWidth = 1;
+    for (let i = 0; i <= 20; i++) {
+      const pos = i * s / 20;
+      etaCtx.beginPath(); etaCtx.moveTo(pos, 0); etaCtx.lineTo(pos, s); etaCtx.stroke();
+      etaCtx.beginPath(); etaCtx.moveTo(0, pos); etaCtx.lineTo(s, pos); etaCtx.stroke();
+    }
+    // Roads
+    etaCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+    etaCtx.lineWidth = 2;
+    for (let i = 0; i <= 20; i += 5) {
+      const pos = i * s / 20;
+      etaCtx.beginPath(); etaCtx.moveTo(pos, 0); etaCtx.lineTo(pos, s); etaCtx.stroke();
+      etaCtx.beginPath(); etaCtx.moveTo(0, pos); etaCtx.lineTo(s, pos); etaCtx.stroke();
+    }
+    // Straight line
+    etaCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+    etaCtx.setLineDash([4, 4]);
+    etaCtx.lineWidth = 1;
+    etaCtx.beginPath();
+    etaCtx.moveTo(etaDriver.x, etaDriver.y);
+    etaCtx.lineTo(etaRider.x, etaRider.y);
+    etaCtx.stroke();
+    etaCtx.setLineDash([]);
+    // Manhattan route
+    etaCtx.strokeStyle = 'rgba(96,165,250,0.5)';
+    etaCtx.lineWidth = 2;
+    etaCtx.setLineDash([6, 3]);
+    etaCtx.beginPath();
+    etaCtx.moveTo(etaDriver.x, etaDriver.y);
+    etaCtx.lineTo(etaDriver.x, etaRider.y);
+    etaCtx.lineTo(etaRider.x, etaRider.y);
+    etaCtx.stroke();
+    etaCtx.setLineDash([]);
+    // Driver marker
+    etaCtx.fillStyle = '#3b82f6';
+    etaCtx.shadowColor = 'rgba(59,130,246,0.5)';
+    etaCtx.shadowBlur = 10;
+    etaCtx.beginPath();
+    etaCtx.arc(etaDriver.x, etaDriver.y, 10, 0, Math.PI * 2);
+    etaCtx.fill();
+    etaCtx.shadowBlur = 0;
+    etaCtx.fillStyle = '#fff';
+    etaCtx.font = 'bold 10px sans-serif';
+    etaCtx.textAlign = 'center';
+    etaCtx.fillText('D', etaDriver.x, etaDriver.y + 4);
+    // Rider marker
+    etaCtx.fillStyle = '#ef4444';
+    etaCtx.shadowColor = 'rgba(239,68,68,0.5)';
+    etaCtx.shadowBlur = 10;
+    etaCtx.beginPath();
+    etaCtx.arc(etaRider.x, etaRider.y, 10, 0, Math.PI * 2);
+    etaCtx.fill();
+    etaCtx.shadowBlur = 0;
+    etaCtx.fillStyle = '#fff';
+    etaCtx.font = 'bold 10px sans-serif';
+    etaCtx.textAlign = 'center';
+    etaCtx.fillText('R', etaRider.x, etaRider.y + 4);
+  }
+
+  function updateETA() {
+    const straightDist = dist(etaDriver, etaRider);
+    const straightKm = straightDist / 20; // scale factor
+    const avgSpeedKmMin = 0.5; // 30 km/h in km/min
+    const straightMinutes = straightKm / avgSpeedKmMin;
+    document.getElementById('etaStraight').textContent = `${straightKm.toFixed(1)} km → ${straightMinutes.toFixed(1)} min`;
+    const roadF = parseFloat(document.getElementById('roadFactor').value);
+    const roadMinutes = straightMinutes * roadF;
+    document.getElementById('etaRoad').textContent = `${(straightKm * roadF).toFixed(1)} km → ${roadMinutes.toFixed(1)} min`;
+    document.getElementById('roadFactorVal').textContent = `${roadF}x`;
+    const trafficF = parseFloat(document.getElementById('trafficFactor').value);
+    const trafficMinutes = roadMinutes * trafficF;
+    document.getElementById('etaTraffic').textContent = `${trafficMinutes.toFixed(1)} min`;
+    document.getElementById('trafficFactorVal').textContent = `${trafficF}x`;
+    const histF = parseFloat(document.getElementById('historicalFactor').value);
+    const finalMinutes = trafficMinutes * histF;
+    document.getElementById('etaHistorical').textContent = `${finalMinutes.toFixed(1)} min`;
+    document.getElementById('historicalFactorVal').textContent = `${histF}x`;
+    document.getElementById('etaFinal').textContent = `${finalMinutes.toFixed(1)} min`;
+    // Highlight active stages
+    document.querySelectorAll('.eta-stage').forEach(s => s.classList.add('active-stage'));
+    drawEtaMap();
+  }
+
+  etaCanvas?.addEventListener('mousedown', (e) => {
+    const rect = etaCanvas.getBoundingClientRect();
+    const scaleX = etaCanvas.width / rect.width;
+    const scaleY = etaCanvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    if (dist({ x: mx, y: my }, etaDriver) < 20) dragging = 'driver';
+    else if (dist({ x: mx, y: my }, etaRider) < 20) dragging = 'rider';
+  });
+  etaCanvas?.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const rect = etaCanvas.getBoundingClientRect();
+    const scaleX = etaCanvas.width / rect.width;
+    const scaleY = etaCanvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    if (dragging === 'driver') { etaDriver.x = mx; etaDriver.y = my; }
+    else { etaRider.x = mx; etaRider.y = my; }
+    updateETA();
+  });
+  etaCanvas?.addEventListener('mouseup', () => { dragging = null; });
+  etaCanvas?.addEventListener('mouseleave', () => { dragging = null; });
+
+  // Touch support for ETA
+  etaCanvas?.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const rect = etaCanvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const scaleX = etaCanvas.width / rect.width;
+    const scaleY = etaCanvas.height / rect.height;
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    if (dist({ x: mx, y: my }, etaDriver) < 30) dragging = 'driver';
+    else if (dist({ x: mx, y: my }, etaRider) < 30) dragging = 'rider';
+  }, { passive: false });
+  etaCanvas?.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const rect = etaCanvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const scaleX = etaCanvas.width / rect.width;
+    const scaleY = etaCanvas.height / rect.height;
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    if (dragging === 'driver') { etaDriver.x = mx; etaDriver.y = my; }
+    else { etaRider.x = mx; etaRider.y = my; }
+    updateETA();
+  }, { passive: false });
+  etaCanvas?.addEventListener('touchend', () => { dragging = null; });
+
+  document.getElementById('roadFactor')?.addEventListener('input', updateETA);
+  document.getElementById('trafficFactor')?.addEventListener('input', updateETA);
+  document.getElementById('historicalFactor')?.addEventListener('input', updateETA);
+
+  // ==========================================
+  // SECTION 4: Surge Pricing
+  // ==========================================
+  const surgeCanvas = document.getElementById('surgeCanvas');
+  const surgeCtx = surgeCanvas?.getContext('2d');
+  const SURGE_GRID = 10;
+  let surgeDemand = [];
+  let surgeSupply = [];
+  let baseSupply = 50;
+
+  function initSurge() {
+    surgeDemand = [];
+    surgeSupply = [];
+    for (let i = 0; i < SURGE_GRID; i++) {
+      surgeDemand[i] = [];
+      surgeSupply[i] = [];
+      for (let j = 0; j < SURGE_GRID; j++) {
+        surgeDemand[i][j] = 20 + Math.floor(Math.random() * 30);
+        surgeSupply[i][j] = baseSupply + Math.floor(Math.random() * 20 - 10);
+      }
+    }
+  }
+
+  function surgeColor(multiplier) {
+    if (multiplier <= 1.0) return 'rgba(34,197,94,0.5)';
+    if (multiplier <= 1.3) return 'rgba(34,197,94,0.7)';
+    if (multiplier <= 1.5) return 'rgba(234,179,8,0.5)';
+    if (multiplier <= 1.8) return 'rgba(234,179,8,0.7)';
+    if (multiplier <= 2.0) return 'rgba(249,115,22,0.6)';
+    if (multiplier <= 2.5) return 'rgba(239,68,68,0.6)';
+    return 'rgba(239,68,68,0.8)';
+  }
+
+  function drawSurge() {
+    if (!surgeCtx || !surgeCanvas) return;
+    const s = surgeCanvas.width;
+    const cellSize = s / SURGE_GRID;
+    surgeCtx.clearRect(0, 0, s, s);
+    let totalDemand = 0, totalSupply = 0;
+    let maxSurge = 1.0, sumSurge = 0;
+    for (let i = 0; i < SURGE_GRID; i++) {
+      for (let j = 0; j < SURGE_GRID; j++) {
+        const demand = surgeDemand[i][j];
+        const supply = surgeSupply[i][j];
+        const multiplier = Math.max(1.0, demand / Math.max(supply, 1));
+        totalDemand += demand;
+        totalSupply += supply;
+        sumSurge += multiplier;
+        if (multiplier > maxSurge) maxSurge = multiplier;
+        surgeCtx.fillStyle = surgeColor(multiplier);
+        surgeCtx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+        surgeCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+        surgeCtx.lineWidth = 1;
+        surgeCtx.strokeRect(i * cellSize, j * cellSize, cellSize, cellSize);
+        // Multiplier text
+        surgeCtx.fillStyle = multiplier > 1.5 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)';
+        surgeCtx.font = 'bold 11px sans-serif';
+        surgeCtx.textAlign = 'center';
+        surgeCtx.fillText(`${multiplier.toFixed(1)}x`, i * cellSize + cellSize / 2, j * cellSize + cellSize / 2 - 4);
+        surgeCtx.font = '9px sans-serif';
+        surgeCtx.fillStyle = 'rgba(255,255,255,0.3)';
+        surgeCtx.fillText(`${demand}/${supply}`, i * cellSize + cellSize / 2, j * cellSize + cellSize / 2 + 10);
+      }
+    }
+    const avgSurge = sumSurge / (SURGE_GRID * SURGE_GRID);
+    document.getElementById('avgSurge').textContent = `${avgSurge.toFixed(2)}x`;
+    document.getElementById('maxSurge').textContent = `${maxSurge.toFixed(2)}x`;
+    document.getElementById('totalDemand').textContent = totalDemand.toString();
+    document.getElementById('totalSupply').textContent = totalSupply.toString();
+    // Update fare example
+    const baseFare = 16.50;
+    const surgeFare = (baseFare * avgSurge).toFixed(2);
+    document.getElementById('surgeFareExample').textContent = `$${surgeFare}`;
+  }
+
+  surgeCanvas?.addEventListener('click', (e) => {
+    const rect = surgeCanvas.getBoundingClientRect();
+    const scaleX = surgeCanvas.width / rect.width;
+    const scaleY = surgeCanvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+    const cellSize = surgeCanvas.width / SURGE_GRID;
+    const ci = Math.floor(mx / cellSize);
+    const cj = Math.floor(my / cellSize);
+    if (ci >= 0 && ci < SURGE_GRID && cj >= 0 && cj < SURGE_GRID) {
+      // Increase demand in clicked cell and neighbors
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          const ni = ci + di, nj = cj + dj;
+          if (ni >= 0 && ni < SURGE_GRID && nj >= 0 && nj < SURGE_GRID) {
+            const boost = di === 0 && dj === 0 ? 20 : 8;
+            surgeDemand[ni][nj] += boost;
+          }
+        }
+      }
+      drawSurge();
+    }
+  });
+
+  document.getElementById('surgeResetBtn')?.addEventListener('click', () => {
+    baseSupply = parseInt(document.getElementById('supplySlider').value);
+    initSurge();
+    drawSurge();
+  });
+
+  document.getElementById('surgeRainBtn')?.addEventListener('click', () => {
+    // Rain increases demand across the board
+    for (let i = 0; i < SURGE_GRID; i++) {
+      for (let j = 0; j < SURGE_GRID; j++) {
+        surgeDemand[i][j] += 15 + Math.floor(Math.random() * 20);
+      }
+    }
+    drawSurge();
+  });
+
+  document.getElementById('surgeConcertBtn')?.addEventListener('click', () => {
+    // Concert ends: huge demand spike in one area
+    const cx = 3 + Math.floor(Math.random() * 4);
+    const cy = 3 + Math.floor(Math.random() * 4);
+    for (let i = -2; i <= 2; i++) {
+      for (let j = -2; j <= 2; j++) {
+        const ni = cx + i, nj = cy + j;
+        if (ni >= 0 && ni < SURGE_GRID && nj >= 0 && nj < SURGE_GRID) {
+          const proximity = 3 - Math.max(Math.abs(i), Math.abs(j));
+          surgeDemand[ni][nj] += proximity * 25;
+        }
+      }
+    }
+    drawSurge();
+  });
+
+  document.getElementById('supplySlider')?.addEventListener('input', (e) => {
+    baseSupply = parseInt(e.target.value);
+    document.getElementById('supplyVal').textContent = baseSupply.toString();
+    for (let i = 0; i < SURGE_GRID; i++) {
+      for (let j = 0; j < SURGE_GRID; j++) {
+        surgeSupply[i][j] = baseSupply + Math.floor(Math.random() * 20 - 10);
+      }
+    }
+    drawSurge();
+  });
+
+  // ==========================================
+  // SECTION 5: Trip Lifecycle
+  // ==========================================
+  const lcStates = ['request', 'matching', 'enroute', 'pickup', 'intrip', 'dropoff', 'payment', 'rating'];
+  const lcDetails = {
+    request: {
+      title: '📱 Ride Requested',
+      body: '<p>The rider opens the app, enters pickup and dropoff locations, selects ride type (Economy, Premium, etc.), and confirms the request.</p><p><strong>Backend operations:</strong> Validate rider account, pre-authorize payment, calculate initial fare estimate, find surge multiplier for the area, and send the request to the matching engine.</p>',
+      ops: ['Validate Account', 'Pre-Auth Payment', 'Fare Estimate', 'Check Surge', 'Queue to Matcher'],
+    },
+    matching: {
+      title: '🔍 Finding a Driver',
+      body: '<p>The matching engine queries the geospatial index for available drivers within a radius (typically 3-5 km). It ranks candidates by ETA, driver rating, and fairness score. The top candidate receives a match offer with a 15-second acceptance timeout.</p><p><strong>If driver declines:</strong> Move to next candidate. After 3 rejections, expand search radius.</p>',
+      ops: ['Geo Query', 'ETA Calc', 'Rank Drivers', 'Send Offer', 'Start Timer'],
+    },
+    enroute: {
+      title: '🚗 Driver En Route',
+      body: '<p>The matched driver accepted. Both rider and driver see live positions. The driver receives turn-by-turn navigation to the pickup point. The rider sees the driver approaching with updated ETA.</p><p><strong>Location updates</strong> happen every 3-4 seconds via WebSocket.</p>',
+      ops: ['WebSocket Connect', 'Stream Location', 'Route Navigation', 'Update ETA', 'Push Notifications'],
+    },
+    pickup: {
+      title: '📍 Pickup',
+      body: '<p>Driver arrives at pickup location. A 5-minute wait timer starts. Both rider and driver can contact each other via masked phone number or in-app messaging. Driver confirms pickup when rider enters the vehicle.</p><p><strong>If rider no-shows:</strong> Driver can cancel after wait timer expires; rider is charged a cancellation fee.</p>',
+      ops: ['Arrive Notification', 'Start Wait Timer', 'Enable Contact', 'Confirm Pickup', 'Start Trip Meter'],
+    },
+    intrip: {
+      title: '🛣️ In Trip',
+      body: '<p>The trip is active. The system tracks the route, calculates fare in real time based on distance and time. The rider sees progress toward the destination. The driver follows navigation. GPS breadcrumbs are recorded for the trip log.</p><p><strong>Safety features:</strong> Route deviation alerts, emergency button, trip sharing with contacts.</p>',
+      ops: ['Track Route', 'Calculate Fare', 'Safety Monitor', 'Record GPS Trail', 'Live ETA to Dest'],
+    },
+    dropoff: {
+      title: '🏁 Dropoff',
+      body: '<p>Driver arrives at or near the destination. Driver confirms the dropoff. The system computes the final fare based on actual distance traveled, time elapsed, surge multiplier, tolls, and any applicable promos. The trip is finalized in the database.</p>',
+      ops: ['Confirm Dropoff', 'Compute Final Fare', 'Apply Promos', 'Add Tolls', 'Finalize Trip Record'],
+    },
+    payment: {
+      title: '💳 Payment Processing',
+      body: '<p>The pre-authorized amount is captured (or adjusted to actual fare). Payment is processed via the saved payment method. A receipt is generated and emailed. Driver earnings are calculated (fare minus platform commission) and added to their balance.</p><p><strong>Failure handling:</strong> Retry with backoff, fall back to alternate payment method, manual resolution queue.</p>',
+      ops: ['Capture Payment', 'Generate Receipt', 'Calc Driver Earnings', 'Update Balances', 'Send Receipt Email'],
+    },
+    rating: {
+      title: '⭐ Rating & Feedback',
+      body: '<p>Both rider and driver are prompted to rate each other (1-5 stars). Optional comments and tip. Ratings are used for matching quality and account standing. Consistently low-rated accounts may be deactivated.</p><p><strong>Data pipeline:</strong> Ratings feed into ML models for driver-rider compatibility scoring in future matches.</p>',
+      ops: ['Show Rating UI', 'Record Rating', 'Process Tip', 'Update Averages', 'Feed ML Pipeline'],
+    },
+  };
+  let lcCurrentIdx = -1;
+  let lcAutoInterval = null;
+
+  function advanceLifecycle() {
+    lcCurrentIdx++;
+    if (lcCurrentIdx >= lcStates.length) lcCurrentIdx = 0;
+    const state = lcStates[lcCurrentIdx];
+    const detail = lcDetails[state];
+    // Update state display
+    document.querySelectorAll('.lc-state').forEach((el, i) => {
+      el.classList.remove('active-lc', 'done-lc');
+      if (i < lcCurrentIdx) el.classList.add('done-lc');
+      else if (i === lcCurrentIdx) el.classList.add('active-lc');
+    });
+    // Update details
+    document.getElementById('lcDetailTitle').textContent = detail.title;
+    document.getElementById('lcDetailBody').innerHTML = detail.body;
+    const opsEl = document.getElementById('lcBackendOps');
+    opsEl.innerHTML = detail.ops.map(op => `<span class="lc-op-tag">${op}</span>`).join('');
+    opsEl.classList.add('animate-in');
+    setTimeout(() => opsEl.classList.remove('animate-in'), 500);
+  }
+
+  document.getElementById('lifecycleNextBtn')?.addEventListener('click', advanceLifecycle);
+  document.getElementById('lifecycleResetBtn')?.addEventListener('click', () => {
+    lcCurrentIdx = -1;
+    if (lcAutoInterval) { clearInterval(lcAutoInterval); lcAutoInterval = null; }
+    document.querySelectorAll('.lc-state').forEach(el => {
+      el.classList.remove('active-lc', 'done-lc');
+    });
+    document.getElementById('lcDetailTitle').textContent = 'Click "Next Step" to begin';
+    document.getElementById('lcDetailBody').innerHTML = '<p>The trip lifecycle follows a strict state machine. Each transition triggers specific backend operations, notifications, and data updates.</p>';
+    document.getElementById('lcBackendOps').innerHTML = '';
+    document.getElementById('lifecycleAutoBtn').textContent = '⏩ Auto-Play';
+  });
+  document.getElementById('lifecycleAutoBtn')?.addEventListener('click', () => {
+    if (lcAutoInterval) {
+      clearInterval(lcAutoInterval);
+      lcAutoInterval = null;
+      document.getElementById('lifecycleAutoBtn').textContent = '⏩ Auto-Play';
+    } else {
+      document.getElementById('lifecycleAutoBtn').textContent = '⏸️ Pause';
+      advanceLifecycle();
+      lcAutoInterval = setInterval(() => {
+        advanceLifecycle();
+        if (lcCurrentIdx >= lcStates.length - 1) {
+          clearInterval(lcAutoInterval);
+          lcAutoInterval = null;
+          document.getElementById('lifecycleAutoBtn').textContent = '⏩ Auto-Play';
+        }
+      }, 2500);
+    }
+  });
+
+  // ==========================================
+  // SECTION 6: Architecture Component Details
+  // ==========================================
+  const archDetails = {
+    'rider-app': {
+      title: '📱 Rider App',
+      body: '<p><strong>Responsibilities:</strong> Location input (pickup/dropoff), ride request, real-time driver tracking, fare display, payment, rating.</p><p><strong>Tech:</strong> React Native / Flutter for cross-platform. Maintains persistent WebSocket connection for live updates. Implements local caching for recent places and ride history.</p><ul><li>GPS polling every 1-3 seconds during active ride</li><li>Background location for ETA notifications</li><li>Optimistic UI updates for snappy feel</li></ul>',
+    },
+    'driver-app': {
+      title: '🚗 Driver App',
+      body: '<p><strong>Responsibilities:</strong> Accept/decline ride offers, navigation, trip management, earnings dashboard, go online/offline.</p><p><strong>Key feature:</strong> Sends GPS location every 3-4 seconds when online. Receives ride offers via push notification + WebSocket. Must handle poor connectivity gracefully — queue location updates and batch-send when back online.</p><ul><li>Background GPS tracking (battery-optimized)</li><li>Turn-by-turn navigation integration</li><li>Offline queue for location updates</li></ul>',
+    },
+    'api-gateway': {
+      title: '🌐 API Gateway',
+      body: '<p><strong>Responsibilities:</strong> Request routing, authentication, rate limiting, TLS termination, WebSocket management.</p><p><strong>Scale:</strong> Must handle ~10M concurrent WebSocket connections (drivers + active riders). Use consistent hashing to route connections to specific gateway instances. Connection affinity for stateful WebSocket sessions.</p><ul><li>Rate limit: 100 req/s per user</li><li>JWT-based authentication</li><li>Geographic routing to nearest data center</li></ul>',
+    },
+    'location-service': {
+      title: '📡 Location Tracking Service',
+      body: '<p><strong>Responsibilities:</strong> Ingest driver location updates (~1.25M writes/sec), maintain current positions in a geospatial index, serve proximity queries.</p><p><strong>Storage:</strong> Redis Geo (GEOADD/GEORADIUS) for hot data. Location history to Kafka for analytics. TTL of 60s — if no update, driver considered offline.</p><ul><li>Sharded by geohash prefix (city-level)</li><li>In-memory geospatial index per shard</li><li>P99 write latency: &lt;5ms</li></ul>',
+    },
+    'matching-service': {
+      title: '🔗 Matching Engine',
+      body: '<p><strong>Responsibilities:</strong> Given a ride request, find the best available driver. Considers distance, ETA, driver heading, rating, fairness score.</p><p><strong>Algorithm:</strong> 1) Query location service for drivers within 5km. 2) Compute ETA for top 10 candidates. 3) Score using weighted formula. 4) Send offer to top candidate. 5) 15s timeout, then next candidate.</p><ul><li>Batch mode: accumulate requests over 2-3s window for global optimization</li><li>Hungarian algorithm for optimal assignment in batch</li><li>Fallback: greedy nearest-first under high load</li></ul>',
+    },
+    'dispatch-service': {
+      title: '📋 Dispatch Service',
+      body: '<p><strong>Responsibilities:</strong> Orchestrate the ride lifecycle. Manages state transitions (request → matching → en route → ...). Sends notifications at each stage. Handles timeouts and cancellations.</p><p><strong>Pattern:</strong> Saga pattern for distributed state management. Each state transition is an event published to Kafka. Other services react accordingly.</p><ul><li>State machine with strict transition rules</li><li>Idempotent state transitions</li><li>Compensating actions for rollback</li></ul>',
+    },
+    'pricing-service': {
+      title: '💲 Pricing / Surge Service',
+      body: '<p><strong>Responsibilities:</strong> Compute fare estimates, apply surge multipliers, handle promos and discounts.</p><p><strong>Surge calculation:</strong> Divides city into hexagonal cells (H3). Tracks supply/demand ratio per cell every 30s. Applies smoothing to prevent oscillation. Caps maximum surge (typically 5-8x).</p><ul><li>Real-time supply/demand tracking via stream processing</li><li>Geofencing for special zones (airports, events)</li><li>A/B testing framework for pricing experiments</li></ul>',
+    },
+    'eta-service': {
+      title: '⏱️ ETA Service',
+      body: '<p><strong>Responsibilities:</strong> Compute estimated time of arrival between any two points. Used by matching (driver-to-rider ETA) and trip display (rider-to-destination ETA).</p><p><strong>Pipeline:</strong> Road graph (OSRM) → traffic overlay (real-time speed data) → ML correction (historical patterns). Pre-compute popular routes. Cache results with 30s TTL.</p><ul><li>P50 compute latency: &lt;50ms</li><li>Batch ETA for multiple candidates in single call</li><li>Fallback to straight-line × 1.4 if routing unavailable</li></ul>',
+    },
+    'payment-service': {
+      title: '💳 Payment Service',
+      body: '<p><strong>Responsibilities:</strong> Pre-authorize, capture, refund. Integrate with Stripe/Braintree. Handle multiple payment methods, wallets, corporate accounts.</p><p><strong>Design:</strong> Event sourcing for full audit trail. Idempotency keys on every transaction. Separate ledger service for driver earnings and platform revenue. Async settlement to driver bank accounts (weekly).</p><ul><li>PCI-DSS compliant tokenized card storage</li><li>Retry with exponential backoff on payment failures</li><li>Dead letter queue for manual resolution</li></ul>',
+    },
+    'location-db': {
+      title: '🗄️ Redis (Location Cache)',
+      body: '<p><strong>Purpose:</strong> Store current driver positions for real-time proximity queries. Redis Geo commands (GEOADD, GEORADIUS) provide O(log N) spatial lookups.</p><p><strong>Scale:</strong> 5M driver positions, ~1.25M updates/sec. Sharded by city. Each shard handles ~50-100K drivers. TTL of 60s auto-evicts offline drivers.</p><ul><li>Memory: ~500 bytes per driver × 5M = ~2.5 GB</li><li>Replicated for read scaling</li><li>Sentinel/Cluster for HA</li></ul>',
+    },
+    'trip-db': {
+      title: '🗃️ PostgreSQL (Trips)',
+      body: '<p><strong>Purpose:</strong> Persistent storage for trip records, user profiles, payment transactions. Source of truth for all business data.</p><p><strong>Scale:</strong> ~20M new trips/day. Partitioned by date. Sharded by city or user_id for horizontal scaling. Read replicas for analytics queries.</p><ul><li>JSONB for flexible trip metadata</li><li>PostGIS extension for spatial queries on historical data</li><li>Citus or Vitess for sharding</li></ul>',
+    },
+    'geo-index': {
+      title: '🌍 Geo Index (S2/H3)',
+      body: '<p><strong>Purpose:</strong> Hierarchical spatial indexing for geofencing, surge zone management, and analytics. Uber uses H3 (hexagonal grid), Google uses S2 (spherical geometry).</p><p><strong>Use cases:</strong> Define surge zones, airport geofences, city boundaries, restricted areas. Pre-compute cell-level statistics for fast lookups.</p><ul><li>H3 resolution 7: ~5km² hexagons (city-level)</li><li>H3 resolution 9: ~0.1km² hexagons (neighborhood-level)</li><li>Compact representation as 64-bit integers</li></ul>',
+    },
+    'kafka-bus': {
+      title: '📨 Kafka (Event Bus)',
+      body: '<p><strong>Purpose:</strong> Asynchronous event streaming between services. Every state change publishes an event. Enables event sourcing, analytics pipelines, and loose coupling between services.</p><p><strong>Topics:</strong> ride-requests, ride-state-changes, location-updates, payment-events, driver-events. Partitioned by ride_id or driver_id for ordering.</p><ul><li>Throughput: ~5M events/sec across all topics</li><li>Retention: 7 days for replay capability</li><li>Consumer groups for each downstream service</li></ul>',
+    },
+  };
+
+  document.querySelectorAll('.arch-node').forEach(node => {
+    node.addEventListener('click', () => {
+      const comp = node.getAttribute('data-component');
+      const detail = archDetails[comp];
+      if (!detail) return;
+      document.querySelectorAll('.arch-node').forEach(n => n.classList.remove('selected-node'));
+      node.classList.add('selected-node');
+      document.getElementById('archDetailTitle').textContent = detail.title;
+      document.getElementById('archDetailBody').innerHTML = detail.body;
+    });
+  });
+
+  // Tradeoff cards toggle
+  document.querySelectorAll('.tradeoff-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const card = header.closest('.tradeoff-card');
+      card.classList.toggle('open');
+    });
+  });
+
+  // ==========================================
+  // Initialize everything
+  // ==========================================
+  if (mapCanvas && mapCtx) {
+    initDrivers();
+    document.getElementById('driverCount').textContent = drivers.length.toString();
+    drawMap();
+  }
+  drawGeoViz();
+  updateETA();
+  initSurge();
+  drawSurge();
+</script>
+</BaseLayout>

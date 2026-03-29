@@ -1,0 +1,1525 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Design a Distributed File System — Interactive Visualization"
+  description="Understand distributed file system architecture: chunk splitting, replication, master/chunk servers, consistency, fault tolerance. Interactive simulation."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Distributed File System", href: "/system-design/distributed-file-system/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📁💾 Design a Distributed File System</h1>
+      <p class="subtitle">Chunk splitting, replication, master/chunk architecture, consistency, and fault tolerance — all interactive</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A distributed file system stores large files across multiple machines by splitting them into
+          fixed-size <strong>chunks</strong> (typically 64MB) and replicating each chunk across several
+          <strong>chunk servers</strong>. A <strong>master server</strong> maintains metadata: the file
+          namespace, chunk-to-server mappings, and lease management. The key challenges are
+          <em>consistency</em>, <em>fault tolerance</em>, and <em>efficient data flow</em>. This design
+          is inspired by the Google File System (GFS) and HDFS.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: File Chunking Visualization                       -->
+    <!-- ============================================================ -->
+    <section class="chunking-section">
+      <h2>🔪 File Chunking</h2>
+      <p class="section-desc">Enter a file name and size to see it split into fixed-size chunks. Each chunk gets a unique ID and is tracked by the master's metadata table.</p>
+
+      <div class="chunking-controls">
+        <div class="input-group">
+          <label for="fileName">File Name</label>
+          <input type="text" id="fileName" value="research_data.tar" placeholder="e.g. backup.tar">
+        </div>
+        <div class="input-group">
+          <label for="fileSize">File Size (MB)</label>
+          <input type="number" id="fileSize" value="400" min="1" max="2048">
+        </div>
+        <div class="input-group">
+          <label for="chunkSize">Chunk Size (MB)</label>
+          <select id="chunkSize">
+            <option value="16">16 MB</option>
+            <option value="32">32 MB</option>
+            <option value="64" selected>64 MB</option>
+            <option value="128">128 MB</option>
+          </select>
+        </div>
+        <button id="splitFileBtn" class="action-btn primary-btn">Split File</button>
+        <button id="resetChunkBtn" class="action-btn reset-btn">Reset</button>
+      </div>
+
+      <div class="chunking-layout">
+        <div class="file-visual">
+          <div class="file-icon" id="fileIcon">
+            <div class="file-icon-inner">
+              <span class="file-emoji">📄</span>
+              <span class="file-label" id="fileLabel">research_data.tar</span>
+              <span class="file-size-label" id="fileSizeLabel">400 MB</span>
+            </div>
+          </div>
+          <div class="split-arrow" id="splitArrow">
+            <svg width="60" height="30"><path d="M5,15 L50,15" stroke="#4fc3f7" stroke-width="2" stroke-dasharray="6,3" fill="none"/><polygon points="50,10 60,15 50,20" fill="#4fc3f7"/></svg>
+          </div>
+          <div class="chunks-container" id="chunksContainer"></div>
+        </div>
+        <div class="metadata-table-wrap">
+          <h4>Master Metadata Table</h4>
+          <table class="metadata-table" id="metadataTable">
+            <thead>
+              <tr><th>Chunk ID</th><th>File</th><th>Offset</th><th>Size</th><th>Checksum</th></tr>
+            </thead>
+            <tbody id="metadataBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: Replication Across Nodes                          -->
+    <!-- ============================================================ -->
+    <section class="replication-section">
+      <h2>🔄 Replication Across Nodes</h2>
+      <p class="section-desc">Watch chunks replicated across chunk servers. Adjust the replication factor. Click a node to simulate failure and observe re-replication.</p>
+
+      <div class="replication-controls">
+        <label>Replication Factor: <strong id="repFactorLabel">3</strong>
+          <input type="range" id="repFactorSlider" min="1" max="5" value="3">
+        </label>
+        <button id="replicateBtn" class="action-btn primary-btn">Replicate Chunks</button>
+        <button id="resetRepBtn" class="action-btn reset-btn">Reset</button>
+      </div>
+
+      <div class="cluster-layout">
+        <div class="cluster-ring" id="clusterRing"></div>
+        <div class="replication-info">
+          <div class="rep-legend">
+            <span class="legend-item"><span class="legend-dot primary-dot"></span> Primary</span>
+            <span class="legend-item"><span class="legend-dot replica1-dot"></span> Replica 1</span>
+            <span class="legend-item"><span class="legend-dot replica2-dot"></span> Replica 2</span>
+            <span class="legend-item"><span class="legend-dot dead-dot"></span> Dead Node</span>
+          </div>
+          <div class="rep-stats">
+            <div class="stat"><span class="stat-l">Total Nodes</span><span class="stat-v" id="totalNodes">8</span></div>
+            <div class="stat"><span class="stat-l">Healthy Nodes</span><span class="stat-v" id="healthyNodes">8</span></div>
+            <div class="stat"><span class="stat-l">Chunks Stored</span><span class="stat-v" id="chunksStored">0</span></div>
+            <div class="stat"><span class="stat-l">Under-Replicated</span><span class="stat-v" id="underReplicated">0</span></div>
+          </div>
+          <div class="rep-log" id="repLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: Master / Chunk Server Architecture                -->
+    <!-- ============================================================ -->
+    <section class="architecture-section">
+      <h2>🏗️ Master / Chunk Server Architecture</h2>
+      <p class="section-desc">Toggle between read and write flows to see how clients interact with the master and chunk servers.</p>
+
+      <div class="arch-controls">
+        <button id="writeFlowBtn" class="action-btn primary-btn active-flow">Write Flow</button>
+        <button id="readFlowBtn" class="action-btn primary-btn-secondary">Read Flow</button>
+        <button id="replayFlowBtn" class="action-btn reset-btn">Replay</button>
+      </div>
+
+      <div class="arch-diagram" id="archDiagram">
+        <canvas id="archCanvas" width="800" height="450"></canvas>
+      </div>
+
+      <div class="flow-steps" id="flowSteps"></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: Consistency Model                                 -->
+    <!-- ============================================================ -->
+    <section class="consistency-section">
+      <h2>🔒 Consistency Model</h2>
+      <p class="section-desc">Compare strong vs. eventual consistency. Watch how write acknowledgements differ and how replicas converge.</p>
+
+      <div class="consistency-controls">
+        <button id="strongConsBtn" class="action-btn primary-btn active-cons">Strong Consistency</button>
+        <button id="eventualConsBtn" class="action-btn primary-btn-secondary">Eventual Consistency</button>
+        <button id="triggerWriteBtn" class="action-btn primary-btn">Trigger Write</button>
+        <button id="resetConsBtn" class="action-btn reset-btn">Reset</button>
+      </div>
+
+      <div class="consistency-layout">
+        <div class="cons-timeline" id="consTimeline">
+          <canvas id="consCanvas" width="750" height="350"></canvas>
+        </div>
+        <div class="cons-info">
+          <div class="cons-status" id="consStatus">
+            <div class="stat"><span class="stat-l">Model</span><span class="stat-v" id="consModelLabel">Strong</span></div>
+            <div class="stat"><span class="stat-l">Write Latency</span><span class="stat-v" id="writeLatency">—</span></div>
+            <div class="stat"><span class="stat-l">Replicas Synced</span><span class="stat-v" id="replicasSynced">0 / 3</span></div>
+            <div class="stat"><span class="stat-l">ACK Sent</span><span class="stat-v" id="ackSent">No</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: Fault Tolerance                                   -->
+    <!-- ============================================================ -->
+    <section class="fault-section">
+      <h2>💥 Fault Tolerance Simulation</h2>
+      <p class="section-desc">Click on chunk servers to kill them. Watch the system detect the failure via heartbeat timeout and trigger re-replication on surviving nodes.</p>
+
+      <div class="fault-controls">
+        <button id="startHeartbeatBtn" class="action-btn primary-btn">Start Heartbeat Monitor</button>
+        <button id="resetFaultBtn" class="action-btn reset-btn">Reset All Nodes</button>
+      </div>
+
+      <div class="fault-layout">
+        <div class="fault-cluster" id="faultCluster"></div>
+        <div class="fault-info">
+          <div class="fault-stats">
+            <div class="stat"><span class="stat-l">Alive</span><span class="stat-v green" id="aliveCount">8</span></div>
+            <div class="stat"><span class="stat-l">Dead</span><span class="stat-v red" id="deadCount">0</span></div>
+            <div class="stat"><span class="stat-l">Re-replications</span><span class="stat-v" id="reRepCount">0</span></div>
+            <div class="stat"><span class="stat-l">Recovery Time</span><span class="stat-v" id="recoveryTime">— ms</span></div>
+          </div>
+          <div class="heartbeat-monitor" id="heartbeatMonitor">
+            <h4>Heartbeat Log</h4>
+            <div class="hb-log" id="hbLog"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 6: Architecture Deep Dive                            -->
+    <!-- ============================================================ -->
+    <section class="deepdive-section">
+      <h2>📚 Architecture Deep Dive</h2>
+      <p class="section-desc">Detailed internals of a production distributed file system.</p>
+
+      <div class="deepdive-grid">
+        <div class="deepdive-card">
+          <h3>Namespace Management</h3>
+          <p>The master manages the full file namespace as a flat lookup table mapping pathnames to metadata. Each path has a read-write lock. Creating <code>/d1/d2/leaf</code> acquires read locks on <code>/d1</code> and <code>/d1/d2</code> and a write lock on <code>/d1/d2/leaf</code>. This allows concurrent mutations in the same directory — unlike a traditional inode tree.</p>
+          <div class="dd-detail">
+            <strong>Key Insight:</strong> No per-directory data structures means no risk of directory-level hot spots.
+          </div>
+        </div>
+
+        <div class="deepdive-card">
+          <h3>Chunk Lease Mechanism</h3>
+          <p>The master grants a 60-second lease to one replica (the <strong>primary</strong>) for each chunk. The primary picks the mutation order and all replicas follow it. This ensures a consistent serial order without the master being on the data path.</p>
+          <div class="dd-detail">
+            <strong>Lease Renewal:</strong> The primary requests extensions via heartbeat messages. If the master loses contact, it waits for the lease to expire before granting a new one — preventing split-brain.
+          </div>
+        </div>
+
+        <div class="deepdive-card">
+          <h3>Garbage Collection</h3>
+          <p>Deleted files are renamed to a hidden name with a deletion timestamp. A background scan reclaims files hidden for more than 3 days. Orphaned chunks (no file reference) are identified during chunk-namespace comparison and removed.</p>
+          <div class="dd-detail">
+            <strong>Advantage:</strong> Lazy deletion provides a safety net against accidental deletes and simplifies failure handling during complex operations.
+          </div>
+        </div>
+
+        <div class="deepdive-card">
+          <h3>Snapshots</h3>
+          <p>Snapshot is implemented via <strong>copy-on-write</strong>. When a snapshot is requested, the master revokes all leases on affected chunks, logs the operation, and duplicates the metadata. Actual data is only copied when a chunk is next mutated.</p>
+          <div class="dd-detail">
+            <strong>Efficiency:</strong> Snapshot is nearly instantaneous regardless of dataset size since no data is copied upfront.
+          </div>
+        </div>
+
+        <div class="deepdive-card">
+          <h3>Data Integrity</h3>
+          <p>Each chunk is divided into 64KB blocks, each with a 32-bit checksum. On reads, the chunk server verifies the checksum before returning data. Corruption is detected immediately, and the client retries from another replica. The master then re-replicates the valid copy.</p>
+          <div class="dd-detail">
+            <strong>Idle Verification:</strong> Chunk servers scan inactive chunks periodically to detect bit-rot before it affects reads.
+          </div>
+        </div>
+
+        <div class="deepdive-card">
+          <h3>Scaling Strategies</h3>
+          <p>Scale horizontally by adding chunk servers — the master rebalances chunks. For metadata scaling, use a shadow master for read-only redundancy, or partition the namespace across multiple masters (federated model as in HDFS Federation).</p>
+          <div class="dd-detail">
+            <strong>Bottleneck:</strong> The single-master model limits namespace operations. HDFS Federation addresses this with independent namespace volumes.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 7: Key Design Decisions                              -->
+    <!-- ============================================================ -->
+    <section class="tradeoffs-section">
+      <h2>⚖️ Key Design Decisions</h2>
+      <p class="section-desc">Every design choice involves tradeoffs. Understand both sides.</p>
+
+      <div class="tradeoff-grid">
+        <div class="tradeoff-card">
+          <h3>Chunk Size: Small vs. Large</h3>
+          <div class="tradeoff-sides">
+            <div class="tradeoff-pro">
+              <h4>Large Chunks (64–128 MB)</h4>
+              <ul>
+                <li>Fewer metadata entries on master</li>
+                <li>Fewer TCP connections per file read</li>
+                <li>Good for large sequential reads</li>
+              </ul>
+            </div>
+            <div class="tradeoff-con">
+              <h4>Small Chunks (4–16 MB)</h4>
+              <ul>
+                <li>Better parallelism for small files</li>
+                <li>Less internal fragmentation</li>
+                <li>More metadata overhead on master</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="tradeoff-card">
+          <h3>Replication vs. Erasure Coding</h3>
+          <div class="tradeoff-sides">
+            <div class="tradeoff-pro">
+              <h4>Replication (3x)</h4>
+              <ul>
+                <li>Simple implementation</li>
+                <li>Fast reads (any replica)</li>
+                <li>3x storage overhead</li>
+              </ul>
+            </div>
+            <div class="tradeoff-con">
+              <h4>Erasure Coding (e.g. RS 6+3)</h4>
+              <ul>
+                <li>1.5x storage overhead</li>
+                <li>CPU cost for encoding/decoding</li>
+                <li>Good for cold/warm data</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="tradeoff-card">
+          <h3>Strong vs. Eventual Consistency</h3>
+          <div class="tradeoff-sides">
+            <div class="tradeoff-pro">
+              <h4>Strong Consistency</h4>
+              <ul>
+                <li>All readers see the latest write</li>
+                <li>Simpler application logic</li>
+                <li>Higher write latency</li>
+              </ul>
+            </div>
+            <div class="tradeoff-con">
+              <h4>Eventual Consistency</h4>
+              <ul>
+                <li>Lower write latency</li>
+                <li>Better availability</li>
+                <li>Risk of stale reads</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="tradeoff-card">
+          <h3>Single vs. Distributed Metadata</h3>
+          <div class="tradeoff-sides">
+            <div class="tradeoff-pro">
+              <h4>Single Master</h4>
+              <ul>
+                <li>Simple consistency for metadata</li>
+                <li>Global view for placement</li>
+                <li>Single point of failure risk</li>
+              </ul>
+            </div>
+            <div class="tradeoff-con">
+              <h4>Distributed Metadata</h4>
+              <ul>
+                <li>No single bottleneck</li>
+                <li>Higher availability</li>
+                <li>Complex consistency (Paxos/Raft)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</BaseLayout>
+
+<style>
+  /* =========== Global =========== */
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 1.25rem 3rem;
+    color: #e0e0e0;
+  }
+  .viz-header {
+    text-align: center;
+    padding: 2.5rem 0 1rem;
+  }
+  .viz-header h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.5rem;
+    color: #fff;
+  }
+  .subtitle {
+    color: #90a4ae;
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  /* Overview */
+  .overview-section { margin-bottom: 2rem; }
+  .overview-card {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 12px;
+    padding: 1.5rem;
+    line-height: 1.7;
+    font-size: 1rem;
+  }
+  .overview-card strong { color: #4fc3f7; }
+  .overview-card em { color: #81c784; }
+
+  /* Shared section styling */
+  section {
+    margin-bottom: 3rem;
+  }
+  section h2 {
+    font-size: 1.55rem;
+    color: #fff;
+    margin: 0 0 0.4rem;
+  }
+  .section-desc {
+    color: #90a4ae;
+    margin: 0 0 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  /* Buttons */
+  .action-btn {
+    padding: 0.5rem 1.1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .action-btn:active { transform: scale(0.97); }
+  .primary-btn { background: #1976d2; color: #fff; }
+  .primary-btn:hover { background: #1e88e5; }
+  .primary-btn-secondary { background: #2e3d52; color: #90caf9; border: 1px solid #37474f; }
+  .primary-btn-secondary:hover { background: #37474f; }
+  .reset-btn { background: #37474f; color: #b0bec5; }
+  .reset-btn:hover { background: #455a64; }
+  .active-flow, .active-cons { background: #0d47a1; box-shadow: 0 0 8px rgba(25,118,210,0.5); }
+
+  /* Stat blocks */
+  .stat { display: flex; justify-content: space-between; padding: 0.35rem 0; border-bottom: 1px solid #1e2d3d; font-size: 0.9rem; }
+  .stat-l { color: #78909c; }
+  .stat-v { color: #4fc3f7; font-weight: 700; }
+  .green { color: #66bb6a !important; }
+  .red { color: #ef5350 !important; }
+
+  /* =========== Section 1: Chunking =========== */
+  .chunking-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+    margin-bottom: 1.25rem;
+  }
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .input-group label {
+    font-size: 0.8rem;
+    color: #78909c;
+  }
+  .input-group input, .input-group select {
+    padding: 0.45rem 0.7rem;
+    border-radius: 6px;
+    border: 1px solid #37474f;
+    background: #0d1b2a;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    width: 150px;
+  }
+  .chunking-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  .file-visual {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .file-icon {
+    flex-shrink: 0;
+  }
+  .file-icon-inner {
+    background: #1a2332;
+    border: 2px solid #1976d2;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+    width: 120px;
+    transition: border-color 0.3s;
+  }
+  .file-emoji { font-size: 2rem; display: block; margin-bottom: 0.3rem; }
+  .file-label { display: block; font-size: 0.8rem; color: #90caf9; word-break: break-all; }
+  .file-size-label { display: block; font-size: 0.75rem; color: #78909c; margin-top: 0.2rem; }
+  .split-arrow { flex-shrink: 0; display: flex; align-items: center; padding-top: 1.5rem; }
+  .chunks-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+  }
+  .chunk-block {
+    background: #0d2137;
+    border: 1px solid #1565c0;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.72rem;
+    text-align: center;
+    min-width: 70px;
+    opacity: 0;
+    transform: translateY(10px);
+    animation: chunkAppear 0.35s forwards;
+  }
+  .chunk-block .chunk-id { color: #4fc3f7; display: block; font-weight: 700; }
+  .chunk-block .chunk-sz { color: #78909c; display: block; }
+  @keyframes chunkAppear {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .metadata-table-wrap {
+    overflow-x: auto;
+  }
+  .metadata-table-wrap h4 { color: #b0bec5; margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .metadata-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+  .metadata-table th {
+    background: #0d1b2a;
+    color: #4fc3f7;
+    padding: 0.4rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid #1e2d3d;
+    white-space: nowrap;
+  }
+  .metadata-table td {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #131f2e;
+    color: #b0bec5;
+    white-space: nowrap;
+  }
+  .metadata-table tbody tr { opacity: 0; animation: rowAppear 0.3s forwards; }
+  @keyframes rowAppear { to { opacity: 1; } }
+
+  /* =========== Section 2: Replication =========== */
+  .replication-controls {
+    display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 1.25rem;
+  }
+  .replication-controls label { color: #b0bec5; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+  .replication-controls input[type="range"] { width: 100px; }
+  .cluster-layout {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    gap: 1.5rem;
+  }
+  .cluster-ring {
+    position: relative;
+    width: 400px;
+    height: 400px;
+    border: 2px dashed #1e2d3d;
+    border-radius: 50%;
+    margin: 0 auto;
+  }
+  .node-circle {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: #1a2332;
+    border: 3px solid #37474f;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: #b0bec5;
+    cursor: pointer;
+    transition: border-color 0.3s, background 0.3s, box-shadow 0.3s, transform 0.2s;
+    z-index: 2;
+  }
+  .node-circle:hover { transform: scale(1.1); }
+  .node-circle .node-label { font-weight: 700; font-size: 0.75rem; }
+  .node-circle .node-chunks { font-size: 0.65rem; color: #78909c; }
+  .node-circle.node-dead {
+    border-color: #c62828;
+    background: #3e1111;
+    opacity: 0.6;
+  }
+  .node-circle.node-dead .node-label { color: #ef5350; text-decoration: line-through; }
+  .chunk-dot {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    opacity: 0;
+    animation: dotAppear 0.5s forwards;
+  }
+  @keyframes dotAppear { to { opacity: 1; } }
+  .chunk-dot.primary-chunk { background: #1976d2; }
+  .chunk-dot.replica1-chunk { background: #43a047; }
+  .chunk-dot.replica2-chunk { background: #f9a825; }
+
+  .replication-info { display: flex; flex-direction: column; gap: 1rem; }
+  .rep-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.5rem; }
+  .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: #b0bec5; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .primary-dot { background: #1976d2; }
+  .replica1-dot { background: #43a047; }
+  .replica2-dot { background: #f9a825; }
+  .dead-dot { background: #c62828; }
+
+  .rep-log {
+    background: #0d1b2a;
+    border: 1px solid #1e2d3d;
+    border-radius: 8px;
+    padding: 0.75rem;
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 0.78rem;
+    font-family: 'Courier New', monospace;
+    color: #78909c;
+  }
+  .rep-log .log-entry { margin-bottom: 0.25rem; }
+  .rep-log .log-entry.info { color: #4fc3f7; }
+  .rep-log .log-entry.warn { color: #ffa726; }
+  .rep-log .log-entry.error { color: #ef5350; }
+  .rep-log .log-entry.success { color: #66bb6a; }
+
+  /* =========== Section 3: Architecture =========== */
+  .arch-controls {
+    display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;
+  }
+  .arch-diagram {
+    background: #0d1b2a;
+    border: 1px solid #1e2d3d;
+    border-radius: 12px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+  }
+  .arch-diagram canvas { display: block; margin: 0 auto; }
+  .flow-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .flow-step {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.85rem;
+    color: #78909c;
+    flex: 1;
+    min-width: 160px;
+    opacity: 0.4;
+    transition: opacity 0.4s, border-color 0.4s;
+  }
+  .flow-step.active-step {
+    opacity: 1;
+    border-color: #1976d2;
+    color: #e0e0e0;
+  }
+  .flow-step .step-num { color: #4fc3f7; font-weight: 700; margin-right: 0.4rem; }
+
+  /* =========== Section 4: Consistency =========== */
+  .consistency-controls {
+    display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;
+  }
+  .consistency-layout {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 1.25rem;
+  }
+  .cons-timeline {
+    background: #0d1b2a;
+    border: 1px solid #1e2d3d;
+    border-radius: 12px;
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .cons-timeline canvas { display: block; }
+  .cons-info { display: flex; flex-direction: column; gap: 0.75rem; }
+  .cons-status {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 10px;
+    padding: 0.75rem;
+  }
+
+  /* =========== Section 5: Fault Tolerance =========== */
+  .fault-controls {
+    display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap;
+  }
+  .fault-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  .fault-cluster {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+  }
+  .fault-node {
+    background: #1a2332;
+    border: 2px solid #37474f;
+    border-radius: 10px;
+    padding: 0.75rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.3s, background 0.3s, transform 0.15s;
+    position: relative;
+  }
+  .fault-node:hover { transform: scale(1.05); }
+  .fault-node .fn-icon { font-size: 1.5rem; display: block; }
+  .fault-node .fn-label { font-size: 0.8rem; font-weight: 700; color: #b0bec5; }
+  .fault-node .fn-hb { font-size: 0.7rem; color: #78909c; }
+  .fault-node.fn-alive { border-color: #2e7d32; }
+  .fault-node.fn-alive .fn-icon::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    background: #66bb6a;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+  .fault-node.fn-dead {
+    border-color: #c62828;
+    background: #2a1111;
+    opacity: 0.65;
+  }
+  .fault-node.fn-dead .fn-label { text-decoration: line-through; color: #ef5350; }
+  .fault-node.fn-recovering {
+    border-color: #f57f17;
+    animation: recoverPulse 0.6s 3;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(102,187,106,0.5); }
+    50% { box-shadow: 0 0 0 4px rgba(102,187,106,0); }
+  }
+  @keyframes recoverPulse {
+    0%, 100% { background: #1a2332; }
+    50% { background: #2a3a18; }
+  }
+  .fault-info { display: flex; flex-direction: column; gap: 1rem; }
+  .fault-stats {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 10px;
+    padding: 0.75rem;
+  }
+  .heartbeat-monitor {
+    background: #0d1b2a;
+    border: 1px solid #1e2d3d;
+    border-radius: 10px;
+    padding: 0.75rem;
+    flex: 1;
+  }
+  .heartbeat-monitor h4 { color: #b0bec5; margin: 0 0 0.5rem; font-size: 0.9rem; }
+  .hb-log {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    font-family: 'Courier New', monospace;
+    color: #78909c;
+  }
+  .hb-log .hb-entry { margin-bottom: 0.2rem; }
+  .hb-log .hb-ok { color: #66bb6a; }
+  .hb-log .hb-fail { color: #ef5350; }
+  .hb-log .hb-info { color: #4fc3f7; }
+
+  /* =========== Section 6: Deep Dive =========== */
+  .deepdive-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  .deepdive-card {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 10px;
+    padding: 1.1rem;
+  }
+  .deepdive-card h3 { color: #4fc3f7; font-size: 1rem; margin: 0 0 0.5rem; }
+  .deepdive-card p { font-size: 0.88rem; line-height: 1.65; color: #b0bec5; margin: 0 0 0.6rem; }
+  .deepdive-card code {
+    background: #0d1b2a;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    color: #81c784;
+  }
+  .dd-detail {
+    background: #0f1d2e;
+    border-left: 3px solid #1976d2;
+    padding: 0.6rem 0.8rem;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.82rem;
+    color: #90a4ae;
+    line-height: 1.55;
+  }
+  .dd-detail strong { color: #4fc3f7; }
+
+  /* =========== Section 7: Tradeoffs =========== */
+  .tradeoff-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  .tradeoff-card {
+    background: #1a2332;
+    border: 1px solid #263248;
+    border-radius: 10px;
+    padding: 1.1rem;
+  }
+  .tradeoff-card h3 { color: #fff; font-size: 1rem; margin: 0 0 0.75rem; }
+  .tradeoff-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .tradeoff-pro, .tradeoff-con {
+    background: #0f1d2e;
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .tradeoff-pro { border-left: 3px solid #43a047; }
+  .tradeoff-con { border-left: 3px solid #f57f17; }
+  .tradeoff-pro h4, .tradeoff-con h4 { font-size: 0.82rem; color: #b0bec5; margin: 0 0 0.4rem; }
+  .tradeoff-pro ul, .tradeoff-con ul { margin: 0; padding-left: 1.1rem; }
+  .tradeoff-pro li, .tradeoff-con li { font-size: 0.8rem; color: #90a4ae; margin-bottom: 0.2rem; line-height: 1.5; }
+
+  /* =========== Responsive =========== */
+  @media (max-width: 800px) {
+    .chunking-layout, .cluster-layout, .consistency-layout, .fault-layout { grid-template-columns: 1fr; }
+    .deepdive-grid, .tradeoff-grid { grid-template-columns: 1fr; }
+    .cluster-ring { width: 300px; height: 300px; }
+    .tradeoff-sides { grid-template-columns: 1fr; }
+    .arch-diagram canvas { width: 100%; height: auto; }
+  }
+</style>
+
+<script>
+  // ================================================================
+  // Utility helpers
+  // ================================================================
+  function $(sel) { return document.querySelector(sel); }
+  function $$(sel) { return document.querySelectorAll(sel); }
+  function rnd(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+  function hex4() { return Math.random().toString(16).slice(2, 6); }
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function ts() { const d = new Date(); return d.toTimeString().slice(0,8); }
+
+  // ================================================================
+  // Section 1: File Chunking
+  // ================================================================
+  const splitFileBtn = $('#splitFileBtn');
+  const resetChunkBtn = $('#resetChunkBtn');
+  const chunksContainer = $('#chunksContainer');
+  const metadataBody = $('#metadataBody');
+  const fileLabel = $('#fileLabel');
+  const fileSizeLabel = $('#fileSizeLabel');
+
+  splitFileBtn.addEventListener('click', async () => {
+    const name = $('#fileName').value || 'file.dat';
+    const size = parseInt($('#fileSize').value) || 256;
+    const cSize = parseInt($('#chunkSize').value) || 64;
+    fileLabel.textContent = name;
+    fileSizeLabel.textContent = size + ' MB';
+    chunksContainer.innerHTML = '';
+    metadataBody.innerHTML = '';
+
+    const numChunks = Math.ceil(size / cSize);
+    for (let i = 0; i < numChunks; i++) {
+      const actualSize = Math.min(cSize, size - i * cSize);
+      const chunkId = hex4() + hex4();
+      await delay(120);
+      const blk = document.createElement('div');
+      blk.className = 'chunk-block';
+      blk.style.animationDelay = '0s';
+      blk.innerHTML = `<span class="chunk-id">C-${chunkId}</span><span class="chunk-sz">${actualSize} MB</span>`;
+      chunksContainer.appendChild(blk);
+
+      const row = document.createElement('tr');
+      row.style.animationDelay = '0s';
+      const checksum = hex4() + hex4() + hex4();
+      row.innerHTML = `<td>C-${chunkId}</td><td>${name}</td><td>${i * cSize} MB</td><td>${actualSize} MB</td><td>${checksum}</td>`;
+      metadataBody.appendChild(row);
+    }
+  });
+
+  resetChunkBtn.addEventListener('click', () => {
+    chunksContainer.innerHTML = '';
+    metadataBody.innerHTML = '';
+  });
+
+  // ================================================================
+  // Section 2: Replication Across Nodes
+  // ================================================================
+  const NUM_NODES = 8;
+  const clusterRing = $('#clusterRing');
+  const repFactorSlider = $('#repFactorSlider');
+  const repFactorLabel = $('#repFactorLabel');
+  const replicateBtn = $('#replicateBtn');
+  const resetRepBtn = $('#resetRepBtn');
+  const repLog = $('#repLog');
+
+  let clusterNodes = [];
+  let nodeAlive = [];
+  let chunkAssignments = []; // [{chunkId, nodes:[{nodeIdx, role}]}]
+
+  repFactorSlider.addEventListener('input', () => { repFactorLabel.textContent = repFactorSlider.value; });
+
+  function buildClusterRing() {
+    clusterRing.innerHTML = '';
+    clusterNodes = [];
+    nodeAlive = Array(NUM_NODES).fill(true);
+    chunkAssignments = [];
+    const ringW = clusterRing.offsetWidth || 400;
+    const ringH = clusterRing.offsetHeight || 400;
+    const cx = ringW / 2, cy = ringH / 2;
+    const radius = Math.min(cx, cy) - 45;
+    for (let i = 0; i < NUM_NODES; i++) {
+      const angle = (2 * Math.PI * i) / NUM_NODES - Math.PI / 2;
+      const x = cx + radius * Math.cos(angle) - 32;
+      const y = cy + radius * Math.sin(angle) - 32;
+      const el = document.createElement('div');
+      el.className = 'node-circle';
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.innerHTML = `<span class="node-label">CS-${i}</span><span class="node-chunks">0 chunks</span>`;
+      el.addEventListener('click', () => killNodeInCluster(i));
+      clusterRing.appendChild(el);
+      clusterNodes.push(el);
+    }
+    updateRepStats();
+  }
+
+  function killNodeInCluster(idx) {
+    if (!nodeAlive[idx]) return;
+    nodeAlive[idx] = false;
+    clusterNodes[idx].classList.add('node-dead');
+    logRep(`Node CS-${idx} FAILED`, 'error');
+
+    // re-replicate under-replicated chunks
+    const repFactor = parseInt(repFactorSlider.value);
+    let reReplicated = 0;
+    chunkAssignments.forEach(ca => {
+      ca.nodes = ca.nodes.filter(n => nodeAlive[n.nodeIdx]);
+      while (ca.nodes.length < repFactor) {
+        const alive = [];
+        for (let i = 0; i < NUM_NODES; i++) {
+          if (nodeAlive[i] && !ca.nodes.find(n => n.nodeIdx === i)) alive.push(i);
+        }
+        if (alive.length === 0) break;
+        const target = alive[rnd(0, alive.length - 1)];
+        const role = ca.nodes.length === 0 ? 'primary' : ca.nodes.length === 1 ? 'replica1' : 'replica2';
+        ca.nodes.push({ nodeIdx: target, role });
+        reReplicated++;
+        logRep(`Re-replicated ${ca.chunkId} -> CS-${target}`, 'warn');
+      }
+    });
+    if (reReplicated > 0) logRep(`Re-replication complete: ${reReplicated} copies`, 'success');
+    renderChunkDots();
+    updateRepStats();
+  }
+
+  function logRep(msg, cls = 'info') {
+    const div = document.createElement('div');
+    div.className = 'log-entry ' + cls;
+    div.textContent = `[${ts()}] ${msg}`;
+    repLog.prepend(div);
+  }
+
+  function renderChunkDots() {
+    // remove old dots
+    clusterRing.querySelectorAll('.chunk-dot').forEach(d => d.remove());
+    // count per node
+    const counts = Array(NUM_NODES).fill(0);
+    chunkAssignments.forEach(ca => {
+      ca.nodes.forEach(n => {
+        counts[n.nodeIdx]++;
+        const nodeEl = clusterNodes[n.nodeIdx];
+        const nx = parseFloat(nodeEl.style.left) + 32;
+        const ny = parseFloat(nodeEl.style.top) + 32;
+        const dot = document.createElement('div');
+        dot.className = 'chunk-dot ' + (n.role === 'primary' ? 'primary-chunk' : n.role === 'replica1' ? 'replica1-chunk' : 'replica2-chunk');
+        const offsetAngle = Math.random() * Math.PI * 2;
+        const offsetR = 28 + Math.random() * 14;
+        dot.style.left = (nx + offsetR * Math.cos(offsetAngle) - 5) + 'px';
+        dot.style.top = (ny + offsetR * Math.sin(offsetAngle) - 5) + 'px';
+        clusterRing.appendChild(dot);
+      });
+    });
+    clusterNodes.forEach((el, i) => {
+      el.querySelector('.node-chunks').textContent = counts[i] + ' chunks';
+    });
+  }
+
+  function updateRepStats() {
+    const alive = nodeAlive.filter(Boolean).length;
+    $('#totalNodes').textContent = NUM_NODES;
+    $('#healthyNodes').textContent = alive;
+    let totalChunks = 0;
+    let under = 0;
+    const repFactor = parseInt(repFactorSlider.value);
+    chunkAssignments.forEach(ca => {
+      totalChunks += ca.nodes.length;
+      if (ca.nodes.length < repFactor) under++;
+    });
+    $('#chunksStored').textContent = totalChunks;
+    $('#underReplicated').textContent = under;
+  }
+
+  replicateBtn.addEventListener('click', async () => {
+    // grab chunks from chunking section
+    const chunkEls = chunksContainer.querySelectorAll('.chunk-block');
+    if (chunkEls.length === 0) {
+      logRep('No chunks to replicate. Split a file first!', 'warn');
+      return;
+    }
+    chunkAssignments = [];
+    // remove existing dots
+    clusterRing.querySelectorAll('.chunk-dot').forEach(d => d.remove());
+    const repFactor = parseInt(repFactorSlider.value);
+
+    for (const chunkEl of chunkEls) {
+      const chunkId = chunkEl.querySelector('.chunk-id').textContent;
+      const aliveIdxs = [];
+      for (let i = 0; i < NUM_NODES; i++) { if (nodeAlive[i]) aliveIdxs.push(i); }
+      // pick repFactor unique nodes
+      const shuffled = aliveIdxs.sort(() => Math.random() - 0.5);
+      const chosen = shuffled.slice(0, Math.min(repFactor, shuffled.length));
+      const nodes = chosen.map((idx, r) => ({
+        nodeIdx: idx,
+        role: r === 0 ? 'primary' : r === 1 ? 'replica1' : 'replica2'
+      }));
+      chunkAssignments.push({ chunkId, nodes });
+      const targets = nodes.map(n => `CS-${n.nodeIdx}(${n.role})`).join(', ');
+      logRep(`${chunkId} -> ${targets}`, 'info');
+      await delay(90);
+      renderChunkDots();
+      updateRepStats();
+    }
+    logRep('Replication complete', 'success');
+  });
+
+  resetRepBtn.addEventListener('click', () => {
+    repLog.innerHTML = '';
+    buildClusterRing();
+  });
+
+  // init cluster
+  buildClusterRing();
+
+  // ================================================================
+  // Section 3: Architecture Diagram (Canvas)
+  // ================================================================
+  const archCanvas = $('#archCanvas');
+  const archCtx = archCanvas.getContext('2d');
+  const writeFlowBtn = $('#writeFlowBtn');
+  const readFlowBtn = $('#readFlowBtn');
+  const replayFlowBtn = $('#replayFlowBtn');
+  const flowStepsContainer = $('#flowSteps');
+
+  let currentFlow = 'write';
+  let archAnimFrame = null;
+  let archStep = -1;
+
+  const WRITE_STEPS = [
+    { num: '1', text: 'Client asks Master for chunk locations' },
+    { num: '2', text: 'Master returns primary + replica addresses' },
+    { num: '3', text: 'Client pushes data to nearest chunk server (pipeline)' },
+    { num: '4', text: 'Data forwarded along the chain to all replicas' },
+    { num: '5', text: 'Primary assigns serial order, applies mutation' },
+    { num: '6', text: 'Replicas apply mutation in same order, ACK to primary' },
+    { num: '7', text: 'Primary ACKs client — write complete' }
+  ];
+
+  const READ_STEPS = [
+    { num: '1', text: 'Client sends file name + byte offset to Master' },
+    { num: '2', text: 'Master returns chunk handle + replica locations' },
+    { num: '3', text: 'Client caches this mapping for future reads' },
+    { num: '4', text: 'Client reads from closest replica directly' },
+    { num: '5', text: 'Chunk server verifies checksum, returns data' }
+  ];
+
+  writeFlowBtn.addEventListener('click', () => {
+    currentFlow = 'write';
+    writeFlowBtn.classList.add('active-flow');
+    readFlowBtn.classList.remove('active-flow');
+    startArchAnim();
+  });
+  readFlowBtn.addEventListener('click', () => {
+    currentFlow = 'read';
+    readFlowBtn.classList.add('active-flow');
+    writeFlowBtn.classList.remove('active-flow');
+    startArchAnim();
+  });
+  replayFlowBtn.addEventListener('click', () => startArchAnim());
+
+  function drawArchBoxes(ctx) {
+    const w = archCanvas.width, h = archCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Client box
+    drawBox(ctx, 40, 180, 120, 70, '#1976d2', '#0d47a1', 'Client');
+    // Master box
+    drawBox(ctx, 340, 30, 130, 70, '#7b1fa2', '#4a0072', 'Master');
+    // sub-label
+    ctx.fillStyle = '#ce93d8';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('metadata + locations', 345, 118);
+    // Chunk servers
+    drawBox(ctx, 560, 60, 110, 55, '#2e7d32', '#1b5e20', 'CS-0 (Primary)');
+    drawBox(ctx, 560, 170, 110, 55, '#43a047', '#2e7d32', 'CS-1 (Replica)');
+    drawBox(ctx, 560, 280, 110, 55, '#66bb6a', '#43a047', 'CS-2 (Replica)');
+    // Chunk server storage icons
+    ctx.fillStyle = '#a5d6a7';
+    ctx.font = '18px sans-serif';
+    ctx.fillText('💾', 690, 92);
+    ctx.fillText('💾', 690, 202);
+    ctx.fillText('💾', 690, 312);
+  }
+
+  function drawBox(ctx, x, y, w, h, bg, border, label) {
+    ctx.fillStyle = bg;
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 5);
+    ctx.textAlign = 'left';
+  }
+
+  function drawArrow(ctx, x1, y1, x2, y2, color, progress) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const ex = x1 + dx * progress, ey = y1 + dy * progress;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // arrowhead
+    if (progress > 0.1) {
+      const angle = Math.atan2(dy, dx);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 10 * Math.cos(angle - 0.35), ey - 10 * Math.sin(angle - 0.35));
+      ctx.lineTo(ex - 10 * Math.cos(angle + 0.35), ey - 10 * Math.sin(angle + 0.35));
+      ctx.closePath();
+      ctx.fill();
+    }
+    // moving dot
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(ex, ey, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const WRITE_ARROWS = [
+    { from: [160, 200], to: [340, 65], color: '#4fc3f7' },   // step 1
+    { from: [340, 65], to: [160, 200], color: '#ce93d8' },    // step 2
+    { from: [160, 215], to: [560, 87], color: '#4fc3f7' },    // step 3
+    { from: [615, 115], to: [615, 170], color: '#81c784' },   // step 4 chain
+    { from: [615, 225], to: [615, 280], color: '#81c784' },   // step 4b chain
+    { from: [560, 87], to: [340, 80], color: '#ffb74d' },     // step 5-6 ack
+    { from: [160, 230], to: [160, 230], color: '#66bb6a' }    // step 7 ack (self)
+  ];
+
+  const READ_ARROWS = [
+    { from: [160, 200], to: [340, 65], color: '#4fc3f7' },
+    { from: [340, 65], to: [160, 200], color: '#ce93d8' },
+    { from: [160, 200], to: [160, 200], color: '#ffb74d' },   // cache (no arrow)
+    { from: [160, 215], to: [560, 197], color: '#4fc3f7' },
+    { from: [560, 197], to: [160, 215], color: '#81c784' }
+  ];
+
+  async function startArchAnim() {
+    archStep = -1;
+    const steps = currentFlow === 'write' ? WRITE_STEPS : READ_STEPS;
+    const arrows = currentFlow === 'write' ? WRITE_ARROWS : READ_ARROWS;
+    flowStepsContainer.innerHTML = '';
+    steps.forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'flow-step';
+      div.innerHTML = `<span class="step-num">${s.num}</span>${s.text}`;
+      flowStepsContainer.appendChild(div);
+    });
+
+    for (let i = 0; i < steps.length; i++) {
+      archStep = i;
+      flowStepsContainer.children[i].classList.add('active-step');
+      const arrow = arrows[i];
+      // animate arrow
+      const frames = 40;
+      for (let f = 0; f <= frames; f++) {
+        drawArchBoxes(archCtx);
+        // draw all previous arrows fully
+        for (let p = 0; p < i; p++) {
+          const pa = arrows[p];
+          if (pa.from[0] !== pa.to[0] || pa.from[1] !== pa.to[1]) {
+            drawArrow(archCtx, pa.from[0], pa.from[1], pa.to[0], pa.to[1], pa.color, 1);
+          }
+        }
+        // draw current arrow with progress
+        if (arrow.from[0] !== arrow.to[0] || arrow.from[1] !== arrow.to[1]) {
+          drawArrow(archCtx, arrow.from[0], arrow.from[1], arrow.to[0], arrow.to[1], arrow.color, f / frames);
+        }
+        await delay(22);
+      }
+      await delay(350);
+    }
+  }
+
+  // initial draw
+  drawArchBoxes(archCtx);
+  setTimeout(() => startArchAnim(), 200);
+
+  // ================================================================
+  // Section 4: Consistency Model
+  // ================================================================
+  const consCanvas = $('#consCanvas');
+  const consCtx = consCanvas.getContext('2d');
+  const strongConsBtn = $('#strongConsBtn');
+  const eventualConsBtn = $('#eventualConsBtn');
+  const triggerWriteBtn = $('#triggerWriteBtn');
+  const resetConsBtn = $('#resetConsBtn');
+
+  let consModel = 'strong';
+  let consAnimRunning = false;
+
+  strongConsBtn.addEventListener('click', () => {
+    consModel = 'strong';
+    strongConsBtn.classList.add('active-cons');
+    eventualConsBtn.classList.remove('active-cons');
+    $('#consModelLabel').textContent = 'Strong';
+    resetConsViz();
+  });
+  eventualConsBtn.addEventListener('click', () => {
+    consModel = 'eventual';
+    eventualConsBtn.classList.add('active-cons');
+    strongConsBtn.classList.remove('active-cons');
+    $('#consModelLabel').textContent = 'Eventual';
+    resetConsViz();
+  });
+
+  function resetConsViz() {
+    consAnimRunning = false;
+    drawConsBase(consCtx);
+    $('#writeLatency').textContent = '—';
+    $('#replicasSynced').textContent = '0 / 3';
+    $('#ackSent').textContent = 'No';
+  }
+  resetConsBtn.addEventListener('click', resetConsViz);
+
+  function drawConsBase(ctx) {
+    const w = consCanvas.width, h = consCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0d1b2a';
+    ctx.fillRect(0, 0, w, h);
+
+    // labels
+    ctx.fillStyle = '#78909c';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('Client', 15, 55);
+    ctx.fillText('Primary', 15, 135);
+    ctx.fillText('Replica 1', 15, 215);
+    ctx.fillText('Replica 2', 15, 295);
+
+    // timelines
+    ctx.strokeStyle = '#263248';
+    ctx.lineWidth = 1;
+    for (let y of [60, 140, 220, 300]) {
+      ctx.beginPath();
+      ctx.moveTo(90, y);
+      ctx.lineTo(w - 20, y);
+      ctx.stroke();
+    }
+    // time axis
+    ctx.fillStyle = '#546e7a';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('time ---->', w - 70, h - 10);
+  }
+
+  triggerWriteBtn.addEventListener('click', async () => {
+    if (consAnimRunning) return;
+    consAnimRunning = true;
+    drawConsBase(consCtx);
+
+    const ctx = consCtx;
+    const startX = 120;
+    const primary_y = 140, r1_y = 220, r2_y = 300, client_y = 60;
+
+    // Write arrives at primary
+    await animConsArrow(ctx, startX, client_y, startX + 40, primary_y, '#4fc3f7', 'WRITE');
+    $('#replicasSynced').textContent = '0 / 3';
+
+    if (consModel === 'strong') {
+      // fan out to all replicas, wait for all
+      await Promise.all([
+        animConsArrow(ctx, startX + 60, primary_y, startX + 130, r1_y, '#43a047', 'sync'),
+        animConsArrow(ctx, startX + 80, primary_y, startX + 150, r2_y, '#f9a825', 'sync')
+      ]);
+      $('#replicasSynced').textContent = '1 / 3';
+      await delay(150);
+      $('#replicasSynced').textContent = '2 / 3';
+      await delay(150);
+      $('#replicasSynced').textContent = '3 / 3';
+
+      // All ACK back
+      await Promise.all([
+        animConsArrow(ctx, startX + 150, r1_y, startX + 220, primary_y, '#66bb6a', 'ACK'),
+        animConsArrow(ctx, startX + 170, r2_y, startX + 240, primary_y, '#66bb6a', 'ACK')
+      ]);
+
+      // Primary ACKs client
+      await animConsArrow(ctx, startX + 260, primary_y, startX + 320, client_y, '#66bb6a', 'ACK');
+      $('#ackSent').textContent = 'Yes';
+      $('#writeLatency').textContent = '320 ms';
+
+      // draw ACK label
+      ctx.fillStyle = '#66bb6a';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText('All replicas confirmed', startX + 340, client_y + 5);
+    } else {
+      // ACK after primary write
+      await delay(100);
+      $('#replicasSynced').textContent = '1 / 3';
+      await animConsArrow(ctx, startX + 60, primary_y, startX + 100, client_y, '#66bb6a', 'ACK');
+      $('#ackSent').textContent = 'Yes';
+      $('#writeLatency').textContent = '80 ms';
+
+      ctx.fillStyle = '#66bb6a';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText('ACK (primary only)', startX + 120, client_y + 5);
+
+      // async replication (after ACK)
+      await delay(300);
+      await animConsArrow(ctx, startX + 140, primary_y, startX + 250, r1_y, '#43a047', 'async');
+      $('#replicasSynced').textContent = '2 / 3';
+      await delay(200);
+      await animConsArrow(ctx, startX + 180, primary_y, startX + 320, r2_y, '#f9a825', 'async');
+      $('#replicasSynced').textContent = '3 / 3';
+
+      ctx.fillStyle = '#ffa726';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('(replicas converge later)', startX + 260, r2_y + 25);
+    }
+    consAnimRunning = false;
+  });
+
+  async function animConsArrow(ctx, x1, y1, x2, y2, color, label) {
+    const frames = 25;
+    for (let f = 0; f <= frames; f++) {
+      const p = f / frames;
+      const cx = x1 + (x2 - x1) * p;
+      const cy = y1 + (y2 - y1) * p;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+      await delay(18);
+    }
+    // draw full arrow
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    // arrowhead
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - 8 * Math.cos(angle - 0.4), y2 - 8 * Math.sin(angle - 0.4));
+    ctx.lineTo(x2 - 8 * Math.cos(angle + 0.4), y2 - 8 * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fill();
+    // label
+    if (label) {
+      ctx.fillStyle = color;
+      ctx.font = '10px sans-serif';
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      ctx.fillText(label, mx - 10, my - 6);
+    }
+  }
+
+  drawConsBase(consCtx);
+
+  // ================================================================
+  // Section 5: Fault Tolerance
+  // ================================================================
+  const faultCluster = $('#faultCluster');
+  const startHeartbeatBtn = $('#startHeartbeatBtn');
+  const resetFaultBtn = $('#resetFaultBtn');
+  const hbLog = $('#hbLog');
+
+  let faultNodes = [];
+  let faultAlive = [];
+  let hbInterval = null;
+  let faultChunks = [];
+  let reRepTotal = 0;
+
+  function buildFaultCluster() {
+    faultCluster.innerHTML = '';
+    faultNodes = [];
+    faultAlive = Array(NUM_NODES).fill(true);
+    faultChunks = [];
+    reRepTotal = 0;
+    hbLog.innerHTML = '';
+    if (hbInterval) clearInterval(hbInterval);
+    hbInterval = null;
+
+    // assign some initial chunks
+    for (let c = 0; c < 6; c++) {
+      const id = 'C-' + hex4();
+      const nodes = [];
+      const idxs = Array.from({length: NUM_NODES}, (_, i) => i).sort(() => Math.random() - 0.5).slice(0, 3);
+      idxs.forEach((idx, r) => nodes.push({ nodeIdx: idx, role: r === 0 ? 'primary' : r === 1 ? 'replica1' : 'replica2' }));
+      faultChunks.push({ chunkId: id, nodes });
+    }
+
+    for (let i = 0; i < NUM_NODES; i++) {
+      const chunkCount = faultChunks.reduce((acc, c) => acc + c.nodes.filter(n => n.nodeIdx === i).length, 0);
+      const el = document.createElement('div');
+      el.className = 'fault-node fn-alive';
+      el.innerHTML = `<span class="fn-icon">🖥️</span><span class="fn-label">CS-${i}</span><span class="fn-hb">${chunkCount} chunks</span>`;
+      el.addEventListener('click', () => killFaultNode(i));
+      faultCluster.appendChild(el);
+      faultNodes.push(el);
+    }
+    updateFaultStats();
+  }
+
+  function killFaultNode(idx) {
+    if (!faultAlive[idx]) return;
+    faultAlive[idx] = false;
+    faultNodes[idx].classList.remove('fn-alive');
+    faultNodes[idx].classList.add('fn-dead');
+    faultNodes[idx].querySelector('.fn-icon').textContent = '💀';
+    hbLogEntry(`CS-${idx} killed!`, 'hb-fail');
+
+    // Simulate heartbeat timeout detection
+    setTimeout(() => {
+      hbLogEntry(`Master detected CS-${idx} failure (heartbeat timeout 10s)`, 'hb-fail');
+      const start = performance.now();
+      // re-replicate
+      let reReps = 0;
+      faultChunks.forEach(c => {
+        c.nodes = c.nodes.filter(n => faultAlive[n.nodeIdx]);
+        while (c.nodes.length < 3) {
+          const alive = [];
+          for (let i = 0; i < NUM_NODES; i++) {
+            if (faultAlive[i] && !c.nodes.find(n => n.nodeIdx === i)) alive.push(i);
+          }
+          if (alive.length === 0) break;
+          const t = alive[rnd(0, alive.length - 1)];
+          c.nodes.push({ nodeIdx: t, role: c.nodes.length === 0 ? 'primary' : c.nodes.length === 1 ? 'replica1' : 'replica2' });
+          reReps++;
+          hbLogEntry(`Re-replicate ${c.chunkId} -> CS-${t}`, 'hb-info');
+          // flash the target node
+          faultNodes[t].classList.add('fn-recovering');
+          setTimeout(() => faultNodes[t].classList.remove('fn-recovering'), 1800);
+        }
+      });
+      reRepTotal += reReps;
+      const elapsed = Math.round(performance.now() - start + rnd(50, 200));
+      hbLogEntry(`Recovery complete: ${reReps} chunks re-replicated in ~${elapsed}ms`, 'hb-ok');
+      $('#recoveryTime').textContent = elapsed + ' ms';
+      $('#reRepCount').textContent = reRepTotal;
+      updateFaultNodeLabels();
+      updateFaultStats();
+    }, 800);
+
+    updateFaultStats();
+  }
+
+  function updateFaultNodeLabels() {
+    faultNodes.forEach((el, i) => {
+      const chunkCount = faultChunks.reduce((acc, c) => acc + c.nodes.filter(n => n.nodeIdx === i).length, 0);
+      el.querySelector('.fn-hb').textContent = chunkCount + ' chunks';
+    });
+  }
+
+  function updateFaultStats() {
+    const alive = faultAlive.filter(Boolean).length;
+    $('#aliveCount').textContent = alive;
+    $('#deadCount').textContent = NUM_NODES - alive;
+  }
+
+  function hbLogEntry(msg, cls) {
+    const div = document.createElement('div');
+    div.className = 'hb-entry ' + cls;
+    div.textContent = `[${ts()}] ${msg}`;
+    hbLog.prepend(div);
+  }
+
+  startHeartbeatBtn.addEventListener('click', () => {
+    if (hbInterval) {
+      clearInterval(hbInterval);
+      hbInterval = null;
+      startHeartbeatBtn.textContent = 'Start Heartbeat Monitor';
+      return;
+    }
+    startHeartbeatBtn.textContent = 'Stop Heartbeat Monitor';
+    hbInterval = setInterval(() => {
+      faultAlive.forEach((alive, i) => {
+        if (alive) {
+          hbLogEntry(`CS-${i}: heartbeat OK`, 'hb-ok');
+        }
+      });
+    }, 3000);
+  });
+
+  resetFaultBtn.addEventListener('click', buildFaultCluster);
+
+  buildFaultCluster();
+</script>

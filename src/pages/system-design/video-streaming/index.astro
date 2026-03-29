@@ -1,0 +1,2455 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Design a Video Streaming Service — Interactive Visualization"
+  description="Understand video streaming architecture: CDN routing, adaptive bitrate, encoding pipeline, chunk delivery. Interactive simulation."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Video Streaming", href: "/system-design/video-streaming/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>📺 Design a Video Streaming Service</h1>
+      <p class="subtitle">CDN routing, adaptive bitrate, encoding pipelines, and chunk delivery — all interactive</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A video streaming service must deliver high-quality video to millions of concurrent users worldwide.
+          The key challenges: <strong>how do you route users to the nearest server?</strong> How does the player
+          adapt quality in real-time based on network conditions? How do you encode, segment, and distribute
+          petabytes of video content efficiently? This page lets you explore each layer of the architecture interactively.
+        </p>
+        <div class="overview-stats">
+          <div class="overview-stat">
+            <span class="overview-stat-value">80%+</span>
+            <span class="overview-stat-label">of internet traffic is video</span>
+          </div>
+          <div class="overview-stat">
+            <span class="overview-stat-value">&lt;200ms</span>
+            <span class="overview-stat-label">target startup latency</span>
+          </div>
+          <div class="overview-stat">
+            <span class="overview-stat-value">5-20 Mbps</span>
+            <span class="overview-stat-label">bandwidth for HD/4K</span>
+          </div>
+          <div class="overview-stat">
+            <span class="overview-stat-value">4-10s</span>
+            <span class="overview-stat-label">typical chunk/segment size</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CDN Routing Visualization -->
+    <section class="cdn-section">
+      <h2>🌍 CDN Routing Visualization</h2>
+      <p class="section-desc">Click on a user location to see how requests are routed to the nearest CDN edge server. Watch data packets flow from origin through edge to user.</p>
+      <div class="cdn-controls">
+        <button id="cdnResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <button id="cdnAutoBtn" class="action-btn primary-btn">▶️ Auto Demo</button>
+        <span class="cdn-info" id="cdnInfo">Click a user icon to start routing</span>
+      </div>
+      <div class="cdn-map-container">
+        <svg id="cdnMap" viewBox="0 0 900 460" class="cdn-map">
+          <!-- Simplified world map background -->
+          <rect x="0" y="0" width="900" height="460" fill="#0a1628" rx="8"/>
+          <!-- Grid lines -->
+          <line x1="0" y1="115" x2="900" y2="115" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <line x1="0" y1="230" x2="900" y2="230" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <line x1="0" y1="345" x2="900" y2="345" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <line x1="225" y1="0" x2="225" y2="460" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <line x1="450" y1="0" x2="450" y2="460" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <line x1="675" y1="0" x2="675" y2="460" stroke="#1a2a4a" stroke-width="0.5" stroke-dasharray="4"/>
+          <!-- Continent outlines (simplified) -->
+          <!-- North America -->
+          <path d="M80,80 Q120,60 200,70 Q240,80 260,120 Q270,160 250,200 Q220,240 180,260 Q140,250 100,220 Q70,180 60,140 Q60,100 80,80Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+          <!-- South America -->
+          <path d="M200,280 Q230,270 250,290 Q260,320 270,360 Q260,400 240,420 Q220,430 200,410 Q180,380 180,340 Q180,300 200,280Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+          <!-- Europe -->
+          <path d="M380,70 Q420,60 460,70 Q480,90 490,120 Q480,150 460,160 Q430,170 400,160 Q380,140 370,110 Q370,90 380,70Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+          <!-- Africa -->
+          <path d="M400,180 Q440,170 470,190 Q490,230 500,280 Q490,340 470,370 Q440,380 420,360 Q400,320 390,270 Q390,220 400,180Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+          <!-- Asia -->
+          <path d="M520,60 Q600,50 700,70 Q760,100 780,150 Q770,200 740,220 Q680,240 620,230 Q560,210 530,170 Q510,130 510,90 Q510,70 520,60Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+          <!-- Australia -->
+          <path d="M720,300 Q760,290 800,300 Q820,320 810,350 Q790,370 760,370 Q730,360 720,340 Q710,320 720,300Z" fill="#0d1f3c" stroke="#1e3a5f" stroke-width="1"/>
+
+          <!-- Origin Server -->
+          <g id="originServer" class="cdn-origin">
+            <rect x="430" y="200" width="40" height="30" rx="4" fill="#ff6b35" stroke="#ff9a6c" stroke-width="1.5"/>
+            <text x="450" y="220" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">SRC</text>
+            <text x="450" y="248" text-anchor="middle" fill="#ff9a6c" font-size="9">Origin</text>
+          </g>
+
+          <!-- CDN Edge Servers -->
+          <g class="cdn-edge" data-edge="us-east" data-x="180" data-y="140">
+            <circle cx="180" cy="140" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="180" y="144" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E1</text>
+            <text x="180" y="165" text-anchor="middle" fill="#4dffd4" font-size="8">US-East</text>
+          </g>
+          <g class="cdn-edge" data-edge="us-west" data-x="100" data-y="160">
+            <circle cx="100" cy="160" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="100" y="164" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E2</text>
+            <text x="100" y="185" text-anchor="middle" fill="#4dffd4" font-size="8">US-West</text>
+          </g>
+          <g class="cdn-edge" data-edge="eu-west" data-x="410" data-y="100">
+            <circle cx="410" cy="100" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="410" y="104" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E3</text>
+            <text x="410" y="125" text-anchor="middle" fill="#4dffd4" font-size="8">EU-West</text>
+          </g>
+          <g class="cdn-edge" data-edge="asia-east" data-x="720" data-y="130">
+            <circle cx="720" cy="130" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="720" y="134" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E4</text>
+            <text x="720" y="155" text-anchor="middle" fill="#4dffd4" font-size="8">Asia-East</text>
+          </g>
+          <g class="cdn-edge" data-edge="asia-south" data-x="620" data-y="200">
+            <circle cx="620" cy="200" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="620" y="204" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E5</text>
+            <text x="620" y="225" text-anchor="middle" fill="#4dffd4" font-size="8">Asia-S</text>
+          </g>
+          <g class="cdn-edge" data-edge="sa-east" data-x="230" data-y="340">
+            <circle cx="230" cy="340" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="230" y="344" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E6</text>
+            <text x="230" y="365" text-anchor="middle" fill="#4dffd4" font-size="8">SA-East</text>
+          </g>
+          <g class="cdn-edge" data-edge="au" data-x="770" data-y="330">
+            <circle cx="770" cy="330" r="12" fill="#00c9a7" stroke="#4dffd4" stroke-width="1.5" opacity="0.9"/>
+            <text x="770" y="334" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">E7</text>
+            <text x="770" y="355" text-anchor="middle" fill="#4dffd4" font-size="8">AU</text>
+          </g>
+
+          <!-- User locations (clickable) -->
+          <g class="cdn-user" data-user="ny" data-x="195" data-y="120" data-nearest="us-east" style="cursor:pointer">
+            <circle cx="195" cy="120" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="195" y="124" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="195" y="110" text-anchor="middle" fill="#a29bfe" font-size="7">NYC</text>
+          </g>
+          <g class="cdn-user" data-user="la" data-x="80" data-y="170" data-nearest="us-west" style="cursor:pointer">
+            <circle cx="80" cy="170" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="80" y="174" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="80" y="160" text-anchor="middle" fill="#a29bfe" font-size="7">LA</text>
+          </g>
+          <g class="cdn-user" data-user="london" data-x="400" data-y="82" data-nearest="eu-west" style="cursor:pointer">
+            <circle cx="400" cy="82" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="400" y="86" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="400" y="72" text-anchor="middle" fill="#a29bfe" font-size="7">LDN</text>
+          </g>
+          <g class="cdn-user" data-user="tokyo" data-x="750" data-y="110" data-nearest="asia-east" style="cursor:pointer">
+            <circle cx="750" cy="110" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="750" y="114" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="750" y="100" text-anchor="middle" fill="#a29bfe" font-size="7">TKY</text>
+          </g>
+          <g class="cdn-user" data-user="mumbai" data-x="600" data-y="210" data-nearest="asia-south" style="cursor:pointer">
+            <circle cx="600" cy="210" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="600" y="214" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="600" y="200" text-anchor="middle" fill="#a29bfe" font-size="7">MUM</text>
+          </g>
+          <g class="cdn-user" data-user="saopaulo" data-x="220" data-y="360" data-nearest="sa-east" style="cursor:pointer">
+            <circle cx="220" cy="360" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="220" y="364" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="220" y="350" text-anchor="middle" fill="#a29bfe" font-size="7">SAO</text>
+          </g>
+          <g class="cdn-user" data-user="sydney" data-x="800" data-y="340" data-nearest="au" style="cursor:pointer">
+            <circle cx="800" cy="340" r="8" fill="#6c5ce7" stroke="#a29bfe" stroke-width="1.5"/>
+            <text x="800" y="344" text-anchor="middle" fill="#fff" font-size="7">U</text>
+            <text x="800" y="330" text-anchor="middle" fill="#a29bfe" font-size="7">SYD</text>
+          </g>
+
+          <!-- Animated elements group -->
+          <g id="cdnAnimGroup"></g>
+
+          <!-- Latency overlay -->
+          <g id="cdnLatencyOverlay"></g>
+        </svg>
+        <div class="cdn-legend">
+          <span class="cdn-legend-item"><span class="legend-dot origin-dot"></span> Origin Server</span>
+          <span class="cdn-legend-item"><span class="legend-dot edge-dot"></span> CDN Edge Server</span>
+          <span class="cdn-legend-item"><span class="legend-dot user-dot"></span> User Location</span>
+        </div>
+      </div>
+      <div class="cdn-detail-panel" id="cdnDetailPanel">
+        <div class="cdn-detail-row">
+          <span class="cdn-detail-label">User</span>
+          <span class="cdn-detail-value" id="cdnDetailUser">—</span>
+        </div>
+        <div class="cdn-detail-row">
+          <span class="cdn-detail-label">Nearest Edge</span>
+          <span class="cdn-detail-value" id="cdnDetailEdge">—</span>
+        </div>
+        <div class="cdn-detail-row">
+          <span class="cdn-detail-label">Edge Latency</span>
+          <span class="cdn-detail-value" id="cdnDetailEdgeLat">—</span>
+        </div>
+        <div class="cdn-detail-row">
+          <span class="cdn-detail-label">Origin Latency</span>
+          <span class="cdn-detail-value" id="cdnDetailOriginLat">—</span>
+        </div>
+        <div class="cdn-detail-row">
+          <span class="cdn-detail-label">Savings</span>
+          <span class="cdn-detail-value cdn-savings" id="cdnDetailSavings">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Adaptive Bitrate Switching -->
+    <section class="abr-section">
+      <h2>📊 Adaptive Bitrate Switching</h2>
+      <p class="section-desc">Watch how ABR algorithms dynamically switch video quality based on available bandwidth. Simulate bandwidth changes to see quality adaptation in real-time.</p>
+      <div class="abr-controls">
+        <button id="abrStartBtn" class="action-btn primary-btn">▶️ Start Simulation</button>
+        <button id="abrStopBtn" class="action-btn reset-btn">⏹️ Stop</button>
+        <button id="abrDropBtn" class="action-btn warn-btn">📉 Bandwidth Drop</button>
+        <button id="abrSpikeBtn" class="action-btn primary-btn-secondary">📈 Bandwidth Spike</button>
+        <button id="abrResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="abr-layout">
+        <div class="abr-chart-container">
+          <canvas id="abrChart" width="700" height="300"></canvas>
+          <div class="abr-chart-legend">
+            <span class="abr-legend-item"><span class="abr-legend-line bw-line"></span> Bandwidth</span>
+            <span class="abr-legend-item"><span class="abr-legend-line quality-line"></span> Selected Quality</span>
+          </div>
+        </div>
+        <div class="abr-side-panel">
+          <div class="abr-current-quality">
+            <span class="abr-quality-label">Current Quality</span>
+            <span class="abr-quality-value" id="abrCurrentQuality">—</span>
+            <span class="abr-quality-bitrate" id="abrCurrentBitrate">— Mbps</span>
+          </div>
+          <div class="abr-buffer-indicator">
+            <span class="abr-buffer-label">Buffer Level</span>
+            <div class="abr-buffer-bar-container">
+              <div class="abr-buffer-bar" id="abrBufferBar"></div>
+            </div>
+            <span class="abr-buffer-value" id="abrBufferValue">0.0s</span>
+          </div>
+          <div class="abr-quality-tiers">
+            <h4>Quality Tiers</h4>
+            <div class="abr-tier" data-tier="1080p">
+              <span class="tier-label">1080p</span>
+              <span class="tier-bitrate">5.0 Mbps</span>
+              <div class="tier-indicator" id="tier1080"></div>
+            </div>
+            <div class="abr-tier" data-tier="720p">
+              <span class="tier-label">720p</span>
+              <span class="tier-bitrate">2.5 Mbps</span>
+              <div class="tier-indicator" id="tier720"></div>
+            </div>
+            <div class="abr-tier" data-tier="480p">
+              <span class="tier-label">480p</span>
+              <span class="tier-bitrate">1.2 Mbps</span>
+              <div class="tier-indicator" id="tier480"></div>
+            </div>
+            <div class="abr-tier" data-tier="360p">
+              <span class="tier-label">360p</span>
+              <span class="tier-bitrate">0.6 Mbps</span>
+              <div class="tier-indicator" id="tier360"></div>
+            </div>
+            <div class="abr-tier" data-tier="240p">
+              <span class="tier-label">240p</span>
+              <span class="tier-bitrate">0.3 Mbps</span>
+              <div class="tier-indicator" id="tier240"></div>
+            </div>
+          </div>
+          <div class="abr-stats">
+            <div class="abr-stat"><span>Quality Switches</span><strong id="abrSwitchCount">0</strong></div>
+            <div class="abr-stat"><span>Rebuffer Events</span><strong id="abrRebufferCount">0</strong></div>
+            <div class="abr-stat"><span>Avg Quality</span><strong id="abrAvgQuality">—</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Encoding Pipeline -->
+    <section class="encoding-section">
+      <h2>🎬 Encoding Pipeline</h2>
+      <p class="section-desc">See how raw video is processed into multiple quality levels and segmented for streaming. Click "Start Encoding" to animate the pipeline.</p>
+      <div class="encoding-controls">
+        <button id="encodeStartBtn" class="action-btn primary-btn">🚀 Start Encoding</button>
+        <button id="encodeResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <div class="encode-input-info">
+          <span>Input: <strong>1080p, 24fps, 10 min video</strong></span>
+          <span>Raw size: <strong>~18 GB</strong></span>
+        </div>
+      </div>
+      <div class="encoding-pipeline">
+        <div class="pipeline-stage" id="pipeStage1">
+          <div class="pipeline-stage-icon">📥</div>
+          <div class="pipeline-stage-name">Raw Upload</div>
+          <div class="pipeline-stage-detail">Ingest raw video file</div>
+          <div class="pipeline-stage-bar"><div class="pipeline-stage-progress" id="pipeProgress1"></div></div>
+          <div class="pipeline-stage-size">18 GB</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" id="pipeStage2">
+          <div class="pipeline-stage-icon">🔧</div>
+          <div class="pipeline-stage-name">Transcode</div>
+          <div class="pipeline-stage-detail">H.264/H.265 encoding</div>
+          <div class="pipeline-stage-bar"><div class="pipeline-stage-progress" id="pipeProgress2"></div></div>
+          <div class="pipeline-stage-size">—</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" id="pipeStage3">
+          <div class="pipeline-stage-icon">📐</div>
+          <div class="pipeline-stage-name">Multi-Resolution</div>
+          <div class="pipeline-stage-detail">Generate quality tiers</div>
+          <div class="pipeline-stage-bar"><div class="pipeline-stage-progress" id="pipeProgress3"></div></div>
+          <div class="pipeline-stage-size">—</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" id="pipeStage4">
+          <div class="pipeline-stage-icon">🔪</div>
+          <div class="pipeline-stage-name">Segmentation</div>
+          <div class="pipeline-stage-detail">Split into 4s chunks</div>
+          <div class="pipeline-stage-bar"><div class="pipeline-stage-progress" id="pipeProgress4"></div></div>
+          <div class="pipeline-stage-size">—</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage" id="pipeStage5">
+          <div class="pipeline-stage-icon">☁️</div>
+          <div class="pipeline-stage-name">Store & Distribute</div>
+          <div class="pipeline-stage-detail">Push to CDN origins</div>
+          <div class="pipeline-stage-bar"><div class="pipeline-stage-progress" id="pipeProgress5"></div></div>
+          <div class="pipeline-stage-size">—</div>
+        </div>
+      </div>
+      <div class="encoding-outputs" id="encodingOutputs">
+        <h4>Generated Renditions</h4>
+        <div class="rendition-grid" id="renditionGrid"></div>
+      </div>
+    </section>
+
+    <!-- Chunk Delivery Simulation -->
+    <section class="chunk-section">
+      <h2>📦 Chunk Delivery Simulation</h2>
+      <p class="section-desc">Watch video chunks being downloaded and played in sequence. Simulate network issues to see buffering behavior.</p>
+      <div class="chunk-controls">
+        <button id="chunkPlayBtn" class="action-btn primary-btn">▶️ Play</button>
+        <button id="chunkPauseBtn" class="action-btn primary-btn-secondary">⏸️ Pause</button>
+        <button id="chunkSlowBtn" class="action-btn warn-btn">🐢 Slow Network</button>
+        <button id="chunkFastBtn" class="action-btn primary-btn-secondary">🐇 Fast Network</button>
+        <button id="chunkResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="chunk-player">
+        <div class="chunk-screen" id="chunkScreen">
+          <div class="chunk-screen-text" id="chunkScreenText">Press Play</div>
+          <div class="chunk-spinner" id="chunkSpinner" style="display:none">
+            <div class="spinner-ring"></div>
+            <span>Buffering...</span>
+          </div>
+          <div class="chunk-quality-badge" id="chunkQualityBadge">—</div>
+        </div>
+        <div class="chunk-timeline-container">
+          <div class="chunk-timeline" id="chunkTimeline"></div>
+          <div class="chunk-playhead" id="chunkPlayhead"></div>
+          <div class="chunk-time-labels">
+            <span>0:00</span>
+            <span>0:20</span>
+            <span>0:40</span>
+            <span>1:00</span>
+          </div>
+        </div>
+        <div class="chunk-stats-row">
+          <div class="chunk-stat"><span>Downloaded</span><strong id="chunkDownloaded">0 / 15</strong></div>
+          <div class="chunk-stat"><span>Playing</span><strong id="chunkPlaying">0 / 15</strong></div>
+          <div class="chunk-stat"><span>Buffer Ahead</span><strong id="chunkBufferAhead">0 chunks</strong></div>
+          <div class="chunk-stat"><span>Network</span><strong id="chunkNetworkSpeed">Fast</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video Player Buffer Visualization -->
+    <section class="buffer-section">
+      <h2>🎯 Video Player Buffer Visualization</h2>
+      <p class="section-desc">Explore the internal buffer state of a video player. See how segments are fetched ahead of playback and what happens during network stalls.</p>
+      <div class="buffer-controls">
+        <button id="bufferStartBtn" class="action-btn primary-btn">▶️ Start Playback</button>
+        <button id="bufferStallBtn" class="action-btn warn-btn">⚠️ Simulate Stall</button>
+        <button id="bufferResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="buffer-viz">
+        <div class="buffer-bar-outer">
+          <div class="buffer-bar-labels">
+            <span>Played</span>
+            <span>Buffered</span>
+            <span>Not Loaded</span>
+          </div>
+          <div class="buffer-bar-track" id="bufferBarTrack">
+            <div class="buffer-played" id="bufferPlayed"></div>
+            <div class="buffer-loaded" id="bufferLoaded"></div>
+            <div class="buffer-playhead-marker" id="bufferPlayheadMarker"></div>
+          </div>
+          <div class="buffer-time-labels" id="bufferTimeLabels">
+            <span>0:00</span><span>0:30</span><span>1:00</span><span>1:30</span><span>2:00</span>
+          </div>
+        </div>
+        <div class="buffer-health-panel">
+          <div class="buffer-health-gauge">
+            <svg viewBox="0 0 120 70" class="health-gauge-svg">
+              <path d="M10,60 A50,50 0 0,1 110,60" fill="none" stroke="#1a2a4a" stroke-width="10" stroke-linecap="round"/>
+              <path d="M10,60 A50,50 0 0,1 110,60" fill="none" stroke="#00c9a7" stroke-width="10" stroke-linecap="round" id="healthArc" stroke-dasharray="0 157"/>
+            </svg>
+            <div class="health-label">Buffer Health</div>
+            <div class="health-value" id="healthValue">0%</div>
+          </div>
+          <div class="buffer-metrics">
+            <div class="buffer-metric"><span>Playback Position</span><strong id="bufferPos">0:00</strong></div>
+            <div class="buffer-metric"><span>Buffer End</span><strong id="bufferEnd">0:00</strong></div>
+            <div class="buffer-metric"><span>Buffer Duration</span><strong id="bufferDuration">0.0s</strong></div>
+            <div class="buffer-metric"><span>State</span><strong id="bufferState">Idle</strong></div>
+            <div class="buffer-metric"><span>Rebuffers</span><strong id="bufferRebuffers">0</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="buffer-event-log" id="bufferEventLog">
+        <h4>Event Log</h4>
+        <div class="buffer-events" id="bufferEvents"></div>
+      </div>
+    </section>
+
+    <!-- Architecture Deep Dive -->
+    <section class="architecture-section">
+      <h2>🏗️ Architecture Deep Dive</h2>
+      <p class="section-desc">Explore the major subsystems of a video streaming platform.</p>
+
+      <div class="arch-tabs">
+        <button class="arch-tab active" data-tab="upload">Upload Pipeline</button>
+        <button class="arch-tab" data-tab="delivery">Content Delivery</button>
+        <button class="arch-tab" data-tab="player">Video Player</button>
+        <button class="arch-tab" data-tab="recommendation">Recommendations</button>
+        <button class="arch-tab" data-tab="livevod">Live vs VOD</button>
+      </div>
+
+      <div class="arch-content" id="archContent">
+        <!-- Upload Pipeline -->
+        <div class="arch-panel active" data-panel="upload">
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <div class="arch-node upload-node">
+                <div class="arch-node-icon">📱</div>
+                <div class="arch-node-label">Client Upload</div>
+                <div class="arch-node-desc">Resumable upload via TUS protocol. Large files split into chunks for reliability.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node upload-node">
+                <div class="arch-node-icon">🔍</div>
+                <div class="arch-node-label">Validation</div>
+                <div class="arch-node-desc">Format check, virus scan, content moderation (AI-based), metadata extraction.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node upload-node">
+                <div class="arch-node-icon">⚙️</div>
+                <div class="arch-node-label">Transcoding Queue</div>
+                <div class="arch-node-desc">Jobs queued in priority order. DAG of encoding tasks. Distributed across GPU workers.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node upload-node">
+                <div class="arch-node-icon">📦</div>
+                <div class="arch-node-label">Object Storage</div>
+                <div class="arch-node-desc">Renditions stored in S3-compatible storage. Manifest files (HLS/DASH) generated.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node upload-node">
+                <div class="arch-node-icon">✅</div>
+                <div class="arch-node-label">Ready</div>
+                <div class="arch-node-desc">Video indexed, thumbnails generated, CDN warming for popular content.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Content Delivery -->
+        <div class="arch-panel" data-panel="delivery">
+          <div class="arch-diagram">
+            <div class="arch-detail-grid">
+              <div class="arch-detail-card">
+                <h4>🌐 DNS-based Routing</h4>
+                <p>GeoDNS resolves to nearest PoP. Anycast for edge discovery. Latency-based routing with health checks.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>📡 Edge Caching</h4>
+                <p>L1 edge (city-level), L2 regional, L3 origin shield. LRU eviction with popularity-based pinning.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🔒 Token Authentication</h4>
+                <p>Signed URLs with expiry. DRM (Widevine/FairPlay/PlayReady) for premium content. Geo-fencing.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>⚡ HTTP/2 & QUIC</h4>
+                <p>Multiplexed streams. 0-RTT connection resumption. Congestion control optimized for video chunks.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>📊 Cache Hit Ratio</h4>
+                <p>Target 95%+ cache hit ratio. Long-tail content challenge. Predictive pre-warming based on trending.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🔄 Failover</h4>
+                <p>Multi-CDN strategy. Real-time quality monitoring. Automatic failover within 2-3 seconds on errors.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Video Player -->
+        <div class="arch-panel" data-panel="player">
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <div class="arch-node player-node">
+                <div class="arch-node-icon">📋</div>
+                <div class="arch-node-label">Manifest Parser</div>
+                <div class="arch-node-desc">Parse HLS (.m3u8) or DASH (.mpd). Extract available renditions, segments, DRM info.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node player-node">
+                <div class="arch-node-icon">🧠</div>
+                <div class="arch-node-label">ABR Controller</div>
+                <div class="arch-node-desc">Bandwidth estimation (EWMA). Buffer-based + throughput-based hybrid. Quality decision engine.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node player-node">
+                <div class="arch-node-icon">📥</div>
+                <div class="arch-node-label">Segment Loader</div>
+                <div class="arch-node-desc">HTTP range requests. Prefetch logic. Retry with backoff. Parallel downloads for init segments.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node player-node">
+                <div class="arch-node-icon">🎵</div>
+                <div class="arch-node-label">MSE / Buffer</div>
+                <div class="arch-node-desc">Media Source Extensions API. Source buffer management. Audio/video sync. Codec switching.</div>
+              </div>
+              <div class="arch-arrow">→</div>
+              <div class="arch-node player-node">
+                <div class="arch-node-icon">📺</div>
+                <div class="arch-node-label">Renderer</div>
+                <div class="arch-node-desc">Hardware-accelerated decode. Subtitle overlay. Picture-in-picture. Fullscreen management.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div class="arch-panel" data-panel="recommendation">
+          <div class="arch-diagram">
+            <div class="arch-detail-grid">
+              <div class="arch-detail-card">
+                <h4>👤 Collaborative Filtering</h4>
+                <p>Users who watched X also watched Y. Matrix factorization at scale. Cold-start problem for new users.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🎬 Content-Based</h4>
+                <p>Genre, tags, audio/visual features. NLP on descriptions. Scene-level embedding similarity.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🔄 Real-Time Signals</h4>
+                <p>Watch time, skip rate, rewind, pause patterns. Session context. Time-of-day preferences.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🏗️ Feature Store</h4>
+                <p>Precomputed user/item embeddings. Online feature serving &lt;10ms. Batch + streaming pipelines.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🎯 Ranking Pipeline</h4>
+                <p>Candidate generation → scoring → re-ranking. Multi-objective: engagement + satisfaction + diversity.</p>
+              </div>
+              <div class="arch-detail-card">
+                <h4>🧪 A/B Testing</h4>
+                <p>Multi-arm bandit for explore/exploit. Interleaving experiments. Long-term user satisfaction metrics.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live vs VOD -->
+        <div class="arch-panel" data-panel="livevod">
+          <div class="arch-diagram">
+            <div class="arch-compare">
+              <div class="arch-compare-col">
+                <h4>📡 Live Streaming</h4>
+                <ul class="arch-list">
+                  <li>RTMP/SRT ingest from broadcaster</li>
+                  <li>Real-time transcoding (GPU cluster)</li>
+                  <li>2-10s glass-to-glass latency target</li>
+                  <li>LL-HLS / LL-DASH protocols</li>
+                  <li>No seeking ahead — linear playback</li>
+                  <li>Thundering herd on popular events</li>
+                  <li>Edge caching with very short TTL</li>
+                  <li>DVR window for rewind (2-4 hours)</li>
+                </ul>
+              </div>
+              <div class="arch-compare-divider"></div>
+              <div class="arch-compare-col">
+                <h4>🎥 VOD (Video on Demand)</h4>
+                <ul class="arch-list">
+                  <li>File upload, async processing</li>
+                  <li>Offline transcoding (cost-optimized)</li>
+                  <li>Startup latency &lt;2s target</li>
+                  <li>Standard HLS / DASH</li>
+                  <li>Full seek, skip, speed control</li>
+                  <li>Predictable load patterns</li>
+                  <li>Aggressive CDN caching (long TTL)</li>
+                  <li>Full video always available</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Design Decisions -->
+    <section class="decisions-section">
+      <h2>⚖️ Key Design Decisions</h2>
+      <p class="section-desc">Every video streaming system involves critical tradeoffs. Click each card to explore the considerations.</p>
+      <div class="decisions-grid">
+        <div class="decision-card" data-decision="latency-quality">
+          <div class="decision-header">
+            <span class="decision-icon">⏱️</span>
+            <h4>Latency vs Quality</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>Low Latency</strong>
+              <p>Smaller buffers, aggressive ABR downshift. Risk: more rebuffering, quality fluctuation.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>High Quality</strong>
+              <p>Larger buffers (30s+), conservative quality switches. Risk: slow startup, stale content for live.</p>
+            </div>
+            <div class="decision-verdict">Most services use a hybrid: aggressive startup, then shift to quality-optimizing mode once buffer is healthy.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="storage-compute">
+          <div class="decision-header">
+            <span class="decision-icon">💾</span>
+            <h4>Storage vs Compute</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>Pre-encode All</strong>
+              <p>Encode every resolution upfront. Fast delivery, high storage cost. Good for popular content.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>Just-in-Time</strong>
+              <p>Encode on demand. Low storage, high compute latency. Good for long-tail content rarely watched.</p>
+            </div>
+            <div class="decision-verdict">Tiered approach: popular content pre-encoded at all tiers; long-tail content encoded at 2-3 tiers, rest on-demand.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="push-pull">
+          <div class="decision-header">
+            <span class="decision-icon">🔄</span>
+            <h4>Push vs Pull CDN</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>Push CDN</strong>
+              <p>Origin pushes content to edges proactively. Predictable performance, higher bandwidth cost.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>Pull CDN</strong>
+              <p>Edge pulls from origin on cache miss. Lower cost, risk of cold-start latency for first viewer.</p>
+            </div>
+            <div class="decision-verdict">Hybrid: push to top-tier PoPs for new/trending content; pull for everything else. Pre-warm edges for scheduled releases.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="hls-dash">
+          <div class="decision-header">
+            <span class="decision-icon">📄</span>
+            <h4>HLS vs DASH</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>HLS (Apple)</strong>
+              <p>Native iOS/Safari. TS or fMP4 segments. Mature ecosystem. Required for Apple devices.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>DASH (MPEG)</strong>
+              <p>Open standard. fMP4 segments. More flexible. Better DRM integration. Preferred on Android/Web.</p>
+            </div>
+            <div class="decision-verdict">Most services support both via CMAF (Common Media Application Format) — same fMP4 segments, different manifests.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="monolith-micro">
+          <div class="decision-header">
+            <span class="decision-icon">🏛️</span>
+            <h4>Monolith vs Microservices</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>Monolith</strong>
+              <p>Simpler deployment, single codebase. Harder to scale individual components independently.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>Microservices</strong>
+              <p>Independent scaling (transcoding vs API vs search). Complex orchestration, network overhead.</p>
+            </div>
+            <div class="decision-verdict">Microservices win at scale: transcoding, CDN, API, search, recommendations each scale independently with different resource profiles.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="codec">
+          <div class="decision-header">
+            <span class="decision-icon">🎞️</span>
+            <h4>H.264 vs H.265 vs AV1</h4>
+          </div>
+          <div class="decision-body">
+            <div class="decision-option">
+              <strong>H.264 (AVC)</strong>
+              <p>Universal support. Lower compression. Fast encoding. Patent licensed but ubiquitous.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>AV1</strong>
+              <p>30-50% better compression. Royalty-free. Slow encoding (10-100x). Growing hardware decode support.</p>
+            </div>
+            <div class="decision-verdict">Ladder approach: AV1 for popular content (amortize encode cost), H.264 as fallback for compatibility, H.265 for mobile/4K.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+<style>
+  /* === Global / Container === */
+  .viz-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+    color: #e0e0e0;
+  }
+  .viz-header {
+    text-align: center;
+    padding: 2.5rem 0 1rem;
+  }
+  .viz-header h1 {
+    font-size: 2.2rem;
+    margin: 0;
+    color: #fff;
+  }
+  .subtitle {
+    color: #94a3b8;
+    font-size: 1.1rem;
+    margin-top: 0.5rem;
+  }
+
+  /* === Overview === */
+  .overview-section {
+    margin-bottom: 2.5rem;
+  }
+  .overview-card {
+    background: linear-gradient(135deg, #0d1f3c, #162a4a);
+    border: 1px solid #1e3a5f;
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    line-height: 1.7;
+    font-size: 1.05rem;
+  }
+  .overview-card p {
+    margin: 0 0 1.2rem;
+  }
+  .overview-stats {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .overview-stat {
+    flex: 1;
+    min-width: 140px;
+    background: #0a1628;
+    border: 1px solid #1a2a4a;
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    text-align: center;
+  }
+  .overview-stat-value {
+    display: block;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #00c9a7;
+  }
+  .overview-stat-label {
+    display: block;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-top: 0.2rem;
+  }
+
+  /* === Sections common === */
+  section {
+    margin-bottom: 3rem;
+  }
+  section > h2 {
+    font-size: 1.5rem;
+    color: #fff;
+    margin-bottom: 0.3rem;
+  }
+  .section-desc {
+    color: #94a3b8;
+    margin-bottom: 1.2rem;
+    font-size: 0.95rem;
+  }
+
+  /* === Buttons === */
+  .action-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .primary-btn {
+    background: #00c9a7;
+    color: #0a1628;
+  }
+  .primary-btn:hover { background: #00e6be; }
+  .primary-btn-secondary {
+    background: #1e3a5f;
+    color: #4dffd4;
+    border: 1px solid #2a4a6f;
+  }
+  .primary-btn-secondary:hover { background: #2a4a6f; }
+  .reset-btn {
+    background: #1a1a2e;
+    color: #94a3b8;
+    border: 1px solid #2a2a4e;
+  }
+  .reset-btn:hover { background: #2a2a4e; }
+  .warn-btn {
+    background: #3d1f00;
+    color: #ff9a6c;
+    border: 1px solid #5a3000;
+  }
+  .warn-btn:hover { background: #5a3000; }
+
+  /* === CDN Section === */
+  .cdn-controls {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .cdn-info {
+    margin-left: auto;
+    color: #94a3b8;
+    font-size: 0.85rem;
+  }
+  .cdn-map-container {
+    background: #060e1a;
+    border: 1px solid #1a2a4a;
+    border-radius: 10px;
+    padding: 1rem;
+    overflow: hidden;
+  }
+  .cdn-map {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .cdn-user:hover circle {
+    fill: #a29bfe;
+    r: 10;
+  }
+  .cdn-legend {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-top: 0.8rem;
+    font-size: 0.8rem;
+    color: #94a3b8;
+  }
+  .cdn-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .origin-dot { background: #ff6b35; }
+  .edge-dot { background: #00c9a7; }
+  .user-dot { background: #6c5ce7; }
+  .cdn-detail-panel {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.5rem;
+    margin-top: 1rem;
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .cdn-detail-row {
+    text-align: center;
+  }
+  .cdn-detail-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-bottom: 0.3rem;
+  }
+  .cdn-detail-value {
+    display: block;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #e0e0e0;
+  }
+  .cdn-savings {
+    color: #00c9a7;
+  }
+
+  /* === ABR Section === */
+  .abr-controls {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .abr-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 1.2rem;
+  }
+  .abr-chart-container {
+    background: #060e1a;
+    border: 1px solid #1a2a4a;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  #abrChart {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .abr-chart-legend {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #94a3b8;
+  }
+  .abr-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .abr-legend-line {
+    width: 20px;
+    height: 3px;
+    display: inline-block;
+    border-radius: 2px;
+  }
+  .bw-line { background: #6c5ce7; }
+  .quality-line { background: #00c9a7; }
+  .abr-side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .abr-current-quality {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .abr-quality-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+  .abr-quality-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #00c9a7;
+    margin: 0.2rem 0;
+  }
+  .abr-quality-bitrate {
+    font-size: 0.85rem;
+    color: #94a3b8;
+  }
+  .abr-buffer-indicator {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  .abr-buffer-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  .abr-buffer-bar-container {
+    background: #0a1628;
+    border-radius: 6px;
+    height: 14px;
+    overflow: hidden;
+  }
+  .abr-buffer-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #ff6b35, #00c9a7);
+    border-radius: 6px;
+    transition: width 0.3s;
+  }
+  .abr-buffer-value {
+    display: block;
+    text-align: right;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-top: 0.3rem;
+  }
+  .abr-quality-tiers {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  .abr-quality-tiers h4 {
+    margin: 0 0 0.6rem;
+    font-size: 0.85rem;
+    color: #94a3b8;
+  }
+  .abr-tier {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    font-size: 0.82rem;
+  }
+  .tier-label {
+    width: 50px;
+    font-weight: 700;
+    color: #e0e0e0;
+  }
+  .tier-bitrate {
+    color: #64748b;
+    flex: 1;
+    text-align: right;
+  }
+  .tier-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #1a2a4a;
+    transition: background 0.3s;
+  }
+  .tier-indicator.active {
+    background: #00c9a7;
+    box-shadow: 0 0 8px #00c9a7;
+  }
+  .abr-stats {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .abr-stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82rem;
+  }
+  .abr-stat span { color: #64748b; }
+  .abr-stat strong { color: #e0e0e0; }
+
+  /* === Encoding Pipeline === */
+  .encoding-controls {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 1.2rem;
+    flex-wrap: wrap;
+  }
+  .encode-input-info {
+    margin-left: auto;
+    font-size: 0.82rem;
+    color: #64748b;
+    display: flex;
+    gap: 1rem;
+  }
+  .encoding-pipeline {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.3rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .pipeline-stage {
+    flex: 1;
+    min-width: 140px;
+    background: #0d1f3c;
+    border: 1px solid #1a2a4a;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+    transition: border-color 0.4s, box-shadow 0.4s;
+    position: relative;
+  }
+  .pipeline-stage.active {
+    border-color: #00c9a7;
+    box-shadow: 0 0 15px rgba(0,201,167,0.2);
+  }
+  .pipeline-stage.done {
+    border-color: #00c9a7;
+  }
+  .pipeline-stage-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.3rem;
+  }
+  .pipeline-stage-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #e0e0e0;
+    margin-bottom: 0.2rem;
+  }
+  .pipeline-stage-detail {
+    font-size: 0.72rem;
+    color: #64748b;
+    margin-bottom: 0.6rem;
+  }
+  .pipeline-stage-bar {
+    height: 4px;
+    background: #1a2a4a;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.4rem;
+  }
+  .pipeline-stage-progress {
+    height: 100%;
+    width: 0%;
+    background: #00c9a7;
+    border-radius: 4px;
+    transition: width 0.1s linear;
+  }
+  .pipeline-stage-size {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    font-weight: 600;
+  }
+  .pipeline-arrow {
+    font-size: 1.5rem;
+    color: #2a4a6f;
+    padding-top: 1.5rem;
+    flex-shrink: 0;
+  }
+  .encoding-outputs {
+    margin-top: 1.2rem;
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1.2rem;
+    display: none;
+  }
+  .encoding-outputs.visible {
+    display: block;
+    animation: fadeSlideIn 0.4s ease;
+  }
+  .encoding-outputs h4 {
+    margin: 0 0 0.8rem;
+    font-size: 0.95rem;
+    color: #e0e0e0;
+  }
+  .rendition-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.8rem;
+  }
+  .rendition-card {
+    background: #0a1628;
+    border: 1px solid #1a2a4a;
+    border-radius: 8px;
+    padding: 0.8rem;
+    text-align: center;
+    animation: fadeSlideIn 0.3s ease;
+  }
+  .rendition-res {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #00c9a7;
+  }
+  .rendition-detail {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 0.2rem;
+  }
+  .rendition-size {
+    font-size: 0.85rem;
+    color: #ff9a6c;
+    font-weight: 600;
+    margin-top: 0.3rem;
+  }
+  .rendition-chunks {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    margin-top: 0.2rem;
+  }
+
+  /* === Chunk Delivery === */
+  .chunk-controls {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .chunk-player {
+    background: #060e1a;
+    border: 1px solid #1a2a4a;
+    border-radius: 12px;
+    padding: 1.2rem;
+  }
+  .chunk-screen {
+    background: #000;
+    border-radius: 8px;
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .chunk-screen-text {
+    font-size: 1.5rem;
+    color: #333;
+    font-weight: 700;
+  }
+  .chunk-screen.playing .chunk-screen-text {
+    display: none;
+  }
+  .chunk-screen.playing {
+    background: linear-gradient(135deg, #0a0a2e, #1a1a4e);
+  }
+  .chunk-screen.buffering {
+    background: #000;
+  }
+  .chunk-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+  .spinner-ring {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #1a2a4a;
+    border-top: 3px solid #00c9a7;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .chunk-quality-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: rgba(0,0,0,0.6);
+    color: #00c9a7;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+  .chunk-timeline-container {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+  .chunk-timeline {
+    display: flex;
+    gap: 2px;
+    height: 28px;
+  }
+  .chunk-cell {
+    flex: 1;
+    background: #1a2a4a;
+    border-radius: 3px;
+    transition: background 0.3s;
+    position: relative;
+  }
+  .chunk-cell.downloaded {
+    background: #1e3a5f;
+  }
+  .chunk-cell.playing {
+    background: #00c9a7;
+  }
+  .chunk-cell.played {
+    background: #0d4a3a;
+  }
+  .chunk-playhead {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2px;
+    height: 28px;
+    background: #ff6b35;
+    transition: left 0.2s linear;
+    z-index: 2;
+  }
+  .chunk-time-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: #64748b;
+    margin-top: 0.3rem;
+  }
+  .chunk-stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .chunk-stat {
+    text-align: center;
+    background: #0d1f3c;
+    border-radius: 6px;
+    padding: 0.5rem;
+  }
+  .chunk-stat span {
+    display: block;
+    font-size: 0.7rem;
+    color: #64748b;
+  }
+  .chunk-stat strong {
+    font-size: 0.9rem;
+    color: #e0e0e0;
+  }
+
+  /* === Buffer Visualization === */
+  .buffer-controls {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  .buffer-viz {
+    background: #060e1a;
+    border: 1px solid #1a2a4a;
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr 250px;
+    gap: 1.5rem;
+  }
+  .buffer-bar-outer {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .buffer-bar-labels {
+    display: flex;
+    gap: 1.2rem;
+    font-size: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .buffer-bar-labels span:nth-child(1) { color: #0d4a3a; }
+  .buffer-bar-labels span:nth-child(2) { color: #00c9a7; }
+  .buffer-bar-labels span:nth-child(3) { color: #64748b; }
+  .buffer-bar-track {
+    height: 30px;
+    background: #1a2a4a;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .buffer-played {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: #0d4a3a;
+    transition: width 0.2s linear;
+    width: 0%;
+  }
+  .buffer-loaded {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: #00c9a7;
+    opacity: 0.4;
+    transition: width 0.2s linear;
+    width: 0%;
+  }
+  .buffer-playhead-marker {
+    position: absolute;
+    top: -4px;
+    left: 0%;
+    width: 3px;
+    height: 38px;
+    background: #ff6b35;
+    border-radius: 2px;
+    transition: left 0.2s linear;
+    z-index: 2;
+  }
+  .buffer-time-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: #64748b;
+    margin-top: 0.3rem;
+  }
+  .buffer-health-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .buffer-health-gauge {
+    text-align: center;
+  }
+  .health-gauge-svg {
+    width: 120px;
+    height: 70px;
+  }
+  .health-label {
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+  .health-value {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #00c9a7;
+  }
+  .buffer-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    width: 100%;
+  }
+  .buffer-metric {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    padding: 0.2rem 0;
+  }
+  .buffer-metric span { color: #64748b; }
+  .buffer-metric strong { color: #e0e0e0; }
+  .buffer-event-log {
+    margin-top: 1rem;
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  .buffer-event-log h4 {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    color: #94a3b8;
+  }
+  .buffer-events {
+    max-height: 120px;
+    overflow-y: auto;
+    font-size: 0.78rem;
+    font-family: monospace;
+  }
+  .buffer-event {
+    padding: 0.2rem 0;
+    border-bottom: 1px solid #1a2a4a;
+    color: #94a3b8;
+  }
+  .buffer-event .ev-time { color: #64748b; margin-right: 0.5rem; }
+  .buffer-event.ev-warn { color: #ff9a6c; }
+  .buffer-event.ev-good { color: #00c9a7; }
+
+  /* === Architecture === */
+  .arch-tabs {
+    display: flex;
+    gap: 0.3rem;
+    margin-bottom: 1.2rem;
+    flex-wrap: wrap;
+  }
+  .arch-tab {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: 1px solid #1a2a4a;
+    background: #0d1f3c;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  .arch-tab.active {
+    background: #00c9a7;
+    color: #0a1628;
+    border-color: #00c9a7;
+    font-weight: 700;
+  }
+  .arch-tab:hover:not(.active) {
+    background: #1e3a5f;
+  }
+  .arch-panel {
+    display: none;
+  }
+  .arch-panel.active {
+    display: block;
+    animation: fadeSlideIn 0.3s ease;
+  }
+  .arch-flow {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.3rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .arch-node {
+    flex: 1;
+    min-width: 150px;
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .arch-node-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.3rem;
+  }
+  .arch-node-label {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #e0e0e0;
+    margin-bottom: 0.3rem;
+  }
+  .arch-node-desc {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+  .arch-arrow {
+    font-size: 1.5rem;
+    color: #2a4a6f;
+    padding-top: 1.5rem;
+    flex-shrink: 0;
+  }
+  .arch-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .arch-detail-card {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+  }
+  .arch-detail-card h4 {
+    margin: 0 0 0.4rem;
+    color: #e0e0e0;
+    font-size: 0.95rem;
+  }
+  .arch-detail-card p {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+  .arch-compare {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .arch-compare-col {
+    flex: 1;
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 1.2rem;
+  }
+  .arch-compare-col h4 {
+    margin: 0 0 0.6rem;
+    color: #e0e0e0;
+  }
+  .arch-compare-divider {
+    width: 2px;
+    min-height: 200px;
+    background: #1e3a5f;
+    border-radius: 2px;
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+  .arch-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .arch-list li {
+    padding: 0.4rem 0;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    border-bottom: 1px solid #1a2a4a;
+  }
+  .arch-list li:last-child { border-bottom: none; }
+  .arch-list li::before {
+    content: "•";
+    color: #00c9a7;
+    margin-right: 0.5rem;
+    font-weight: bold;
+  }
+
+  /* === Decisions === */
+  .decisions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+  }
+  .decision-card {
+    background: #0d1f3c;
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+    cursor: pointer;
+  }
+  .decision-card:hover {
+    border-color: #2a5a8f;
+  }
+  .decision-card.expanded .decision-body {
+    max-height: 400px;
+    padding: 0 1.2rem 1.2rem;
+  }
+  .decision-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 1rem 1.2rem;
+  }
+  .decision-icon {
+    font-size: 1.3rem;
+  }
+  .decision-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: #e0e0e0;
+  }
+  .decision-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.4s ease;
+    padding: 0 1.2rem;
+  }
+  .decision-option {
+    background: #0a1628;
+    border-radius: 6px;
+    padding: 0.8rem;
+    margin-bottom: 0.3rem;
+  }
+  .decision-option strong {
+    color: #00c9a7;
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+  }
+  .decision-option p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+  .decision-vs {
+    text-align: center;
+    font-weight: 800;
+    color: #ff6b35;
+    font-size: 0.85rem;
+    padding: 0.2rem 0;
+  }
+  .decision-verdict {
+    margin-top: 0.6rem;
+    padding: 0.8rem;
+    background: rgba(0,201,167,0.08);
+    border-left: 3px solid #00c9a7;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.82rem;
+    color: #b0d4c8;
+    line-height: 1.5;
+  }
+
+  /* === Animations === */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  @keyframes packetMove {
+    0% { offset-distance: 0%; opacity: 1; }
+    100% { offset-distance: 100%; opacity: 1; }
+  }
+
+  /* === Responsive === */
+  @media (max-width: 768px) {
+    .abr-layout { grid-template-columns: 1fr; }
+    .buffer-viz { grid-template-columns: 1fr; }
+    .cdn-detail-panel { grid-template-columns: repeat(3, 1fr); }
+    .chunk-stats-row { grid-template-columns: repeat(2, 1fr); }
+    .arch-compare { flex-direction: column; }
+    .arch-compare-divider { width: 100%; min-height: 2px; }
+    .encoding-pipeline { flex-direction: column; }
+    .pipeline-arrow { transform: rotate(90deg); text-align: center; padding: 0; }
+  }
+</style>
+
+<script>
+  // ==========================================================
+  // CDN ROUTING VISUALIZATION
+  // ==========================================================
+  (function() {
+    const svg = document.getElementById('cdnMap');
+    const animGroup = document.getElementById('cdnAnimGroup');
+    const latencyOverlay = document.getElementById('cdnLatencyOverlay');
+    const infoEl = document.getElementById('cdnInfo');
+    const users = svg.querySelectorAll('.cdn-user');
+    const edges = {};
+    let autoInterval = null;
+
+    svg.querySelectorAll('.cdn-edge').forEach(e => {
+      edges[e.dataset.edge] = {
+        x: parseFloat(e.dataset.x),
+        y: parseFloat(e.dataset.y)
+      };
+    });
+
+    const originX = 450, originY = 215;
+    const latencies = {
+      'us-east': { edge: 12, origin: 85 },
+      'us-west': { edge: 18, origin: 120 },
+      'eu-west': { edge: 8, origin: 45 },
+      'asia-east': { edge: 15, origin: 180 },
+      'asia-south': { edge: 20, origin: 140 },
+      'sa-east': { edge: 25, origin: 200 },
+      'au': { edge: 22, origin: 220 }
+    };
+    const userNames = {
+      'ny': 'New York', 'la': 'Los Angeles', 'london': 'London',
+      'tokyo': 'Tokyo', 'mumbai': 'Mumbai', 'saopaulo': 'Sao Paulo', 'sydney': 'Sydney'
+    };
+
+    function clearAnim() {
+      animGroup.innerHTML = '';
+      latencyOverlay.innerHTML = '';
+    }
+
+    function animateRoute(userEl) {
+      clearAnim();
+      const ux = parseFloat(userEl.dataset.x);
+      const uy = parseFloat(userEl.dataset.y);
+      const nearestId = userEl.dataset.nearest;
+      const edge = edges[nearestId];
+      const lat = latencies[nearestId];
+      const userId = userEl.dataset.user;
+
+      document.getElementById('cdnDetailUser').textContent = userNames[userId];
+      document.getElementById('cdnDetailEdge').textContent = nearestId.toUpperCase();
+      document.getElementById('cdnDetailEdgeLat').textContent = lat.edge + ' ms';
+      document.getElementById('cdnDetailOriginLat').textContent = lat.origin + ' ms';
+      const savings = Math.round((1 - lat.edge / lat.origin) * 100);
+      document.getElementById('cdnDetailSavings').textContent = savings + '% faster';
+      infoEl.textContent = userNames[userId] + ' → ' + nearestId.toUpperCase();
+
+      // Draw path: origin -> edge
+      const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      path1.setAttribute('x1', originX); path1.setAttribute('y1', originY);
+      path1.setAttribute('x2', edge.x); path1.setAttribute('y2', edge.y);
+      path1.setAttribute('stroke', '#ff6b35'); path1.setAttribute('stroke-width', '1');
+      path1.setAttribute('stroke-dasharray', '4'); path1.setAttribute('opacity', '0.5');
+      animGroup.appendChild(path1);
+
+      // Draw path: edge -> user
+      const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      path2.setAttribute('x1', edge.x); path2.setAttribute('y1', edge.y);
+      path2.setAttribute('x2', ux); path2.setAttribute('y2', uy);
+      path2.setAttribute('stroke', '#00c9a7'); path2.setAttribute('stroke-width', '1.5');
+      path2.setAttribute('stroke-dasharray', '4'); path2.setAttribute('opacity', '0.7');
+      animGroup.appendChild(path2);
+
+      // Animate packets: origin -> edge
+      animatePacket(originX, originY, edge.x, edge.y, '#ff6b35', 800, () => {
+        // Then edge -> user
+        animatePacket(edge.x, edge.y, ux, uy, '#00c9a7', 400, null);
+      });
+
+      // Latency labels
+      const midX1 = (originX + edge.x) / 2, midY1 = (originY + edge.y) / 2 - 10;
+      addLabel(midX1, midY1, lat.origin + 'ms (origin)', '#ff9a6c');
+      const midX2 = (edge.x + ux) / 2, midY2 = (edge.y + uy) / 2 - 10;
+      addLabel(midX2, midY2, lat.edge + 'ms (edge)', '#4dffd4');
+    }
+
+    function animatePacket(x1, y1, x2, y2, color, duration, onDone) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('r', '4');
+      circle.setAttribute('fill', color);
+      circle.setAttribute('cx', x1);
+      circle.setAttribute('cy', y1);
+      animGroup.appendChild(circle);
+      let start = null;
+      function step(ts) {
+        if (!start) start = ts;
+        const p = Math.min((ts - start) / duration, 1);
+        circle.setAttribute('cx', x1 + (x2 - x1) * p);
+        circle.setAttribute('cy', y1 + (y2 - y1) * p);
+        if (p < 1) {
+          requestAnimationFrame(step);
+        } else {
+          if (onDone) onDone();
+        }
+      }
+      requestAnimationFrame(step);
+    }
+
+    function addLabel(x, y, text, color) {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', x); t.setAttribute('y', y);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('fill', color);
+      t.setAttribute('font-size', '9');
+      t.setAttribute('font-weight', 'bold');
+      t.textContent = text;
+      latencyOverlay.appendChild(t);
+    }
+
+    users.forEach(u => u.addEventListener('click', () => animateRoute(u)));
+
+    document.getElementById('cdnResetBtn').addEventListener('click', () => {
+      clearAnim();
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+      infoEl.textContent = 'Click a user icon to start routing';
+      ['cdnDetailUser','cdnDetailEdge','cdnDetailEdgeLat','cdnDetailOriginLat','cdnDetailSavings'].forEach(id => {
+        document.getElementById(id).textContent = '—';
+      });
+    });
+
+    document.getElementById('cdnAutoBtn').addEventListener('click', () => {
+      if (autoInterval) return;
+      let idx = 0;
+      const userArr = Array.from(users);
+      animateRoute(userArr[0]);
+      autoInterval = setInterval(() => {
+        idx = (idx + 1) % userArr.length;
+        animateRoute(userArr[idx]);
+      }, 2000);
+    });
+  })();
+
+  // ==========================================================
+  // ADAPTIVE BITRATE SWITCHING
+  // ==========================================================
+  (function() {
+    const canvas = document.getElementById('abrChart');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const tiers = [
+      { label: '1080p', bitrate: 5.0, id: 'tier1080' },
+      { label: '720p', bitrate: 2.5, id: 'tier720' },
+      { label: '480p', bitrate: 1.2, id: 'tier480' },
+      { label: '360p', bitrate: 0.6, id: 'tier360' },
+      { label: '240p', bitrate: 0.3, id: 'tier240' }
+    ];
+
+    let bwHistory = [];
+    let qualityHistory = [];
+    let running = false;
+    let bandwidth = 4.0;
+    let bufferLevel = 0;
+    let switchCount = 0;
+    let rebufferCount = 0;
+    let currentTier = 0;
+    let qualitySum = 0;
+    let qualitySamples = 0;
+    let animFrame = null;
+    let forceBwTarget = null;
+    const MAX_POINTS = 120;
+    const MAX_BUFFER = 30;
+
+    function pickQuality(bw, buf) {
+      // Buffer-based + throughput hybrid ABR
+      let chosen = tiers.length - 1;
+      for (let i = 0; i < tiers.length; i++) {
+        if (bw >= tiers[i].bitrate * 1.2 && buf > 5) {
+          chosen = i; break;
+        } else if (bw >= tiers[i].bitrate) {
+          chosen = i; break;
+        }
+      }
+      // If buffer is low, be more conservative
+      if (buf < 3) {
+        chosen = Math.max(chosen, Math.min(tiers.length - 1, currentTier + 1));
+      }
+      return chosen;
+    }
+
+    function updateTierIndicators(idx) {
+      tiers.forEach((t, i) => {
+        document.getElementById(t.id).classList.toggle('active', i === idx);
+      });
+    }
+
+    function drawChart() {
+      ctx.clearRect(0, 0, W, H);
+      const pad = { l: 50, r: 10, t: 15, b: 30 };
+      const cw = W - pad.l - pad.r;
+      const ch = H - pad.t - pad.b;
+      const maxBw = 8;
+
+      // Grid
+      ctx.strokeStyle = '#1a2a4a';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + ch * (1 - i / 4);
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText((maxBw * i / 4).toFixed(1) + ' Mbps', pad.l - 5, y + 3);
+      }
+
+      // Bandwidth line
+      if (bwHistory.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#6c5ce7';
+        ctx.lineWidth = 2;
+        bwHistory.forEach((v, i) => {
+          const x = pad.l + (i / MAX_POINTS) * cw;
+          const y = pad.t + ch * (1 - v / maxBw);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      // Quality line (step)
+      if (qualityHistory.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = '#00c9a7';
+        ctx.lineWidth = 2.5;
+        qualityHistory.forEach((v, i) => {
+          const x = pad.l + (i / MAX_POINTS) * cw;
+          const y = pad.t + ch * (1 - v / maxBw);
+          if (i === 0) ctx.moveTo(x, y);
+          else {
+            const prevX = pad.l + ((i - 1) / MAX_POINTS) * cw;
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+      }
+
+      // Tier threshold lines
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 0.5;
+      tiers.forEach(t => {
+        const y = pad.t + ch * (1 - t.bitrate / maxBw);
+        ctx.strokeStyle = '#2a4a6f';
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        ctx.fillStyle = '#4a5568';
+        ctx.textAlign = 'left';
+        ctx.fillText(t.label, W - pad.r - 35, y - 3);
+      });
+      ctx.setLineDash([]);
+    }
+
+    function tick() {
+      if (!running) return;
+      // Bandwidth simulation
+      if (forceBwTarget !== null) {
+        bandwidth += (forceBwTarget - bandwidth) * 0.15;
+        if (Math.abs(bandwidth - forceBwTarget) < 0.1) forceBwTarget = null;
+      } else {
+        bandwidth += (Math.random() - 0.5) * 0.4;
+        bandwidth = Math.max(0.15, Math.min(7.5, bandwidth));
+      }
+
+      const newTier = pickQuality(bandwidth, bufferLevel);
+      if (newTier !== currentTier) {
+        switchCount++;
+        document.getElementById('abrSwitchCount').textContent = switchCount;
+      }
+      currentTier = newTier;
+      const tierBitrate = tiers[currentTier].bitrate;
+
+      // Buffer: gains from download, drains from playback
+      const downloadRate = Math.max(0, bandwidth - tierBitrate);
+      bufferLevel += downloadRate * 0.15;
+      bufferLevel -= 0.5; // playback drain
+      if (bufferLevel > MAX_BUFFER) bufferLevel = MAX_BUFFER;
+      if (bufferLevel < 0) {
+        bufferLevel = 0;
+        rebufferCount++;
+        document.getElementById('abrRebufferCount').textContent = rebufferCount;
+      }
+
+      bwHistory.push(bandwidth);
+      qualityHistory.push(tierBitrate);
+      if (bwHistory.length > MAX_POINTS) { bwHistory.shift(); qualityHistory.shift(); }
+
+      qualitySum += tierBitrate;
+      qualitySamples++;
+
+      // Update UI
+      document.getElementById('abrCurrentQuality').textContent = tiers[currentTier].label;
+      document.getElementById('abrCurrentBitrate').textContent = tierBitrate.toFixed(1) + ' Mbps';
+      updateTierIndicators(currentTier);
+      const bufPct = (bufferLevel / MAX_BUFFER) * 100;
+      document.getElementById('abrBufferBar').style.width = bufPct + '%';
+      document.getElementById('abrBufferValue').textContent = bufferLevel.toFixed(1) + 's';
+
+      // Avg quality
+      const avgBr = qualitySum / qualitySamples;
+      let avgLabel = '240p';
+      for (const t of tiers) { if (avgBr >= t.bitrate) { avgLabel = t.label; break; } }
+      document.getElementById('abrAvgQuality').textContent = avgLabel;
+
+      drawChart();
+      animFrame = setTimeout(tick, 200);
+    }
+
+    document.getElementById('abrStartBtn').addEventListener('click', () => {
+      if (running) return;
+      running = true;
+      tick();
+    });
+    document.getElementById('abrStopBtn').addEventListener('click', () => {
+      running = false;
+      if (animFrame) clearTimeout(animFrame);
+    });
+    document.getElementById('abrDropBtn').addEventListener('click', () => {
+      forceBwTarget = 0.2 + Math.random() * 0.3;
+    });
+    document.getElementById('abrSpikeBtn').addEventListener('click', () => {
+      forceBwTarget = 5.0 + Math.random() * 2.5;
+    });
+    document.getElementById('abrResetBtn').addEventListener('click', () => {
+      running = false;
+      if (animFrame) clearTimeout(animFrame);
+      bwHistory = []; qualityHistory = [];
+      bandwidth = 4.0; bufferLevel = 0; switchCount = 0; rebufferCount = 0;
+      currentTier = 0; qualitySum = 0; qualitySamples = 0; forceBwTarget = null;
+      document.getElementById('abrCurrentQuality').textContent = '—';
+      document.getElementById('abrCurrentBitrate').textContent = '— Mbps';
+      document.getElementById('abrBufferBar').style.width = '0%';
+      document.getElementById('abrBufferValue').textContent = '0.0s';
+      document.getElementById('abrSwitchCount').textContent = '0';
+      document.getElementById('abrRebufferCount').textContent = '0';
+      document.getElementById('abrAvgQuality').textContent = '—';
+      tiers.forEach(t => document.getElementById(t.id).classList.remove('active'));
+      drawChart();
+    });
+
+    drawChart();
+  })();
+
+  // ==========================================================
+  // ENCODING PIPELINE
+  // ==========================================================
+  (function() {
+    const stages = [1, 2, 3, 4, 5];
+    const renditions = [
+      { res: '1080p', bitrate: '5.0 Mbps', size: '375 MB', chunks: 150 },
+      { res: '720p', bitrate: '2.5 Mbps', size: '188 MB', chunks: 150 },
+      { res: '480p', bitrate: '1.2 Mbps', size: '90 MB', chunks: 150 },
+      { res: '360p', bitrate: '0.6 Mbps', size: '45 MB', chunks: 150 },
+      { res: '240p', bitrate: '0.3 Mbps', size: '23 MB', chunks: 150 }
+    ];
+    let encoding = false;
+
+    function resetPipeline() {
+      encoding = false;
+      stages.forEach(s => {
+        document.getElementById('pipeStage' + s).classList.remove('active', 'done');
+        document.getElementById('pipeProgress' + s).style.width = '0%';
+      });
+      document.getElementById('encodingOutputs').classList.remove('visible');
+      document.getElementById('renditionGrid').innerHTML = '';
+      // Reset size labels
+      document.querySelectorAll('.pipeline-stage-size').forEach((el, i) => {
+        el.textContent = i === 0 ? '18 GB' : '—';
+      });
+    }
+
+    function animateStage(stageNum, duration) {
+      return new Promise(resolve => {
+        const el = document.getElementById('pipeStage' + stageNum);
+        const prog = document.getElementById('pipeProgress' + stageNum);
+        el.classList.add('active');
+        let start = performance.now();
+        function step(ts) {
+          const p = Math.min((ts - start) / duration, 1);
+          prog.style.width = (p * 100) + '%';
+          if (p < 1) {
+            requestAnimationFrame(step);
+          } else {
+            el.classList.remove('active');
+            el.classList.add('done');
+            resolve();
+          }
+        }
+        requestAnimationFrame(step);
+      });
+    }
+
+    async function runPipeline() {
+      if (encoding) return;
+      encoding = true;
+      resetPipeline();
+      encoding = true;
+
+      // Stage 1: Upload
+      await animateStage(1, 800);
+
+      // Stage 2: Transcode
+      document.querySelectorAll('.pipeline-stage-size')[1].textContent = 'H.265';
+      await animateStage(2, 1200);
+
+      // Stage 3: Multi-resolution
+      document.querySelectorAll('.pipeline-stage-size')[2].textContent = '5 tiers';
+      await animateStage(3, 1000);
+
+      // Stage 4: Segmentation
+      document.querySelectorAll('.pipeline-stage-size')[3].textContent = '750 chunks';
+      await animateStage(4, 800);
+
+      // Stage 5: Store
+      document.querySelectorAll('.pipeline-stage-size')[4].textContent = '~721 MB';
+      await animateStage(5, 600);
+
+      // Show outputs
+      const grid = document.getElementById('renditionGrid');
+      const outputsEl = document.getElementById('encodingOutputs');
+      outputsEl.classList.add('visible');
+      for (let i = 0; i < renditions.length; i++) {
+        await new Promise(r => setTimeout(r, 200));
+        const r = renditions[i];
+        const card = document.createElement('div');
+        card.className = 'rendition-card';
+        card.innerHTML = `<div class="rendition-res">${r.res}</div><div class="rendition-detail">${r.bitrate}</div><div class="rendition-size">${r.size}</div><div class="rendition-chunks">${r.chunks} chunks (4s each)</div>`;
+        grid.appendChild(card);
+      }
+      encoding = false;
+    }
+
+    document.getElementById('encodeStartBtn').addEventListener('click', runPipeline);
+    document.getElementById('encodeResetBtn').addEventListener('click', resetPipeline);
+  })();
+
+  // ==========================================================
+  // CHUNK DELIVERY SIMULATION
+  // ==========================================================
+  (function() {
+    const TOTAL_CHUNKS = 15;
+    const timeline = document.getElementById('chunkTimeline');
+    const playhead = document.getElementById('chunkPlayhead');
+    const screen = document.getElementById('chunkScreen');
+    const spinner = document.getElementById('chunkSpinner');
+    const screenText = document.getElementById('chunkScreenText');
+    const qualityBadge = document.getElementById('chunkQualityBadge');
+
+    let chunks = [];
+    let downloadIdx = 0;
+    let playIdx = -1;
+    let playing = false;
+    let networkSpeed = 'fast'; // fast or slow
+    let downloadTimer = null;
+    let playTimer = null;
+
+    function initTimeline() {
+      timeline.innerHTML = '';
+      chunks = [];
+      for (let i = 0; i < TOTAL_CHUNKS; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'chunk-cell';
+        cell.dataset.idx = i;
+        timeline.appendChild(cell);
+        chunks.push({ el: cell, state: 'empty' });
+      }
+      downloadIdx = 0;
+      playIdx = -1;
+      playhead.style.left = '0%';
+      updateChunkStats();
+    }
+
+    function updateChunkStats() {
+      const dl = chunks.filter(c => c.state !== 'empty').length;
+      const played = chunks.filter(c => c.state === 'played' || c.state === 'playing').length;
+      const bufferAhead = chunks.filter(c => c.state === 'downloaded').length;
+      document.getElementById('chunkDownloaded').textContent = dl + ' / ' + TOTAL_CHUNKS;
+      document.getElementById('chunkPlaying').textContent = played + ' / ' + TOTAL_CHUNKS;
+      document.getElementById('chunkBufferAhead').textContent = bufferAhead + ' chunks';
+      document.getElementById('chunkNetworkSpeed').textContent = networkSpeed === 'fast' ? 'Fast' : 'Slow';
+    }
+
+    function downloadNext() {
+      if (downloadIdx >= TOTAL_CHUNKS) return;
+      chunks[downloadIdx].state = 'downloaded';
+      chunks[downloadIdx].el.className = 'chunk-cell downloaded';
+      downloadIdx++;
+      updateChunkStats();
+      const delay = networkSpeed === 'fast' ? 300 : 1500;
+      downloadTimer = setTimeout(downloadNext, delay);
+    }
+
+    function playNext() {
+      if (!playing) return;
+      const nextIdx = playIdx + 1;
+      if (nextIdx >= TOTAL_CHUNKS) {
+        playing = false;
+        screenText.textContent = 'Playback Complete';
+        screen.classList.remove('playing', 'buffering');
+        return;
+      }
+      // Mark current as played
+      if (playIdx >= 0) {
+        chunks[playIdx].state = 'played';
+        chunks[playIdx].el.className = 'chunk-cell played';
+      }
+      // Check if next chunk is downloaded
+      if (chunks[nextIdx].state === 'downloaded' || chunks[nextIdx].state === 'playing') {
+        playIdx = nextIdx;
+        chunks[playIdx].state = 'playing';
+        chunks[playIdx].el.className = 'chunk-cell playing';
+        screen.classList.add('playing');
+        screen.classList.remove('buffering');
+        spinner.style.display = 'none';
+        qualityBadge.textContent = '720p';
+        playhead.style.left = ((playIdx + 1) / TOTAL_CHUNKS * 100) + '%';
+        updateChunkStats();
+        playTimer = setTimeout(playNext, 800);
+      } else {
+        // Buffering!
+        screen.classList.add('buffering');
+        screen.classList.remove('playing');
+        spinner.style.display = 'flex';
+        qualityBadge.textContent = 'Buffering';
+        // Wait for chunk to download
+        const waitForChunk = () => {
+          if (chunks[nextIdx].state === 'downloaded') {
+            playNext();
+          } else {
+            playTimer = setTimeout(waitForChunk, 100);
+          }
+        };
+        playTimer = setTimeout(waitForChunk, 100);
+      }
+    }
+
+    document.getElementById('chunkPlayBtn').addEventListener('click', () => {
+      if (playing) return;
+      if (playIdx >= TOTAL_CHUNKS - 1) {
+        initTimeline();
+      }
+      playing = true;
+      screenText.textContent = '';
+      screen.classList.add('playing');
+      downloadNext();
+      setTimeout(playNext, 500);
+    });
+
+    document.getElementById('chunkPauseBtn').addEventListener('click', () => {
+      playing = false;
+      clearTimeout(downloadTimer);
+      clearTimeout(playTimer);
+    });
+
+    document.getElementById('chunkSlowBtn').addEventListener('click', () => {
+      networkSpeed = 'slow';
+      updateChunkStats();
+    });
+
+    document.getElementById('chunkFastBtn').addEventListener('click', () => {
+      networkSpeed = 'fast';
+      updateChunkStats();
+    });
+
+    document.getElementById('chunkResetBtn').addEventListener('click', () => {
+      playing = false;
+      clearTimeout(downloadTimer);
+      clearTimeout(playTimer);
+      screen.classList.remove('playing', 'buffering');
+      spinner.style.display = 'none';
+      screenText.textContent = 'Press Play';
+      qualityBadge.textContent = '—';
+      initTimeline();
+    });
+
+    initTimeline();
+  })();
+
+  // ==========================================================
+  // VIDEO PLAYER BUFFER VISUALIZATION
+  // ==========================================================
+  (function() {
+    const TOTAL_DURATION = 120; // 2 minutes
+    let playbackPos = 0;
+    let bufferEnd = 0;
+    let running = false;
+    let stalling = false;
+    let rebuffers = 0;
+    let timer = null;
+
+    const playedEl = document.getElementById('bufferPlayed');
+    const loadedEl = document.getElementById('bufferLoaded');
+    const markerEl = document.getElementById('bufferPlayheadMarker');
+    const healthArc = document.getElementById('healthArc');
+    const healthVal = document.getElementById('healthValue');
+    const eventsEl = document.getElementById('bufferEvents');
+
+    function logEvent(text, cls) {
+      const div = document.createElement('div');
+      div.className = 'buffer-event' + (cls ? ' ' + cls : '');
+      const t = formatTime(playbackPos);
+      div.innerHTML = `<span class="ev-time">[${t}]</span> ${text}`;
+      eventsEl.prepend(div);
+      if (eventsEl.children.length > 50) eventsEl.lastChild.remove();
+    }
+
+    function formatTime(s) {
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return m + ':' + (sec < 10 ? '0' : '') + sec;
+    }
+
+    function updateUI() {
+      const playedPct = (playbackPos / TOTAL_DURATION) * 100;
+      const loadedPct = (bufferEnd / TOTAL_DURATION) * 100;
+      playedEl.style.width = playedPct + '%';
+      loadedEl.style.width = loadedPct + '%';
+      markerEl.style.left = playedPct + '%';
+
+      const bufDur = Math.max(0, bufferEnd - playbackPos);
+      const health = Math.min(100, (bufDur / 15) * 100);
+      const arcLen = (health / 100) * 157;
+      healthArc.setAttribute('stroke-dasharray', arcLen + ' 157');
+      if (health > 60) healthArc.setAttribute('stroke', '#00c9a7');
+      else if (health > 30) healthArc.setAttribute('stroke', '#ff9a6c');
+      else healthArc.setAttribute('stroke', '#ff4757');
+      healthVal.textContent = Math.round(health) + '%';
+
+      document.getElementById('bufferPos').textContent = formatTime(playbackPos);
+      document.getElementById('bufferEnd').textContent = formatTime(bufferEnd);
+      document.getElementById('bufferDuration').textContent = bufDur.toFixed(1) + 's';
+      document.getElementById('bufferState').textContent = stalling ? 'Rebuffering' : (running ? 'Playing' : 'Idle');
+      document.getElementById('bufferRebuffers').textContent = rebuffers;
+    }
+
+    function tick() {
+      if (!running) return;
+
+      if (!stalling) {
+        // Download ahead
+        if (bufferEnd < TOTAL_DURATION) {
+          bufferEnd += 1.5 + Math.random() * 0.5;
+          if (bufferEnd > TOTAL_DURATION) bufferEnd = TOTAL_DURATION;
+        }
+        // Playback
+        playbackPos += 0.5;
+        if (playbackPos >= bufferEnd && playbackPos < TOTAL_DURATION) {
+          stalling = true;
+          rebuffers++;
+          logEvent('Rebuffering! Buffer depleted.', 'ev-warn');
+        }
+        if (playbackPos >= TOTAL_DURATION) {
+          playbackPos = TOTAL_DURATION;
+          running = false;
+          logEvent('Playback complete.', 'ev-good');
+        }
+      } else {
+        // Stalling: download but don't advance playback
+        bufferEnd += 2.0;
+        if (bufferEnd > TOTAL_DURATION) bufferEnd = TOTAL_DURATION;
+        if (bufferEnd - playbackPos > 3) {
+          stalling = false;
+          logEvent('Resumed playback. Buffer refilled.', 'ev-good');
+        }
+      }
+
+      updateUI();
+      timer = setTimeout(tick, 200);
+    }
+
+    document.getElementById('bufferStartBtn').addEventListener('click', () => {
+      if (running) return;
+      if (playbackPos >= TOTAL_DURATION) {
+        playbackPos = 0; bufferEnd = 0; rebuffers = 0; stalling = false;
+        eventsEl.innerHTML = '';
+      }
+      running = true;
+      logEvent('Playback started.', 'ev-good');
+      tick();
+    });
+
+    document.getElementById('bufferStallBtn').addEventListener('click', () => {
+      if (!running) return;
+      // Simulate a network stall: freeze buffer downloads
+      const savedBufEnd = bufferEnd;
+      bufferEnd = playbackPos + 0.5; // nearly empty
+      logEvent('Network stall simulated! Buffer drained.', 'ev-warn');
+    });
+
+    document.getElementById('bufferResetBtn').addEventListener('click', () => {
+      running = false;
+      stalling = false;
+      clearTimeout(timer);
+      playbackPos = 0; bufferEnd = 0; rebuffers = 0;
+      eventsEl.innerHTML = '';
+      updateUI();
+    });
+
+    updateUI();
+  })();
+
+  // ==========================================================
+  // ARCHITECTURE TABS
+  // ==========================================================
+  (function() {
+    const tabs = document.querySelectorAll('.arch-tab');
+    const panels = document.querySelectorAll('.arch-panel');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelector(`.arch-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+      });
+    });
+  })();
+
+  // ==========================================================
+  // DECISION CARDS (expand/collapse)
+  // ==========================================================
+  (function() {
+    document.querySelectorAll('.decision-card').forEach(card => {
+      card.addEventListener('click', () => {
+        card.classList.toggle('expanded');
+      });
+    });
+  })();
+</script>
+</BaseLayout>

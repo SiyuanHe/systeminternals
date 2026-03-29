@@ -1,0 +1,1369 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Design a Payment System — Interactive Visualization"
+  description="Explore payment system design with interactive visualizations: payment flows, state machines, idempotency, retry logic, saga patterns, and architecture deep dives."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Payment System", href: "/system-design/payment-system/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>💳 Design a Payment System</h1>
+      <p class="subtitle">Payment flows, state machines, idempotency, retries, and distributed transactions — all interactive</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A payment system handles the movement of money between parties. The key challenges:
+          <strong>exactly-once processing</strong> (never double-charge a customer),
+          <strong>consistency</strong> across distributed services,
+          <strong>fault tolerance</strong> when banks and processors fail, and
+          <strong>reconciliation</strong> to catch discrepancies. Explore each challenge below.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 1. Payment Flow Visualization                -->
+    <!-- ============================================ -->
+    <section class="flow-section">
+      <h2>🔄 Payment Flow</h2>
+      <p class="section-desc">Watch a payment travel from user to bank and back. Click "Process Payment" to animate the full lifecycle.</p>
+      <div class="flow-controls">
+        <button id="processPaymentBtn" class="action-btn primary-btn">▶️ Process Payment</button>
+        <button id="resetFlowBtn" class="action-btn reset-btn">🔄 Reset</button>
+        <label class="flow-amount-label">Amount: <span>$</span><strong id="flowAmountLabel">49.99</strong>
+          <input type="range" id="flowAmountSlider" min="1" max="999" value="4999" step="1">
+        </label>
+      </div>
+      <div class="flow-canvas-wrap">
+        <div class="flow-diagram" id="flowDiagram">
+          <!-- Nodes -->
+          <div class="flow-node" id="fn-user" data-label="User">
+            <div class="flow-node-icon">👤</div>
+            <div class="flow-node-name">User</div>
+          </div>
+          <div class="flow-arrow" id="fa-1"><div class="flow-arrow-line"><div class="flow-particle" id="fp-1"></div></div><div class="flow-arrow-label" id="fal-1"></div></div>
+          <div class="flow-node" id="fn-gateway" data-label="Payment Gateway">
+            <div class="flow-node-icon">🌐</div>
+            <div class="flow-node-name">Gateway</div>
+          </div>
+          <div class="flow-arrow" id="fa-2"><div class="flow-arrow-line"><div class="flow-particle" id="fp-2"></div></div><div class="flow-arrow-label" id="fal-2"></div></div>
+          <div class="flow-node" id="fn-processor" data-label="Payment Processor">
+            <div class="flow-node-icon">⚙️</div>
+            <div class="flow-node-name">Processor</div>
+          </div>
+          <div class="flow-arrow" id="fa-3"><div class="flow-arrow-line"><div class="flow-particle" id="fp-3"></div></div><div class="flow-arrow-label" id="fal-3"></div></div>
+          <div class="flow-node" id="fn-bank" data-label="Acquiring Bank">
+            <div class="flow-node-icon">🏦</div>
+            <div class="flow-node-name">Bank</div>
+          </div>
+          <div class="flow-arrow" id="fa-4"><div class="flow-arrow-line"><div class="flow-particle" id="fp-4"></div></div><div class="flow-arrow-label" id="fal-4"></div></div>
+          <div class="flow-node" id="fn-settlement" data-label="Settlement">
+            <div class="flow-node-icon">✅</div>
+            <div class="flow-node-name">Settlement</div>
+          </div>
+        </div>
+      </div>
+      <div class="flow-log" id="flowLog"></div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 2. Payment State Machine                     -->
+    <!-- ============================================ -->
+    <section class="state-section">
+      <h2>🔀 Payment State Machine</h2>
+      <p class="section-desc">Click on valid next states to transition. The current state is highlighted. Observe valid and invalid transitions.</p>
+      <div class="state-controls">
+        <button id="resetStateBtn" class="action-btn reset-btn">🔄 Reset to Created</button>
+        <button id="autoStateBtn" class="action-btn primary-btn">▶️ Auto-Play Happy Path</button>
+      </div>
+      <div class="state-machine" id="stateMachine">
+        <div class="state-row">
+          <div class="state-node state-created current" id="state-created" data-state="created">
+            <div class="state-label">Created</div>
+          </div>
+          <div class="state-arrow-right">→</div>
+          <div class="state-node state-pending" id="state-pending" data-state="pending">
+            <div class="state-label">Pending</div>
+          </div>
+          <div class="state-arrow-right">→</div>
+          <div class="state-node state-processing" id="state-processing" data-state="processing">
+            <div class="state-label">Processing</div>
+          </div>
+        </div>
+        <div class="state-branch">
+          <div class="state-branch-line"></div>
+          <div class="state-outcomes">
+            <div class="state-node state-success" id="state-success" data-state="success">
+              <div class="state-label">Success</div>
+            </div>
+            <div class="state-node state-failed" id="state-failed" data-state="failed">
+              <div class="state-label">Failed</div>
+            </div>
+            <div class="state-node state-refunded" id="state-refunded" data-state="refunded">
+              <div class="state-label">Refunded</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="state-info-panel" id="stateInfoPanel">
+        <div class="state-info-current">Current: <strong id="stateCurrentLabel">Created</strong></div>
+        <div class="state-info-transitions">Valid transitions: <span id="stateTransitions">Pending</span></div>
+        <div class="state-history" id="stateHistory"></div>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 3. Idempotency Demo                          -->
+    <!-- ============================================ -->
+    <section class="idempotency-section">
+      <h2>🔑 Idempotency Keys</h2>
+      <p class="section-desc">Network retries can cause duplicate charges. Idempotency keys prevent this. Click "Simulate Retry" to see the difference.</p>
+      <div class="idemp-controls">
+        <button id="idempRetryBtn" class="action-btn primary-btn">🔁 Simulate Network Retry</button>
+        <button id="idempResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="idemp-grid">
+        <!-- Without Idempotency -->
+        <div class="idemp-panel idemp-bad">
+          <h3>❌ Without Idempotency</h3>
+          <div class="idemp-scenario">
+            <div class="idemp-client">
+              <div class="idemp-label">Client</div>
+              <div class="idemp-requests" id="idempBadRequests"></div>
+            </div>
+            <div class="idemp-arrow-col" id="idempBadArrows"></div>
+            <div class="idemp-server">
+              <div class="idemp-label">Server</div>
+              <div class="idemp-charges" id="idempBadCharges"></div>
+            </div>
+          </div>
+          <div class="idemp-total">
+            Total charged: <strong class="red" id="idempBadTotal"><span>$</span>0.00</strong>
+          </div>
+          <div class="idemp-verdict" id="idempBadVerdict"></div>
+        </div>
+        <!-- With Idempotency -->
+        <div class="idemp-panel idemp-good">
+          <h3>✅ With Idempotency Key</h3>
+          <div class="idemp-scenario">
+            <div class="idemp-client">
+              <div class="idemp-label">Client</div>
+              <div class="idemp-requests" id="idempGoodRequests"></div>
+            </div>
+            <div class="idemp-arrow-col" id="idempGoodArrows"></div>
+            <div class="idemp-server">
+              <div class="idemp-label">Server</div>
+              <div class="idemp-charges" id="idempGoodCharges"></div>
+            </div>
+          </div>
+          <div class="idemp-total">
+            Total charged: <strong class="green" id="idempGoodTotal"><span>$</span>0.00</strong>
+          </div>
+          <div class="idemp-verdict" id="idempGoodVerdict"></div>
+        </div>
+      </div>
+      <div class="idemp-key-display" id="idempKeyDisplay">
+        Idempotency Key: <code id="idempKeyValue">—</code>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 4. Retry Logic Visualization                 -->
+    <!-- ============================================ -->
+    <section class="retry-section">
+      <h2>🔁 Exponential Backoff & Retry</h2>
+      <p class="section-desc">When a payment processor returns a transient error, we retry with exponential backoff. Watch the increasing delays between attempts.</p>
+      <div class="retry-controls">
+        <div class="retry-control-group">
+          <label>Max Retries: <strong id="maxRetriesLabel">5</strong></label>
+          <input type="range" id="maxRetriesSlider" min="1" max="8" value="5">
+        </div>
+        <div class="retry-control-group">
+          <label>Base Delay: <strong id="baseDelayLabel">200</strong>ms</label>
+          <input type="range" id="baseDelaySlider" min="100" max="2000" value="200" step="100">
+        </div>
+        <div class="retry-control-group">
+          <label class="jitter-label">
+            <input type="checkbox" id="jitterToggle" checked> Add Jitter
+          </label>
+        </div>
+        <div class="retry-control-group">
+          <label>Fail Probability: <strong id="failProbLabel">70</strong>%</label>
+          <input type="range" id="failProbSlider" min="10" max="95" value="70">
+        </div>
+        <button id="startRetryBtn" class="action-btn primary-btn">▶️ Start Retry Sequence</button>
+        <button id="resetRetryBtn" class="action-btn reset-btn">🔄 Reset</button>
+      </div>
+      <div class="retry-timeline" id="retryTimeline">
+        <div class="retry-timeline-track" id="retryTrack"></div>
+      </div>
+      <div class="retry-stats">
+        <div class="stat"><span class="stat-l">Attempt</span><span class="stat-v" id="retryAttempt">0</span></div>
+        <div class="stat"><span class="stat-l">Total Wait</span><span class="stat-v" id="retryTotalWait">0ms</span></div>
+        <div class="stat"><span class="stat-l">Next Delay</span><span class="stat-v" id="retryNextDelay">—</span></div>
+        <div class="stat"><span class="stat-l">Result</span><span class="stat-v" id="retryResult">—</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 5. Distributed Transaction Patterns          -->
+    <!-- ============================================ -->
+    <section class="txn-section">
+      <h2>🔗 Distributed Transaction Patterns</h2>
+      <p class="section-desc">Compare Saga Pattern (choreography with compensating transactions) vs Two-Phase Commit (2PC). Step through each to see how failures are handled.</p>
+      <div class="txn-grid">
+        <!-- Saga Pattern -->
+        <div class="txn-panel" id="sagaPanel">
+          <h3>📜 Saga Pattern</h3>
+          <p class="txn-desc">Each service performs its local transaction and publishes an event. On failure, compensating transactions undo previous steps.</p>
+          <div class="txn-controls">
+            <button id="sagaStepBtn" class="action-btn primary-btn">▶️ Next Step</button>
+            <button id="sagaFailBtn" class="action-btn primary-btn-secondary">💥 Simulate Failure</button>
+            <button id="sagaResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          </div>
+          <div class="saga-steps" id="sagaSteps">
+            <div class="saga-step" id="saga-step-0" data-step="0">
+              <div class="saga-step-num">1</div>
+              <div class="saga-step-info">
+                <div class="saga-step-name">Create Order</div>
+                <div class="saga-step-comp">↩️ Cancel Order</div>
+              </div>
+              <div class="saga-step-status" id="saga-status-0">⏳</div>
+            </div>
+            <div class="saga-step" id="saga-step-1" data-step="1">
+              <div class="saga-step-num">2</div>
+              <div class="saga-step-info">
+                <div class="saga-step-name">Reserve Inventory</div>
+                <div class="saga-step-comp">↩️ Release Inventory</div>
+              </div>
+              <div class="saga-step-status" id="saga-status-1">⏳</div>
+            </div>
+            <div class="saga-step" id="saga-step-2" data-step="2">
+              <div class="saga-step-num">3</div>
+              <div class="saga-step-info">
+                <div class="saga-step-name">Process Payment</div>
+                <div class="saga-step-comp">↩️ Refund Payment</div>
+              </div>
+              <div class="saga-step-status" id="saga-status-2">⏳</div>
+            </div>
+            <div class="saga-step" id="saga-step-3" data-step="3">
+              <div class="saga-step-num">4</div>
+              <div class="saga-step-info">
+                <div class="saga-step-name">Confirm Shipping</div>
+                <div class="saga-step-comp">↩️ Cancel Shipment</div>
+              </div>
+              <div class="saga-step-status" id="saga-status-3">⏳</div>
+            </div>
+          </div>
+          <div class="saga-log" id="sagaLog"></div>
+        </div>
+
+        <!-- Two-Phase Commit -->
+        <div class="txn-panel" id="tpcPanel">
+          <h3>🤝 Two-Phase Commit (2PC)</h3>
+          <p class="txn-desc">A coordinator asks all participants to prepare, then commit. If any participant fails to prepare, all abort.</p>
+          <div class="txn-controls">
+            <button id="tpcStepBtn" class="action-btn primary-btn">▶️ Next Phase</button>
+            <button id="tpcFailBtn" class="action-btn primary-btn-secondary">💥 Participant Fails</button>
+            <button id="tpcResetBtn" class="action-btn reset-btn">🔄 Reset</button>
+          </div>
+          <div class="tpc-diagram" id="tpcDiagram">
+            <div class="tpc-coordinator">
+              <div class="tpc-node" id="tpc-coord">
+                <div class="tpc-node-icon">👔</div>
+                <div class="tpc-node-label">Coordinator</div>
+                <div class="tpc-node-state" id="tpc-coord-state">INIT</div>
+              </div>
+            </div>
+            <div class="tpc-arrows" id="tpcArrows">
+              <div class="tpc-arrow-set">
+                <div class="tpc-arrow-down" id="tpc-arrow-0">↓</div>
+                <div class="tpc-arrow-down" id="tpc-arrow-1">↓</div>
+                <div class="tpc-arrow-down" id="tpc-arrow-2">↓</div>
+              </div>
+            </div>
+            <div class="tpc-participants">
+              <div class="tpc-node" id="tpc-part-0">
+                <div class="tpc-node-icon">🏦</div>
+                <div class="tpc-node-label">Payment</div>
+                <div class="tpc-node-state" id="tpc-part-0-state">INIT</div>
+              </div>
+              <div class="tpc-node" id="tpc-part-1">
+                <div class="tpc-node-icon">📦</div>
+                <div class="tpc-node-label">Inventory</div>
+                <div class="tpc-node-state" id="tpc-part-1-state">INIT</div>
+              </div>
+              <div class="tpc-node" id="tpc-part-2">
+                <div class="tpc-node-icon">📧</div>
+                <div class="tpc-node-label">Notification</div>
+                <div class="tpc-node-state" id="tpc-part-2-state">INIT</div>
+              </div>
+            </div>
+          </div>
+          <div class="tpc-phase-label" id="tpcPhaseLabel">Phase: Waiting</div>
+          <div class="tpc-log" id="tpcLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 6. Architecture Deep Dive                    -->
+    <!-- ============================================ -->
+    <section class="arch-section">
+      <h2>🏗️ Architecture Deep Dive</h2>
+      <div class="arch-tabs">
+        <button class="arch-tab active" data-tab="api">API Design</button>
+        <button class="arch-tab" data-tab="schema">Database Schema</button>
+        <button class="arch-tab" data-tab="recon">Reconciliation</button>
+        <button class="arch-tab" data-tab="fraud">Fraud Detection</button>
+        <button class="arch-tab" data-tab="pci">PCI Compliance</button>
+      </div>
+      <div class="arch-panels">
+        <!-- API Design -->
+        <div class="arch-panel active" id="panel-api">
+          <h3>RESTful Payment API</h3>
+          <div class="code-block">
+            <pre><code set:html={`POST /v1/payments
+{
+  "idempotency_key": "uuid-v4-unique-per-request",
+  "amount": 4999,          // cents to avoid float issues
+  "currency": "USD",
+  "payment_method": {
+    "type": "card",
+    "token": "tok_visa_4242"  // tokenized, never raw card
+  },
+  "description": "Order #12345",
+  "metadata": { "order_id": "12345" }
+}
+
+Response 201:
+{
+  "id": "pay_abc123",
+  "status": "pending",
+  "amount": 4999,
+  "currency": "USD",
+  "created_at": "2025-01-15T10:30:00Z"
+}
+
+GET /v1/payments/:id          // check status
+POST /v1/payments/:id/capture // capture authorized payment
+POST /v1/payments/:id/refund  // initiate refund
+GET /v1/payments?limit=20     // list with pagination`} /></pre>
+          </div>
+          <div class="arch-notes">
+            <p><strong>Key decisions:</strong></p>
+            <ul>
+              <li>Amounts in <strong>smallest currency unit</strong> (cents) to avoid floating-point errors</li>
+              <li><strong>Idempotency key</strong> is required on all mutating endpoints</li>
+              <li>Card data is <strong>tokenized</strong> before reaching our servers (PCI compliance)</li>
+              <li>Separate <strong>authorize/capture</strong> flow for pre-auth scenarios</li>
+              <li>All responses include <strong>status</strong> for async polling</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Database Schema -->
+        <div class="arch-panel" id="panel-schema">
+          <h3>Core Tables</h3>
+          <div class="code-block">
+            <pre><code set:html={`-- Payments table (source of truth)
+CREATE TABLE payments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key VARCHAR(255) UNIQUE NOT NULL,
+  amount          BIGINT NOT NULL,        -- cents
+  currency        VARCHAR(3) NOT NULL,
+  status          VARCHAR(20) NOT NULL DEFAULT 'created',
+  payment_method  JSONB NOT NULL,
+  merchant_id     UUID NOT NULL REFERENCES merchants(id),
+  description     TEXT,
+  metadata        JSONB DEFAULT '{}',
+  processor_ref   VARCHAR(255),           -- external ref
+  failure_reason  TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- State transition ledger (immutable audit log)
+CREATE TABLE payment_events (
+  id          BIGSERIAL PRIMARY KEY,
+  payment_id  UUID NOT NULL REFERENCES payments(id),
+  from_status VARCHAR(20),
+  to_status   VARCHAR(20) NOT NULL,
+  reason      TEXT,
+  actor       VARCHAR(50),   -- 'system', 'user', 'webhook'
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Idempotency store (dedup layer)
+CREATE TABLE idempotency_keys (
+  key         VARCHAR(255) PRIMARY KEY,
+  payment_id  UUID REFERENCES payments(id),
+  response    JSONB,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ DEFAULT NOW() + INTERVAL '24 hours'
+);`} /></pre>
+          </div>
+          <div class="arch-notes">
+            <p><strong>Design rationale:</strong></p>
+            <ul>
+              <li><strong>Immutable event log</strong> tracks every state transition for auditability</li>
+              <li><strong>UNIQUE constraint</strong> on idempotency_key provides database-level dedup</li>
+              <li>Idempotency keys <strong>expire after 24h</strong> to bound storage growth</li>
+              <li><strong>JSONB metadata</strong> allows flexible merchant-specific data</li>
+              <li>Processor reference stored for <strong>reconciliation</strong> with external systems</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Reconciliation -->
+        <div class="arch-panel" id="panel-recon">
+          <h3>Payment Reconciliation</h3>
+          <div class="arch-diagram-text">
+            <div class="recon-flow">
+              <div class="recon-step">
+                <div class="recon-icon">📥</div>
+                <div class="recon-text"><strong>1. Ingest:</strong> Pull settlement files from processor (daily CSV/SFTP)</div>
+              </div>
+              <div class="recon-step">
+                <div class="recon-icon">🔍</div>
+                <div class="recon-text"><strong>2. Match:</strong> Join on processor_ref with our payments table</div>
+              </div>
+              <div class="recon-step">
+                <div class="recon-icon">⚖️</div>
+                <div class="recon-text"><strong>3. Compare:</strong> Verify amounts, currencies, statuses match</div>
+              </div>
+              <div class="recon-step">
+                <div class="recon-icon">🚨</div>
+                <div class="recon-text"><strong>4. Flag:</strong> Mismatches trigger alerts for manual review</div>
+              </div>
+              <div class="recon-step">
+                <div class="recon-icon">✅</div>
+                <div class="recon-text"><strong>5. Resolve:</strong> Adjust ledger entries or initiate corrections</div>
+              </div>
+            </div>
+          </div>
+          <div class="arch-notes">
+            <p><strong>Common discrepancies:</strong></p>
+            <ul>
+              <li><strong>Missing payments:</strong> We recorded success but processor has no record (network issue)</li>
+              <li><strong>Amount mismatch:</strong> Currency conversion differences or partial captures</li>
+              <li><strong>Status mismatch:</strong> Webhook missed, payment actually declined at bank</li>
+              <li><strong>Orphaned transactions:</strong> Processor charged but we crashed before recording</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Fraud Detection -->
+        <div class="arch-panel" id="panel-fraud">
+          <h3>Fraud Detection Pipeline</h3>
+          <div class="arch-diagram-text">
+            <div class="fraud-layers">
+              <div class="fraud-layer" data-risk="low">
+                <div class="fraud-layer-label">Layer 1: Rules Engine</div>
+                <div class="fraud-layer-desc">Velocity checks, amount thresholds, blocked lists, geo-IP</div>
+              </div>
+              <div class="fraud-layer" data-risk="medium">
+                <div class="fraud-layer-label">Layer 2: ML Scoring</div>
+                <div class="fraud-layer-desc">Real-time risk score (0-100) from behavioral features</div>
+              </div>
+              <div class="fraud-layer" data-risk="high">
+                <div class="fraud-layer-label">Layer 3: 3D Secure</div>
+                <div class="fraud-layer-desc">Challenge high-risk with bank-issued OTP verification</div>
+              </div>
+              <div class="fraud-layer" data-risk="review">
+                <div class="fraud-layer-label">Layer 4: Manual Review</div>
+                <div class="fraud-layer-desc">Suspicious transactions queued for human analysts</div>
+              </div>
+            </div>
+          </div>
+          <div class="arch-notes">
+            <p><strong>Key signals:</strong></p>
+            <ul>
+              <li>Card testing patterns (many small charges in rapid succession)</li>
+              <li>Shipping/billing address mismatch</li>
+              <li>Device fingerprint anomalies</li>
+              <li>Unusual purchase velocity or amount for the merchant category</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- PCI Compliance -->
+        <div class="arch-panel" id="panel-pci">
+          <h3>PCI DSS Compliance</h3>
+          <div class="arch-diagram-text">
+            <div class="pci-zones">
+              <div class="pci-zone pci-zone-outside">
+                <div class="pci-zone-label">Outside PCI Scope</div>
+                <div class="pci-zone-items">
+                  <span class="pci-item">Application Server</span>
+                  <span class="pci-item">User Dashboard</span>
+                  <span class="pci-item">Analytics</span>
+                </div>
+              </div>
+              <div class="pci-zone pci-zone-boundary">
+                <div class="pci-zone-label">PCI Boundary</div>
+                <div class="pci-zone-items">
+                  <span class="pci-item">Tokenization Service</span>
+                  <span class="pci-item">Card Vault (HSM)</span>
+                </div>
+              </div>
+              <div class="pci-zone pci-zone-external">
+                <div class="pci-zone-label">External (PSP)</div>
+                <div class="pci-zone-items">
+                  <span class="pci-item">Stripe / Adyen</span>
+                  <span class="pci-item">Card Networks</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="arch-notes">
+            <p><strong>Minimizing PCI scope:</strong></p>
+            <ul>
+              <li>Use a <strong>PSP's hosted payment form</strong> (Stripe Elements) so raw card data never hits our servers</li>
+              <li>If we must handle cards: <strong>tokenize immediately</strong> at the edge and store tokens, not PANs</li>
+              <li><strong>Network segmentation</strong> isolates card data environment from general infrastructure</li>
+              <li><strong>Encryption at rest and in transit</strong> (TLS 1.2+, AES-256 for stored tokens)</li>
+              <li>Regular <strong>penetration testing</strong> and <strong>vulnerability scanning</strong> required</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- 7. Key Design Decisions                      -->
+    <!-- ============================================ -->
+    <section class="decisions-section">
+      <h2>⚖️ Key Design Decisions</h2>
+      <div class="decisions-grid">
+        <div class="decision-card">
+          <h4>Consistency vs Availability</h4>
+          <div class="decision-tradeoff">
+            <div class="decision-option decision-chosen">
+              <span class="decision-badge">Chosen</span>
+              <strong>Strong Consistency</strong>
+              <p>Payment status must be accurate. We accept higher latency and use synchronous writes with ACID guarantees.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option">
+              <strong>High Availability</strong>
+              <p>Eventual consistency risks showing stale payment states, leading to double-charges or lost payments.</p>
+            </div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>Sync vs Async Processing</h4>
+          <div class="decision-tradeoff">
+            <div class="decision-option">
+              <strong>Fully Synchronous</strong>
+              <p>Simple but blocks user while waiting for bank response (can be 5-30 seconds).</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option decision-chosen">
+              <span class="decision-badge">Chosen</span>
+              <strong>Async with Webhooks</strong>
+              <p>Return "pending" immediately. Notify via webhook when bank responds. Better UX and throughput.</p>
+            </div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>Single DB vs Event Sourcing</h4>
+          <div class="decision-tradeoff">
+            <div class="decision-option">
+              <strong>Single Mutable Row</strong>
+              <p>Simpler queries but loses history of state transitions. Hard to debug payment issues.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option decision-chosen">
+              <span class="decision-badge">Chosen</span>
+              <strong>Event Sourced Ledger</strong>
+              <p>Append-only event log. Current state is derived. Full auditability for financial compliance.</p>
+            </div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <h4>Build vs Buy PSP</h4>
+          <div class="decision-tradeoff">
+            <div class="decision-option">
+              <strong>Build In-House</strong>
+              <p>Full control but massive PCI scope, card network agreements, and compliance burden.</p>
+            </div>
+            <div class="decision-vs">vs</div>
+            <div class="decision-option decision-chosen">
+              <span class="decision-badge">Chosen</span>
+              <strong>Use PSP (Stripe/Adyen)</strong>
+              <p>Outsource PCI scope. Focus on business logic. Multi-PSP for redundancy.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <style>
+    /* ===== Flow Section ===== */
+    .flow-section { margin: 2rem 0; }
+    .section-desc { color: #94a3b8; font-size: 0.95rem; margin-bottom: 1rem; line-height: 1.5; }
+    .flow-controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .flow-amount-label { color: #94a3b8; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+    .flow-amount-label strong { color: #667eea; }
+    .flow-amount-label input[type="range"] { width: 120px; accent-color: #667eea; }
+    .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.2s; }
+    .action-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+    .action-btn:active { transform: translateY(0); }
+    .primary-btn { background: #667eea; color: white; }
+    .primary-btn-secondary { background: #e74c3c; color: white; }
+    .reset-btn { background: #334155; color: #94a3b8; }
+    .flow-canvas-wrap { overflow-x: auto; padding: 1rem 0; }
+    .flow-diagram { display: flex; align-items: center; gap: 0; min-width: 700px; padding: 2rem 1rem; }
+    .flow-node { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; background: #1a1a2e; border: 2px solid #2a2a4a; border-radius: 12px; padding: 1rem 1.25rem; min-width: 90px; transition: all 0.4s ease; position: relative; }
+    .flow-node.active { border-color: #667eea; box-shadow: 0 0 20px rgba(102,126,234,0.4); transform: scale(1.08); }
+    .flow-node.done { border-color: #22c55e; box-shadow: 0 0 15px rgba(34,197,94,0.3); }
+    .flow-node-icon { font-size: 1.8rem; }
+    .flow-node-name { font-size: 0.85rem; color: #e2e8f0; font-weight: 600; }
+    .flow-arrow { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 60px; }
+    .flow-arrow-line { width: 100%; height: 3px; background: #2a2a4a; border-radius: 2px; position: relative; overflow: hidden; }
+    .flow-arrow-line::after { content: ''; position: absolute; right: -6px; top: -4px; border: 5px solid transparent; border-left-color: #2a2a4a; }
+    .flow-particle { position: absolute; top: -3px; left: -10px; width: 10px; height: 10px; border-radius: 50%; background: #667eea; box-shadow: 0 0 10px #667eea; opacity: 0; transition: none; }
+    .flow-particle.animate { animation: flowParticle 0.6s ease-in-out forwards; }
+    @keyframes flowParticle { 0% { left: -10px; opacity: 1; } 100% { left: calc(100% + 10px); opacity: 1; } }
+    .flow-arrow-label { font-size: 0.7rem; color: #667eea; margin-top: 0.3rem; height: 1rem; font-family: monospace; }
+    .flow-log { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem; font-family: monospace; font-size: 0.8rem; color: #64748b; max-height: 120px; overflow-y: auto; margin-top: 1rem; }
+    .flow-log .log-entry { padding: 0.15rem 0; }
+    .flow-log .log-entry.success { color: #22c55e; }
+    .flow-log .log-entry.info { color: #667eea; }
+
+    /* ===== State Machine ===== */
+    .state-section { margin: 2rem 0; }
+    .state-controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .state-machine { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 2rem; }
+    .state-row { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; }
+    .state-arrow-right { color: #64748b; font-size: 1.5rem; padding: 0 0.25rem; }
+    .state-node { padding: 0.75rem 1.5rem; border-radius: 10px; cursor: pointer; transition: all 0.3s ease; border: 2px solid transparent; user-select: none; }
+    .state-node:hover { transform: scale(1.05); }
+    .state-node.disabled { opacity: 0.35; cursor: not-allowed; }
+    .state-node.disabled:hover { transform: none; }
+    .state-label { font-weight: 600; font-size: 0.95rem; }
+    .state-created { background: #334155; color: #e2e8f0; }
+    .state-pending { background: #854d0e33; color: #fbbf24; }
+    .state-processing { background: #1e3a5f33; color: #60a5fa; }
+    .state-success { background: #14532d33; color: #22c55e; }
+    .state-failed { background: #7f1d1d33; color: #ef4444; }
+    .state-refunded { background: #581c8733; color: #a78bfa; }
+    .state-node.current { border-color: currentColor; box-shadow: 0 0 20px rgba(255,255,255,0.15); animation: statePulse 1.5s ease-in-out infinite; }
+    @keyframes statePulse { 0%,100% { box-shadow: 0 0 10px rgba(255,255,255,0.1); } 50% { box-shadow: 0 0 25px rgba(255,255,255,0.25); } }
+    .state-branch { display: flex; flex-direction: column; align-items: center; margin-top: 1rem; }
+    .state-branch-line { width: 2px; height: 20px; background: #64748b; }
+    .state-outcomes { display: flex; gap: 1rem; margin-top: 0.5rem; flex-wrap: wrap; justify-content: center; }
+    .state-info-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 1rem; margin-top: 1rem; }
+    .state-info-current { color: #e2e8f0; font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .state-info-current strong { color: #667eea; }
+    .state-info-transitions { color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .state-info-transitions span { color: #fbbf24; }
+    .state-history { font-family: monospace; font-size: 0.8rem; color: #64748b; max-height: 80px; overflow-y: auto; }
+
+    /* ===== Idempotency ===== */
+    .idempotency-section { margin: 2rem 0; }
+    .idemp-controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .idemp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 800px) { .idemp-grid { grid-template-columns: 1fr; } }
+    .idemp-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .idemp-panel h3 { margin: 0 0 1rem; color: #e2e8f0; font-size: 1.05rem; }
+    .idemp-bad { border-color: #7f1d1d55; }
+    .idemp-good { border-color: #14532d55; }
+    .idemp-scenario { display: flex; gap: 0.5rem; align-items: flex-start; min-height: 120px; }
+    .idemp-client, .idemp-server { flex: 1; }
+    .idemp-label { font-size: 0.8rem; color: #64748b; text-transform: uppercase; margin-bottom: 0.5rem; font-weight: 600; text-align: center; }
+    .idemp-arrow-col { display: flex; flex-direction: column; gap: 0.25rem; align-items: center; padding-top: 1.5rem; min-width: 40px; }
+    .idemp-arrow-item { color: #64748b; font-size: 0.8rem; animation: idempArrowIn 0.3s ease; }
+    @keyframes idempArrowIn { from { opacity:0; transform: translateX(-5px); } to { opacity:1; transform: translateX(0); } }
+    .idemp-request-item, .idemp-charge-item { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; font-family: monospace; font-size: 0.75rem; color: #94a3b8; animation: idempItemIn 0.3s ease; }
+    @keyframes idempItemIn { from { opacity:0; transform: translateY(-5px); } to { opacity:1; transform: translateY(0); } }
+    .idemp-charge-item.duplicate { border-color: #ef4444; color: #ef4444; background: #7f1d1d22; }
+    .idemp-charge-item.deduped { border-color: #22c55e; color: #22c55e; background: #14532d22; }
+    .idemp-total { margin-top: 0.75rem; text-align: center; color: #94a3b8; font-size: 0.9rem; }
+    .idemp-total strong { font-size: 1.1rem; }
+    .idemp-verdict { text-align: center; margin-top: 0.5rem; font-size: 0.85rem; font-weight: 600; min-height: 1.2rem; }
+    .idemp-verdict.bad { color: #ef4444; }
+    .idemp-verdict.good { color: #22c55e; }
+    .idemp-key-display { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem; text-align: center; margin-top: 1rem; color: #94a3b8; font-size: 0.9rem; }
+    .idemp-key-display code { color: #667eea; background: #0f0f23; padding: 0.2rem 0.5rem; border-radius: 4px; }
+    .red { color: #ef4444; }
+    .green { color: #22c55e; }
+
+    /* ===== Retry Section ===== */
+    .retry-section { margin: 2rem 0; }
+    .retry-controls { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1.5rem; background: #1a1a2e; padding: 1.25rem; border-radius: 12px; border: 1px solid #2a2a4a; }
+    .retry-control-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .retry-control-group label { color: #94a3b8; font-size: 0.85rem; }
+    .retry-control-group label strong { color: #667eea; }
+    .retry-control-group input[type="range"] { width: 120px; accent-color: #667eea; }
+    .jitter-label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+    .jitter-label input { accent-color: #667eea; }
+    .retry-timeline { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.5rem; min-height: 80px; overflow-x: auto; }
+    .retry-timeline-track { display: flex; align-items: center; gap: 0; min-height: 50px; position: relative; }
+    .retry-attempt { display: flex; align-items: center; animation: retryAppear 0.3s ease; }
+    @keyframes retryAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+    .retry-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: white; flex-shrink: 0; }
+    .retry-dot.fail { background: #ef4444; }
+    .retry-dot.success { background: #22c55e; }
+    .retry-dot.pending { background: #64748b; animation: retryPulse 0.8s infinite; }
+    @keyframes retryPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(100,116,139,0.5); } 50% { box-shadow: 0 0 0 8px rgba(100,116,139,0); } }
+    .retry-delay-bar { height: 3px; background: #667eea33; border-radius: 2px; position: relative; margin: 0 4px; transition: width 0.3s; }
+    .retry-delay-bar .delay-label { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 0.65rem; color: #667eea; white-space: nowrap; font-family: monospace; }
+    .retry-delay-bar .delay-fill { height: 100%; background: #667eea; border-radius: 2px; animation: delayFill 0.5s ease forwards; width: 0; }
+    @keyframes delayFill { to { width: 100%; } }
+    .retry-stats { display: flex; gap: 1rem; margin-top: 1rem; }
+    .stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+    .stat-l { font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
+    .stat-v { font-size: 1.3rem; font-weight: 700; color: #e2e8f0; }
+    .stat-v.green { color: #22c55e; }
+    .stat-v.red { color: #ef4444; }
+
+    /* ===== Transaction Patterns ===== */
+    .txn-section { margin: 2rem 0; }
+    .txn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 800px) { .txn-grid { grid-template-columns: 1fr; } }
+    .txn-panel { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .txn-panel h3 { margin: 0 0 0.5rem; color: #e2e8f0; font-size: 1.05rem; }
+    .txn-desc { color: #64748b; font-size: 0.85rem; margin: 0 0 1rem; line-height: 1.4; }
+    .txn-controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+    /* Saga */
+    .saga-steps { display: flex; flex-direction: column; gap: 0.5rem; }
+    .saga-step { display: flex; align-items: center; gap: 0.75rem; background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.6rem 0.75rem; transition: all 0.3s; }
+    .saga-step.active { border-color: #667eea; box-shadow: 0 0 12px rgba(102,126,234,0.2); }
+    .saga-step.done { border-color: #22c55e; }
+    .saga-step.compensating { border-color: #f59e0b; animation: sagaCompensate 0.5s ease; }
+    .saga-step.compensated { border-color: #ef4444; opacity: 0.6; }
+    .saga-step.failed { border-color: #ef4444; }
+    @keyframes sagaCompensate { 0% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } 100% { transform: translateX(0); } }
+    .saga-step-num { width: 24px; height: 24px; border-radius: 50%; background: #334155; color: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+    .saga-step.done .saga-step-num { background: #22c55e; }
+    .saga-step.compensated .saga-step-num { background: #ef4444; }
+    .saga-step-info { flex: 1; }
+    .saga-step-name { color: #e2e8f0; font-size: 0.85rem; font-weight: 600; }
+    .saga-step-comp { color: #64748b; font-size: 0.75rem; }
+    .saga-step-status { font-size: 1.1rem; }
+    .saga-log { margin-top: 0.75rem; background: #0f0f23; border-radius: 6px; padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: #64748b; max-height: 100px; overflow-y: auto; }
+
+    /* 2PC */
+    .tpc-diagram { padding: 1rem 0; }
+    .tpc-coordinator { display: flex; justify-content: center; margin-bottom: 0.5rem; }
+    .tpc-node { background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 10px; padding: 0.75rem; text-align: center; min-width: 90px; transition: all 0.3s; }
+    .tpc-node.prepared { border-color: #fbbf24; box-shadow: 0 0 10px rgba(251,191,36,0.2); }
+    .tpc-node.committed { border-color: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,0.2); }
+    .tpc-node.aborted { border-color: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,0.2); }
+    .tpc-node-icon { font-size: 1.5rem; }
+    .tpc-node-label { font-size: 0.8rem; color: #e2e8f0; font-weight: 600; margin: 0.25rem 0; }
+    .tpc-node-state { font-size: 0.7rem; color: #64748b; font-family: monospace; text-transform: uppercase; }
+    .tpc-arrows { display: flex; justify-content: center; margin: 0.25rem 0; }
+    .tpc-arrow-set { display: flex; gap: 3rem; }
+    .tpc-arrow-down { color: #64748b; font-size: 1.2rem; transition: color 0.3s; text-align: center; width: 90px; }
+    .tpc-arrow-down.prepare { color: #fbbf24; }
+    .tpc-arrow-down.commit { color: #22c55e; }
+    .tpc-arrow-down.abort { color: #ef4444; }
+    .tpc-participants { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
+    .tpc-phase-label { text-align: center; margin-top: 0.75rem; color: #94a3b8; font-size: 0.9rem; font-weight: 600; }
+    .tpc-log { margin-top: 0.75rem; background: #0f0f23; border-radius: 6px; padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: #64748b; max-height: 100px; overflow-y: auto; }
+
+    /* ===== Architecture Deep Dive ===== */
+    .arch-section { margin: 2rem 0; }
+    .arch-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0; }
+    .arch-tab { background: #1a1a2e; border: 1px solid #2a2a4a; border-bottom: none; border-radius: 8px 8px 0 0; padding: 0.6rem 1.2rem; color: #94a3b8; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s; }
+    .arch-tab:hover { color: #e2e8f0; }
+    .arch-tab.active { background: #0f0f23; color: #667eea; border-color: #667eea; border-bottom-color: #0f0f23; position: relative; z-index: 1; }
+    .arch-panels { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 0 12px 12px 12px; padding: 1.5rem; margin-top: -1px; }
+    .arch-panel { display: none; }
+    .arch-panel.active { display: block; animation: archFadeIn 0.3s ease; }
+    @keyframes archFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .arch-panel h3 { color: #e2e8f0; margin: 0 0 1rem; font-size: 1.1rem; }
+    .code-block { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 1rem; overflow-x: auto; margin-bottom: 1rem; }
+    .code-block pre { margin: 0; }
+    .code-block code { color: #e2e8f0; font-size: 0.8rem; line-height: 1.5; font-family: 'Fira Code', 'SF Mono', monospace; }
+    .arch-notes { background: #1a1a2e33; border-radius: 8px; padding: 1rem; }
+    .arch-notes p { color: #e2e8f0; margin: 0 0 0.5rem; font-size: 0.9rem; }
+    .arch-notes ul { margin: 0; padding-left: 1.25rem; }
+    .arch-notes li { color: #94a3b8; font-size: 0.85rem; line-height: 1.6; margin-bottom: 0.25rem; }
+    .arch-notes li strong { color: #667eea; }
+
+    /* Recon flow */
+    .recon-flow { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+    .recon-step { display: flex; align-items: flex-start; gap: 0.75rem; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem; }
+    .recon-icon { font-size: 1.3rem; flex-shrink: 0; }
+    .recon-text { color: #94a3b8; font-size: 0.85rem; line-height: 1.4; }
+    .recon-text strong { color: #e2e8f0; }
+
+    /* Fraud layers */
+    .fraud-layers { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+    .fraud-layer { padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid #2a2a4a; }
+    .fraud-layer[data-risk="low"] { background: #14532d22; border-color: #14532d55; }
+    .fraud-layer[data-risk="medium"] { background: #854d0e22; border-color: #854d0e55; }
+    .fraud-layer[data-risk="high"] { background: #7f1d1d22; border-color: #7f1d1d55; }
+    .fraud-layer[data-risk="review"] { background: #581c8722; border-color: #581c8755; }
+    .fraud-layer-label { font-weight: 600; color: #e2e8f0; font-size: 0.9rem; margin-bottom: 0.25rem; }
+    .fraud-layer-desc { color: #94a3b8; font-size: 0.8rem; }
+
+    /* PCI zones */
+    .pci-zones { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+    .pci-zone { border-radius: 10px; padding: 1rem; }
+    .pci-zone-outside { background: #14532d15; border: 2px dashed #22c55e44; }
+    .pci-zone-boundary { background: #7f1d1d15; border: 2px solid #ef444466; }
+    .pci-zone-external { background: #1e3a5f22; border: 2px dashed #60a5fa44; }
+    .pci-zone-label { font-weight: 600; color: #e2e8f0; font-size: 0.9rem; margin-bottom: 0.5rem; }
+    .pci-zone-items { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .pci-item { background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; padding: 0.3rem 0.75rem; font-size: 0.8rem; color: #94a3b8; }
+
+    /* ===== Design Decisions ===== */
+    .decisions-section { margin: 2rem 0; }
+    .decisions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 800px) { .decisions-grid { grid-template-columns: 1fr; } }
+    .decision-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 1.25rem; }
+    .decision-card h4 { margin: 0 0 1rem; color: #667eea; font-size: 1rem; }
+    .decision-tradeoff { display: flex; align-items: stretch; gap: 0.5rem; }
+    .decision-option { flex: 1; background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 8px; padding: 0.75rem; position: relative; }
+    .decision-option strong { color: #e2e8f0; font-size: 0.9rem; display: block; margin-bottom: 0.4rem; }
+    .decision-option p { color: #94a3b8; font-size: 0.8rem; margin: 0; line-height: 1.4; }
+    .decision-chosen { border-color: #22c55e55; background: #14532d15; }
+    .decision-badge { position: absolute; top: -8px; right: 8px; background: #22c55e; color: #0f0f23; font-size: 0.65rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 4px; text-transform: uppercase; }
+    .decision-vs { display: flex; align-items: center; color: #64748b; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
+
+    /* ===== General/shared ===== */
+    input[type="range"] { accent-color: #667eea; }
+    @media (max-width: 600px) {
+      .flow-diagram { min-width: 500px; }
+      .state-row { gap: 0.25rem; }
+      .tpc-arrow-set { gap: 1rem; }
+      .decisions-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <script type="module">{`
+    // ===== Utility =====
+    const $ = id => document.getElementById(id);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // ===== 1. Payment Flow =====
+    (function initFlow() {
+      const nodes = ['fn-user','fn-gateway','fn-processor','fn-bank','fn-settlement'];
+      const arrows = ['fa-1','fa-2','fa-3','fa-4'];
+      const particles = ['fp-1','fp-2','fp-3','fp-4'];
+      const labels = ['fal-1','fal-2','fal-3','fal-4'];
+      const flowLog = $('flowLog');
+      let flowRunning = false;
+
+      $('flowAmountSlider').addEventListener('input', e => {
+        $('flowAmountLabel').textContent = (e.target.value / 100).toFixed(2);
+      });
+
+      function logFlow(msg, cls) {
+        const d = document.createElement('div');
+        d.className = 'log-entry ' + (cls || '');
+        const t = new Date().toLocaleTimeString();
+        d.textContent = '[' + t + '] ' + msg;
+        flowLog.prepend(d);
+      }
+
+      function resetFlow() {
+        flowRunning = false;
+        nodes.forEach(id => { $(id).classList.remove('active','done'); });
+        particles.forEach(id => { $(id).classList.remove('animate'); $(id).style.left = '-10px'; });
+        labels.forEach(id => { $(id).textContent = ''; });
+        flowLog.innerHTML = '';
+      }
+
+      async function processPayment() {
+        if (flowRunning) return;
+        flowRunning = true;
+        resetFlow();
+        const amount = ($('flowAmountSlider').value / 100).toFixed(2);
+
+        const steps = [
+          { node: 0, msg: 'User initiates payment of $' + amount, label: null },
+          { node: 0, msg: 'Sending to Payment Gateway...', arrow: 0, labelText: 'POST /pay' },
+          { node: 1, msg: 'Gateway validates request, tokenizes card', label: null },
+          { node: 1, msg: 'Forwarding to Processor...', arrow: 1, labelText: 'Auth $' + amount },
+          { node: 2, msg: 'Processor contacts acquiring bank', label: null },
+          { node: 2, msg: 'Sending to Bank network...', arrow: 2, labelText: 'ISO 8583' },
+          { node: 3, msg: 'Bank checks balance, approves transaction', label: null },
+          { node: 3, msg: 'Initiating settlement...', arrow: 3, labelText: 'Approved' },
+          { node: 4, msg: 'Settlement complete. Funds transferred.', label: null },
+        ];
+
+        for (let i = 0; i < steps.length; i++) {
+          if (!flowRunning) return;
+          const s = steps[i];
+          // activate node
+          nodes.forEach((id, idx) => {
+            $(id).classList.toggle('active', idx === s.node);
+            if (idx < s.node) $(id).classList.add('done');
+          });
+          logFlow(s.msg, s.arrow !== undefined ? 'info' : '');
+
+          if (s.arrow !== undefined) {
+            labels[s.arrow] && ($(labels[s.arrow]).textContent = s.labelText || '');
+            const p = $(particles[s.arrow]);
+            p.classList.remove('animate');
+            void p.offsetWidth; // reflow
+            p.classList.add('animate');
+            await sleep(700);
+          } else {
+            await sleep(600);
+          }
+        }
+
+        $(nodes[4]).classList.add('done');
+        $(nodes[4]).classList.remove('active');
+        logFlow('Payment of $' + amount + ' completed successfully!', 'success');
+        flowRunning = false;
+      }
+
+      $('processPaymentBtn').addEventListener('click', processPayment);
+      $('resetFlowBtn').addEventListener('click', resetFlow);
+    })();
+
+    // ===== 2. State Machine =====
+    (function initStateMachine() {
+      const transitions = {
+        created: ['pending'],
+        pending: ['processing'],
+        processing: ['success', 'failed'],
+        success: ['refunded'],
+        failed: [],
+        refunded: []
+      };
+      const stateNames = { created:'Created', pending:'Pending', processing:'Processing', success:'Success', failed:'Failed', refunded:'Refunded' };
+      let currentState = 'created';
+      let history = [];
+
+      function updateUI() {
+        Object.keys(stateNames).forEach(s => {
+          const el = $('state-' + s);
+          const valid = transitions[currentState];
+          el.classList.toggle('current', s === currentState);
+          el.classList.toggle('disabled', s !== currentState && !valid.includes(s));
+        });
+        $('stateCurrentLabel').textContent = stateNames[currentState];
+        const validT = transitions[currentState];
+        $('stateTransitions').textContent = validT.length ? validT.map(s => stateNames[s]).join(', ') : 'None (terminal state)';
+        $('stateHistory').textContent = history.length ? history.join(' -> ') : 'No transitions yet';
+      }
+
+      function transitionTo(state) {
+        if (!transitions[currentState].includes(state)) return;
+        history.push(stateNames[currentState]);
+        currentState = state;
+        history.push(stateNames[currentState]);
+        // deduplicate consecutive
+        const deduped = [history[0]];
+        for (let i = 1; i < history.length; i++) {
+          if (history[i] !== history[i-1]) deduped.push(history[i]);
+        }
+        history = deduped;
+        updateUI();
+      }
+
+      Object.keys(stateNames).forEach(s => {
+        $('state-' + s).addEventListener('click', () => transitionTo(s));
+      });
+
+      $('resetStateBtn').addEventListener('click', () => {
+        currentState = 'created';
+        history = [];
+        updateUI();
+      });
+
+      $('autoStateBtn').addEventListener('click', async () => {
+        currentState = 'created';
+        history = [];
+        updateUI();
+        const path = ['pending', 'processing', 'success'];
+        for (const s of path) {
+          await sleep(800);
+          transitionTo(s);
+        }
+      });
+
+      updateUI();
+    })();
+
+    // ===== 3. Idempotency Demo =====
+    (function initIdempotency() {
+      let retryCount = 0;
+      const amount = 49.99;
+
+      function genKey() {
+        return 'idem_' + Math.random().toString(36).substr(2, 12);
+      }
+
+      function resetIdemp() {
+        retryCount = 0;
+        ['idempBadRequests','idempBadCharges','idempGoodRequests','idempGoodCharges','idempBadArrows','idempGoodArrows'].forEach(id => $(id).innerHTML = '');
+        $('idempBadTotal').textContent = '$0.00';
+        $('idempGoodTotal').textContent = '$0.00';
+        $('idempBadVerdict').textContent = '';
+        $('idempBadVerdict').className = 'idemp-verdict';
+        $('idempGoodVerdict').textContent = '';
+        $('idempGoodVerdict').className = 'idemp-verdict';
+        $('idempKeyValue').textContent = '\\u2014';
+      }
+
+      function addElement(parentId, cls, text) {
+        const el = document.createElement('div');
+        el.className = cls;
+        el.textContent = text;
+        $(parentId).appendChild(el);
+      }
+
+      async function simulateRetry() {
+        retryCount++;
+        const key = genKey();
+        $('idempKeyValue').textContent = key;
+
+        // Without idempotency - each retry creates a new charge
+        await sleep(200);
+        addElement('idempBadRequests', 'idemp-request-item', 'POST /pay $' + amount.toFixed(2));
+        addElement('idempBadArrows', 'idemp-arrow-item', '\\u2192');
+        addElement('idempBadCharges', 'idemp-charge-item' + (retryCount > 1 ? ' duplicate' : ''),
+          (retryCount > 1 ? '\\u26a0 DUPLICATE ' : '') + 'Charge $' + amount.toFixed(2));
+        $('idempBadTotal').textContent = '$' + (retryCount * amount).toFixed(2);
+
+        if (retryCount > 1) {
+          $('idempBadVerdict').textContent = '\\u274c Customer charged ' + retryCount + 'x! ($' + (retryCount * amount).toFixed(2) + ')';
+          $('idempBadVerdict').className = 'idemp-verdict bad';
+        }
+
+        // With idempotency - duplicate detected, return cached response
+        await sleep(100);
+        addElement('idempGoodRequests', 'idemp-request-item', 'POST /pay key=' + key.slice(0,10) + '...');
+        addElement('idempGoodArrows', 'idemp-arrow-item', '\\u2192');
+        if (retryCount === 1) {
+          addElement('idempGoodCharges', 'idemp-charge-item deduped', 'Charge $' + amount.toFixed(2));
+        } else {
+          addElement('idempGoodCharges', 'idemp-charge-item deduped', '\\u2713 Dedup: return cached');
+        }
+        $('idempGoodTotal').textContent = '$' + amount.toFixed(2);
+
+        if (retryCount > 1) {
+          $('idempGoodVerdict').textContent = '\\u2705 Correct! Only charged once ($' + amount.toFixed(2) + ')';
+          $('idempGoodVerdict').className = 'idemp-verdict good';
+        }
+      }
+
+      $('idempRetryBtn').addEventListener('click', simulateRetry);
+      $('idempResetBtn').addEventListener('click', resetIdemp);
+    })();
+
+    // ===== 4. Retry Logic =====
+    (function initRetry() {
+      let running = false;
+      let abortRetry = false;
+
+      $('maxRetriesSlider').addEventListener('input', e => $('maxRetriesLabel').textContent = e.target.value);
+      $('baseDelaySlider').addEventListener('input', e => $('baseDelayLabel').textContent = e.target.value);
+      $('failProbSlider').addEventListener('input', e => $('failProbLabel').textContent = e.target.value);
+
+      function calcDelay(attempt, base, jitter) {
+        let delay = base * Math.pow(2, attempt);
+        if (jitter) delay = delay * (0.5 + Math.random());
+        return Math.round(delay);
+      }
+
+      function resetRetry() {
+        abortRetry = true;
+        running = false;
+        $('retryTrack').innerHTML = '';
+        $('retryAttempt').textContent = '0';
+        $('retryTotalWait').textContent = '0ms';
+        $('retryNextDelay').textContent = '\\u2014';
+        $('retryResult').textContent = '\\u2014';
+        $('retryResult').className = 'stat-v';
+      }
+
+      async function startRetry() {
+        if (running) return;
+        running = true;
+        abortRetry = false;
+        $('retryTrack').innerHTML = '';
+        const maxRetries = parseInt($('maxRetriesSlider').value);
+        const baseDelay = parseInt($('baseDelaySlider').value);
+        const useJitter = $('jitterToggle').checked;
+        const failProb = parseInt($('failProbSlider').value) / 100;
+        let totalWait = 0;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          if (abortRetry) return;
+
+          // Add delay bar if not first attempt
+          if (attempt > 0) {
+            const delay = calcDelay(attempt - 1, baseDelay, useJitter);
+            totalWait += delay;
+            const barWidth = Math.min(delay / 10, 200);
+            const bar = document.createElement('div');
+            bar.className = 'retry-delay-bar';
+            bar.style.width = barWidth + 'px';
+            bar.innerHTML = '<div class="delay-label">' + delay + 'ms</div><div class="delay-fill"></div>';
+            $('retryTrack').appendChild(bar);
+            $('retryNextDelay').textContent = delay + 'ms';
+            $('retryTotalWait').textContent = totalWait + 'ms';
+            await sleep(Math.min(delay, 800)); // speed up viz
+          }
+
+          if (abortRetry) return;
+
+          // Add attempt dot
+          const dot = document.createElement('div');
+          dot.className = 'retry-attempt';
+          const succeeded = Math.random() > failProb || attempt === maxRetries;
+          const isSuccess = Math.random() > failProb;
+          const dotInner = document.createElement('div');
+
+          // Show pending first
+          dotInner.className = 'retry-dot pending';
+          dotInner.textContent = (attempt + 1);
+          dot.appendChild(dotInner);
+          $('retryTrack').appendChild(dot);
+          $('retryAttempt').textContent = (attempt + 1);
+
+          await sleep(400);
+          if (abortRetry) return;
+
+          if (isSuccess) {
+            dotInner.className = 'retry-dot success';
+            $('retryResult').textContent = 'Success';
+            $('retryResult').className = 'stat-v green';
+            $('retryNextDelay').textContent = '\\u2014';
+            running = false;
+            return;
+          } else {
+            dotInner.className = 'retry-dot fail';
+            if (attempt === maxRetries) {
+              $('retryResult').textContent = 'Max retries exceeded';
+              $('retryResult').className = 'stat-v red';
+              $('retryNextDelay').textContent = '\\u2014';
+              running = false;
+              return;
+            }
+          }
+        }
+        running = false;
+      }
+
+      $('startRetryBtn').addEventListener('click', startRetry);
+      $('resetRetryBtn').addEventListener('click', resetRetry);
+    })();
+
+    // ===== 5. Saga Pattern =====
+    (function initSaga() {
+      const stepNames = ['Create Order', 'Reserve Inventory', 'Process Payment', 'Confirm Shipping'];
+      const compNames = ['Cancel Order', 'Release Inventory', 'Refund Payment', 'Cancel Shipment'];
+      let currentStep = -1;
+      let sagaState = 'idle'; // idle, forward, compensating, done
+      let failAtStep = -1;
+
+      function sagaLog(msg) {
+        const log = $('sagaLog');
+        const el = document.createElement('div');
+        el.textContent = '> ' + msg;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function resetSaga() {
+        currentStep = -1;
+        sagaState = 'idle';
+        failAtStep = -1;
+        for (let i = 0; i < 4; i++) {
+          const step = $('saga-step-' + i);
+          step.className = 'saga-step';
+          $('saga-status-' + i).textContent = '\\u23f3';
+        }
+        $('sagaLog').innerHTML = '';
+      }
+
+      function sagaNextStep() {
+        if (sagaState === 'done' || sagaState === 'compensating') return;
+
+        if (sagaState === 'idle') sagaState = 'forward';
+        currentStep++;
+
+        if (currentStep >= 4) {
+          sagaState = 'done';
+          sagaLog('\\u2705 Saga completed successfully!');
+          return;
+        }
+
+        if (failAtStep === currentStep) {
+          // Fail this step and start compensating
+          $('saga-step-' + currentStep).className = 'saga-step failed';
+          $('saga-status-' + currentStep).textContent = '\\u274c';
+          sagaLog('\\u274c ' + stepNames[currentStep] + ' FAILED!');
+          sagaState = 'compensating';
+          compensateSaga(currentStep - 1);
+          return;
+        }
+
+        // Mark active then done
+        $('saga-step-' + currentStep).className = 'saga-step active';
+        $('saga-status-' + currentStep).textContent = '\\u23f3';
+        sagaLog('Executing: ' + stepNames[currentStep] + '...');
+
+        setTimeout(() => {
+          $('saga-step-' + currentStep).className = 'saga-step done';
+          $('saga-status-' + currentStep).textContent = '\\u2705';
+          sagaLog('\\u2705 ' + stepNames[currentStep] + ' succeeded');
+        }, 300);
+      }
+
+      async function compensateSaga(fromStep) {
+        sagaLog('\\u21a9\\ufe0f Starting compensating transactions...');
+        for (let i = fromStep; i >= 0; i--) {
+          await sleep(500);
+          $('saga-step-' + i).className = 'saga-step compensating';
+          $('saga-status-' + i).textContent = '\\u21a9\\ufe0f';
+          sagaLog('Compensating: ' + compNames[i] + '...');
+          await sleep(400);
+          $('saga-step-' + i).className = 'saga-step compensated';
+          $('saga-status-' + i).textContent = '\\u274c';
+          sagaLog('\\u2705 ' + compNames[i] + ' done');
+        }
+        sagaState = 'done';
+        sagaLog('\\u274c Saga rolled back completely.');
+      }
+
+      $('sagaStepBtn').addEventListener('click', () => {
+        if (sagaState === 'compensating' || sagaState === 'done') return;
+        sagaNextStep();
+      });
+
+      $('sagaFailBtn').addEventListener('click', () => {
+        if (sagaState !== 'idle' && sagaState !== 'forward') return;
+        failAtStep = currentStep + 1;
+        sagaLog('\\u26a0 Next step will fail!');
+        sagaNextStep();
+      });
+
+      $('sagaResetBtn').addEventListener('click', resetSaga);
+    })();
+
+    // ===== 6. Two-Phase Commit =====
+    (function initTPC() {
+      let phase = 'init'; // init, prepare, commit/abort
+      let failParticipant = -1;
+
+      function tpcLog(msg) {
+        const log = $('tpcLog');
+        const el = document.createElement('div');
+        el.textContent = '> ' + msg;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function resetTPC() {
+        phase = 'init';
+        failParticipant = -1;
+        $('tpc-coord').className = 'tpc-node';
+        $('tpc-coord-state').textContent = 'INIT';
+        for (let i = 0; i < 3; i++) {
+          $('tpc-part-' + i).className = 'tpc-node';
+          $('tpc-part-' + i + '-state').textContent = 'INIT';
+          $('tpc-arrow-' + i).className = 'tpc-arrow-down';
+          $('tpc-arrow-' + i).textContent = '\\u2193';
+        }
+        $('tpcPhaseLabel').textContent = 'Phase: Waiting';
+        $('tpcLog').innerHTML = '';
+      }
+
+      function tpcNextPhase() {
+        if (phase === 'init') {
+          // Phase 1: Prepare
+          phase = 'prepare';
+          $('tpcPhaseLabel').textContent = 'Phase 1: PREPARE';
+          $('tpc-coord-state').textContent = 'PREPARE';
+          tpcLog('Coordinator sends PREPARE to all participants');
+          for (let i = 0; i < 3; i++) {
+            $('tpc-arrow-' + i).className = 'tpc-arrow-down prepare';
+            $('tpc-arrow-' + i).textContent = '\\u2193 PREPARE';
+            if (i === failParticipant) {
+              $('tpc-part-' + i).className = 'tpc-node aborted';
+              $('tpc-part-' + i + '-state').textContent = 'ABORT';
+              tpcLog('\\u274c Participant ' + i + ' votes ABORT');
+            } else {
+              $('tpc-part-' + i).className = 'tpc-node prepared';
+              $('tpc-part-' + i + '-state').textContent = 'PREPARED';
+              tpcLog('\\u2705 Participant ' + i + ' votes YES');
+            }
+          }
+        } else if (phase === 'prepare') {
+          // Phase 2: Commit or Abort
+          const shouldAbort = failParticipant >= 0;
+          if (shouldAbort) {
+            phase = 'abort';
+            $('tpcPhaseLabel').textContent = 'Phase 2: ABORT';
+            $('tpc-coord').className = 'tpc-node aborted';
+            $('tpc-coord-state').textContent = 'ABORT';
+            tpcLog('\\u274c Coordinator decides ABORT (participant voted no)');
+            for (let i = 0; i < 3; i++) {
+              $('tpc-arrow-' + i).className = 'tpc-arrow-down abort';
+              $('tpc-arrow-' + i).textContent = '\\u2193 ABORT';
+              $('tpc-part-' + i).className = 'tpc-node aborted';
+              $('tpc-part-' + i + '-state').textContent = 'ABORTED';
+            }
+            tpcLog('All participants rolled back');
+          } else {
+            phase = 'commit';
+            $('tpcPhaseLabel').textContent = 'Phase 2: COMMIT';
+            $('tpc-coord').className = 'tpc-node committed';
+            $('tpc-coord-state').textContent = 'COMMIT';
+            tpcLog('\\u2705 Coordinator decides COMMIT (all voted yes)');
+            for (let i = 0; i < 3; i++) {
+              $('tpc-arrow-' + i).className = 'tpc-arrow-down commit';
+              $('tpc-arrow-' + i).textContent = '\\u2193 COMMIT';
+              $('tpc-part-' + i).className = 'tpc-node committed';
+              $('tpc-part-' + i + '-state').textContent = 'COMMITTED';
+            }
+            tpcLog('All participants committed successfully');
+          }
+        }
+      }
+
+      $('tpcStepBtn').addEventListener('click', () => {
+        if (phase === 'commit' || phase === 'abort') return;
+        tpcNextPhase();
+      });
+
+      $('tpcFailBtn').addEventListener('click', () => {
+        if (phase !== 'init') return;
+        failParticipant = Math.floor(Math.random() * 3);
+        tpcLog('\\u26a0 Participant ' + failParticipant + ' will fail during prepare');
+        tpcNextPhase();
+      });
+
+      $('tpcResetBtn').addEventListener('click', resetTPC);
+    })();
+
+    // ===== 7. Architecture Tabs =====
+    (function initArchTabs() {
+      const tabs = document.querySelectorAll('.arch-tab');
+      const panels = document.querySelectorAll('.arch-panel');
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          tabs.forEach(t => t.classList.remove('active'));
+          panels.forEach(p => p.classList.remove('active'));
+          tab.classList.add('active');
+          $('panel-' + tab.dataset.tab).classList.add('active');
+        });
+      });
+    })();
+  `}</script>
+
+</BaseLayout>

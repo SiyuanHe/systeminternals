@@ -1,0 +1,2605 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Design a Web Crawler — Interactive Visualization"
+  description="Understand web crawler architecture: BFS/DFS traversal, URL frontier, politeness policies, bloom filters, distributed crawling. Interactive simulation."
+  breadcrumbs={[
+    { label: "Home", href: "/" },
+    { label: "System Design", href: "/system-design/" },
+    { label: "Web Crawler", href: "/system-design/web-crawler/" }
+  ]}
+>
+  <div class="viz-container">
+    <header class="viz-header">
+      <h1>&#x1F577;&#xFE0F; Design a Web Crawler</h1>
+      <p class="subtitle">Explore crawling algorithms, URL frontiers, politeness policies, and distributed architecture</p>
+    </header>
+
+    <section class="overview-section">
+      <div class="overview-card">
+        <p>
+          A <strong>web crawler</strong> (or spider) systematically browses the web to index content. It starts from
+          <strong>seed URLs</strong>, fetches pages, extracts links, and adds them to a <strong>URL frontier</strong> for
+          future crawling. Key challenges include <strong>politeness</strong> (not overloading servers),
+          <strong>deduplication</strong> (avoiding re-crawling), <strong>prioritization</strong> (crawling important pages first),
+          and <strong>scale</strong> (billions of pages across millions of domains). Explore each component below.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 1: BFS/DFS Crawl Visualization                      -->
+    <!-- ============================================================ -->
+    <section class="crawl-section">
+      <h2>&#x1F310; BFS vs DFS Crawl Traversal</h2>
+      <p class="section-desc">Watch how a crawler discovers pages using Breadth-First Search (explore all links on a page before going deeper) vs Depth-First Search (follow links as deep as possible first). Toggle the strategy and observe the traversal order.</p>
+
+      <div class="crawl-controls">
+        <div class="control-group">
+          <label>Seed URL:</label>
+          <input type="text" id="seedUrlInput" value="example.com" class="text-input" />
+        </div>
+        <div class="control-group">
+          <label>Strategy:</label>
+          <div class="pattern-buttons">
+            <button class="pattern-btn active" data-strategy="bfs" id="bfsBtn">&#x1F4CA; BFS</button>
+            <button class="pattern-btn" data-strategy="dfs" id="dfsBtn">&#x1F4C9; DFS</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Speed:</label>
+          <input type="range" id="crawlSpeed" min="1" max="10" value="5" />
+          <span id="speedLabel">5</span>
+        </div>
+        <div class="control-group">
+          <button id="startCrawlBtn" class="action-btn primary-btn">&#x25B6;&#xFE0F; Start Crawl</button>
+          <button id="resetCrawlBtn" class="action-btn reset-btn">&#x1F504; Reset</button>
+          <button id="stepCrawlBtn" class="action-btn primary-btn-secondary">&#x23ED;&#xFE0F; Step</button>
+        </div>
+      </div>
+
+      <div class="crawl-viz-wrapper">
+        <div class="graph-panel">
+          <h3>Web Graph</h3>
+          <canvas id="graphCanvas" width="700" height="450"></canvas>
+          <div class="legend">
+            <span class="legend-item"><span class="dot unvisited"></span> Unvisited</span>
+            <span class="legend-item"><span class="dot frontier-dot"></span> In Frontier</span>
+            <span class="legend-item"><span class="dot crawling"></span> Crawling</span>
+            <span class="legend-item"><span class="dot visited"></span> Visited</span>
+          </div>
+        </div>
+        <div class="frontier-panel">
+          <h3 id="frontierTitle">&#x1F4E5; URL Frontier (Queue - BFS)</h3>
+          <div class="frontier-list" id="frontierList"></div>
+          <div class="crawl-log">
+            <h4>&#x1F4DD; Crawl Log</h4>
+            <div class="log-entries" id="crawlLog"></div>
+          </div>
+          <div class="crawl-stats">
+            <div class="stat"><span class="stat-l">Visited</span><span class="stat-v green" id="visitedCount">0</span></div>
+            <div class="stat"><span class="stat-l">In Frontier</span><span class="stat-v yellow" id="frontierCount">0</span></div>
+            <div class="stat"><span class="stat-l">Total Found</span><span class="stat-v blue" id="totalFound">0</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 2: URL Frontier & Priority Queue                     -->
+    <!-- ============================================================ -->
+    <section class="frontier-section">
+      <h2>&#x1F4CB; URL Frontier &amp; Priority Queue</h2>
+      <p class="section-desc">The URL frontier is the data structure that stores URLs to be crawled. It uses a <strong>front queue</strong> (priority-based) feeding into <strong>back queues</strong> (one per domain for politeness). URLs are prioritized by PageRank, freshness, or domain importance.</p>
+
+      <div class="frontier-controls">
+        <div class="control-group">
+          <label>Add URL:</label>
+          <input type="text" id="newUrlInput" value="https://news.example.com/article" class="text-input wide" />
+        </div>
+        <div class="control-group">
+          <label>Priority:</label>
+          <select id="prioritySelect" class="select-input">
+            <option value="high">High (PageRank &gt; 0.8)</option>
+            <option value="medium" selected>Medium (PageRank 0.4-0.8)</option>
+            <option value="low">Low (PageRank &lt; 0.4)</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <button id="enqueueBtn" class="action-btn primary-btn">&#x2795; Enqueue</button>
+          <button id="dequeueBtn" class="action-btn primary-btn-secondary">&#x2796; Dequeue Next</button>
+          <button id="autoFrontierBtn" class="action-btn reset-btn">&#x25B6;&#xFE0F; Auto Demo</button>
+        </div>
+      </div>
+
+      <div class="frontier-viz-wrapper">
+        <div class="front-queues-panel">
+          <h3>&#x1F3AF; Front Queues (Priority)</h3>
+          <div class="priority-queues">
+            <div class="pq-lane" id="pqHigh">
+              <div class="pq-label high">HIGH</div>
+              <div class="pq-items" id="pqHighItems"></div>
+            </div>
+            <div class="pq-lane" id="pqMedium">
+              <div class="pq-label medium">MEDIUM</div>
+              <div class="pq-items" id="pqMediumItems"></div>
+            </div>
+            <div class="pq-lane" id="pqLow">
+              <div class="pq-label low">LOW</div>
+              <div class="pq-items" id="pqLowItems"></div>
+            </div>
+          </div>
+        </div>
+        <div class="arrow-col">&#x27A1;&#xFE0F;</div>
+        <div class="back-queues-panel">
+          <h3>&#x1F3E0; Back Queues (Per-Domain Politeness)</h3>
+          <div class="domain-queues" id="domainQueues"></div>
+        </div>
+      </div>
+
+      <div class="frontier-metrics">
+        <div class="stat"><span class="stat-l">Total Enqueued</span><span class="stat-v green" id="totalEnqueued">0</span></div>
+        <div class="stat"><span class="stat-l">Total Dequeued</span><span class="stat-v yellow" id="totalDequeued">0</span></div>
+        <div class="stat"><span class="stat-l">Domains</span><span class="stat-v blue" id="domainCount">0</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 3: Politeness & robots.txt                           -->
+    <!-- ============================================================ -->
+    <section class="politeness-section">
+      <h2>&#x1F916; Politeness &amp; robots.txt</h2>
+      <p class="section-desc">Well-behaved crawlers respect <code>robots.txt</code> directives and enforce crawl delays to avoid overwhelming servers. This simulator shows how URLs are filtered and delayed.</p>
+
+      <div class="politeness-wrapper">
+        <div class="robots-panel">
+          <h3>&#x1F4C4; robots.txt</h3>
+          <pre class="robots-file" id="robotsFile">User-agent: *
+Crawl-delay: 2
+Disallow: /admin/
+Disallow: /private/
+Disallow: /api/internal/
+Allow: /api/public/
+
+User-agent: MyBot
+Crawl-delay: 1
+Disallow: /secret/
+Allow: /</pre>
+          <div class="robots-controls">
+            <label>User-Agent:</label>
+            <select id="userAgentSelect" class="select-input">
+              <option value="generic">GenericBot (*)</option>
+              <option value="mybot">MyBot</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filter-panel">
+          <h3>&#x1F50D; URL Filter Test</h3>
+          <div class="url-test-list" id="urlTestList"></div>
+          <div class="control-group" style="margin-top:12px;">
+            <input type="text" id="testUrlInput" value="/admin/settings" class="text-input wide" />
+            <button id="testUrlBtn" class="action-btn primary-btn">&#x1F50E; Test URL</button>
+          </div>
+        </div>
+
+        <div class="delay-panel">
+          <h3>&#x23F1;&#xFE0F; Crawl Delay Timeline</h3>
+          <div class="timeline-viz" id="timelineViz"></div>
+          <button id="startTimelineBtn" class="action-btn primary-btn-secondary">&#x25B6;&#xFE0F; Simulate Crawl Delay</button>
+          <div class="delay-info" id="delayInfo">
+            <span>Crawl-delay: <strong id="currentDelay">2</strong>s between requests to the same host</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 4: Bloom Filter for Deduplication                    -->
+    <!-- ============================================================ -->
+    <section class="bloom-section">
+      <h2>&#x1F3AF; Bloom Filter for URL Deduplication</h2>
+      <p class="section-desc">A Bloom filter is a space-efficient probabilistic data structure used to test whether a URL has already been seen. It may produce <strong>false positives</strong> (says "seen" when not) but <strong>never false negatives</strong>.</p>
+
+      <div class="bloom-controls">
+        <div class="control-group">
+          <label>URL to check:</label>
+          <input type="text" id="bloomUrlInput" value="https://example.com/page1" class="text-input wide" />
+        </div>
+        <div class="control-group">
+          <button id="bloomAddBtn" class="action-btn primary-btn">&#x2795; Add URL</button>
+          <button id="bloomCheckBtn" class="action-btn primary-btn-secondary">&#x1F50E; Check URL</button>
+          <button id="bloomResetBtn" class="action-btn reset-btn">&#x1F504; Reset</button>
+          <button id="bloomDemoBtn" class="action-btn primary-btn-secondary">&#x25B6;&#xFE0F; Auto Demo</button>
+        </div>
+      </div>
+
+      <div class="bloom-viz-wrapper">
+        <div class="bloom-array-panel">
+          <h3>Bit Array (<span id="bloomSize">64</span> bits)</h3>
+          <div class="bit-array" id="bitArray"></div>
+          <div class="bloom-hash-info" id="bloomHashInfo">Add a URL to see which bits get set</div>
+        </div>
+
+        <div class="bloom-results-panel">
+          <h3>&#x1F4CA; Results</h3>
+          <div class="bloom-log" id="bloomLog"></div>
+          <div class="bloom-stats">
+            <div class="stat"><span class="stat-l">URLs Added</span><span class="stat-v green" id="bloomAdded">0</span></div>
+            <div class="stat"><span class="stat-l">Bits Set</span><span class="stat-v yellow" id="bitsSet">0</span></div>
+            <div class="stat"><span class="stat-l">Fill Ratio</span><span class="stat-v blue" id="fillRatio">0%</span></div>
+            <div class="stat"><span class="stat-l">False Positives</span><span class="stat-v red" id="falsePositives">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bloom-comparison">
+        <h3>&#x1F4BE; Space Comparison</h3>
+        <div class="comparison-bars">
+          <div class="comp-row">
+            <span class="comp-label">Bloom Filter (64 bits)</span>
+            <div class="comp-bar-track"><div class="comp-bar bloom-bar" id="bloomSpaceBar" style="width:8%"></div></div>
+            <span class="comp-value" id="bloomSpaceVal">8 bytes</span>
+          </div>
+          <div class="comp-row">
+            <span class="comp-label">HashSet (avg 40 bytes/URL)</span>
+            <div class="comp-bar-track"><div class="comp-bar hashset-bar" id="hashsetSpaceBar" style="width:0%"></div></div>
+            <span class="comp-value" id="hashsetSpaceVal">0 bytes</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 5: Distributed Crawling Architecture                 -->
+    <!-- ============================================================ -->
+    <section class="distributed-section">
+      <h2>&#x1F30D; Distributed Crawling Architecture</h2>
+      <p class="section-desc">At scale, a single machine cannot crawl the entire web. Multiple crawler workers coordinate through a central URL frontier, using consistent hashing to assign domains to workers.</p>
+
+      <div class="dist-controls">
+        <div class="control-group">
+          <label>Workers:</label>
+          <input type="range" id="workerCount" min="2" max="8" value="4" />
+          <span id="workerLabel">4</span>
+        </div>
+        <div class="control-group">
+          <button id="startDistBtn" class="action-btn primary-btn">&#x25B6;&#xFE0F; Start Distributed Crawl</button>
+          <button id="resetDistBtn" class="action-btn reset-btn">&#x1F504; Reset</button>
+          <button id="addDomainBtn" class="action-btn primary-btn-secondary">&#x2795; Add Domain</button>
+        </div>
+      </div>
+
+      <div class="dist-viz-wrapper">
+        <div class="coordinator-panel">
+          <div class="coordinator-box">
+            <h3>&#x1F3AF; Coordinator</h3>
+            <div class="coord-info">URL Frontier &amp; Domain Assigner</div>
+            <div class="coord-queue" id="coordQueue"></div>
+          </div>
+        </div>
+
+        <div class="hash-ring-panel">
+          <h3>Consistent Hash Ring</h3>
+          <canvas id="hashRingCanvas" width="300" height="300"></canvas>
+        </div>
+
+        <div class="workers-panel">
+          <h3>Crawler Workers</h3>
+          <div class="workers-grid" id="workersGrid"></div>
+        </div>
+      </div>
+
+      <div class="dist-stats">
+        <div class="stat"><span class="stat-l">Active Workers</span><span class="stat-v green" id="activeWorkers">4</span></div>
+        <div class="stat"><span class="stat-l">URLs/sec</span><span class="stat-v yellow" id="crawlRate">0</span></div>
+        <div class="stat"><span class="stat-l">Domains Assigned</span><span class="stat-v blue" id="domainsAssigned">0</span></div>
+        <div class="stat"><span class="stat-l">Total Crawled</span><span class="stat-v green" id="totalCrawled">0</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 6: Architecture Deep Dive                            -->
+    <!-- ============================================================ -->
+    <section class="architecture-section">
+      <h2>&#x1F3D7;&#xFE0F; Architecture Deep Dive</h2>
+
+      <div class="arch-grid">
+        <div class="arch-card">
+          <h3>&#x1F310; DNS Resolver &amp; Caching</h3>
+          <p>Crawlers make millions of DNS lookups. A local DNS cache avoids redundant queries. Strategies include:</p>
+          <ul>
+            <li><strong>Local DNS cache</strong> with TTL-based expiry</li>
+            <li><strong>Pre-fetching</strong> DNS for domains in the frontier</li>
+            <li><strong>Dedicated DNS resolver</strong> to avoid OS resolver bottlenecks</li>
+            <li>Cache hit rates of 90%+ reduce latency dramatically</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">URL</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">DNS Cache</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">IP Address</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">HTTP Fetch</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <h3>&#x1F4C4; Content Parsing &amp; Extraction</h3>
+          <p>After fetching a page, the crawler parses HTML to extract links and content:</p>
+          <ul>
+            <li><strong>Link extraction</strong> from &lt;a&gt;, &lt;link&gt;, &lt;script&gt;, &lt;img&gt; tags</li>
+            <li><strong>URL normalization</strong> (remove fragments, resolve relative URLs)</li>
+            <li><strong>Content type detection</strong> (HTML, PDF, images, etc.)</li>
+            <li><strong>Language detection</strong> for multi-lingual crawling</li>
+            <li><strong>JavaScript rendering</strong> for SPAs (expensive, selective)</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">Raw HTML</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">Parser</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">Links + Text</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <h3>&#x1F504; Duplicate Detection</h3>
+          <p>Beyond URL dedup, content-level dedup avoids storing identical pages served from different URLs:</p>
+          <ul>
+            <li><strong>URL fingerprinting</strong> with Bloom filters (seen above)</li>
+            <li><strong>Content hashing</strong> (MD5/SHA-256 of page body)</li>
+            <li><strong>SimHash / MinHash</strong> for near-duplicate detection</li>
+            <li><strong>URL canonicalization</strong> (trailing slashes, www, http/https)</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">Page Content</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">SimHash</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">Fingerprint DB</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <h3>&#x1F4BE; Storage Layer</h3>
+          <p>Crawled data must be stored efficiently for indexing and analysis:</p>
+          <ul>
+            <li><strong>WARC files</strong> (Web ARChive format) for raw page storage</li>
+            <li><strong>Object storage</strong> (S3) for page content blobs</li>
+            <li><strong>Metadata DB</strong> (crawl time, status, headers) in distributed KV store</li>
+            <li><strong>Inverted index</strong> for full-text search (downstream)</li>
+            <li><strong>Compression</strong> (gzip, zstd) for 3-5x space savings</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">Fetched Page</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">Storage</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">WARC + S3 + DB</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <h3>&#x1F4CA; Monitoring &amp; Metrics</h3>
+          <p>A production crawler needs comprehensive observability:</p>
+          <ul>
+            <li><strong>Pages/sec</strong> per worker and globally</li>
+            <li><strong>Error rates</strong> (timeouts, 4xx, 5xx, DNS failures)</li>
+            <li><strong>Frontier size</strong> and drain rate</li>
+            <li><strong>Domain distribution</strong> to detect hot spots</li>
+            <li><strong>Content freshness</strong> metrics for re-crawl scheduling</li>
+            <li><strong>Resource utilization</strong> (CPU, memory, bandwidth, disk I/O)</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">Workers</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">Metrics Pipeline</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">Dashboard</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <h3>&#x1F680; Scaling Strategies</h3>
+          <p>Scaling from thousands to billions of pages requires:</p>
+          <ul>
+            <li><strong>Horizontal scaling</strong> — add more crawler workers</li>
+            <li><strong>Domain partitioning</strong> — consistent hashing across workers</li>
+            <li><strong>Geographic distribution</strong> — crawl from regions near target servers</li>
+            <li><strong>Adaptive crawl rates</strong> — based on server response times</li>
+            <li><strong>Incremental re-crawling</strong> — prioritize changed pages via sitemaps, HTTP 304</li>
+            <li><strong>Tiered storage</strong> — hot (SSD), warm (HDD), cold (archive)</li>
+          </ul>
+          <div class="arch-diagram">
+            <div class="arch-flow">
+              <span class="arch-node">1 Worker</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node highlight">Shard</span>
+              <span class="arch-arrow">&#x2192;</span>
+              <span class="arch-node">N Workers</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 7: Key Design Decisions                              -->
+    <!-- ============================================================ -->
+    <section class="decisions-section">
+      <h2>&#x2696;&#xFE0F; Key Design Decisions</h2>
+      <p class="section-desc">Every web crawler design involves critical tradeoffs. Click each card to explore the reasoning behind the choices.</p>
+
+      <div class="decision-grid">
+        <div class="decision-card" data-decision="traversal">
+          <div class="decision-header">
+            <h3>&#x1F500; Breadth-First vs Depth-First</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>BFS (Preferred)</h4>
+                <ul>
+                  <li>Discovers diverse domains quickly</li>
+                  <li>Better for building a broad index</li>
+                  <li>Natural priority ordering by link depth</li>
+                  <li>Avoids spider traps (infinite depth)</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>DFS</h4>
+                <ul>
+                  <li>Lower memory usage (no large queue)</li>
+                  <li>Good for deep-crawling single sites</li>
+                  <li>Can get stuck in spider traps</li>
+                  <li>Poor diversity across domains</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Most production crawlers use <strong>BFS with priority</strong> — combines breadth with importance-based ordering.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="freshness">
+          <div class="decision-header">
+            <h3>&#x1F504; Freshness vs Completeness</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>Freshness Focus</h4>
+                <ul>
+                  <li>Re-crawl popular pages frequently</li>
+                  <li>Use sitemaps &amp; change frequency hints</li>
+                  <li>Prioritize dynamic content</li>
+                  <li>Higher bandwidth usage</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>Completeness Focus</h4>
+                <ul>
+                  <li>Crawl as many unique pages as possible</li>
+                  <li>Long-tail pages get attention</li>
+                  <li>Risk of stale content for popular pages</li>
+                  <li>Better for archival / research</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Balance both: use <strong>adaptive re-crawl intervals</strong> based on observed change rates. High-change pages re-crawled more often.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="politeness">
+          <div class="decision-header">
+            <h3>&#x1F3CE;&#xFE0F; Politeness vs Speed</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>Polite Crawling</h4>
+                <ul>
+                  <li>Respect robots.txt &amp; crawl-delay</li>
+                  <li>Max 1 request per domain per second</li>
+                  <li>Good reputation, avoid IP bans</li>
+                  <li>Slower overall throughput per domain</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>Aggressive Crawling</h4>
+                <ul>
+                  <li>Higher throughput per domain</li>
+                  <li>Faster discovery of all pages</li>
+                  <li>Risk of getting blocked / IP banned</li>
+                  <li>Can degrade target server performance</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Always be polite. Parallelize across <strong>many domains simultaneously</strong> to maintain high global throughput while being gentle per domain.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="storage">
+          <div class="decision-header">
+            <h3>&#x1F4BE; Store Raw HTML vs Parsed Content</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>Store Raw HTML</h4>
+                <ul>
+                  <li>Can re-parse with improved algorithms</li>
+                  <li>Full fidelity for archival</li>
+                  <li>Much more storage needed</li>
+                  <li>Standard WARC format compatibility</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>Store Parsed Only</h4>
+                <ul>
+                  <li>Smaller storage footprint</li>
+                  <li>Faster downstream processing</li>
+                  <li>Cannot re-extract if parser improves</li>
+                  <li>Lossy transformation</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Store <strong>both</strong>: raw HTML in cold storage (S3/archive) and parsed content in hot storage for processing. Compression makes raw storage affordable.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="dedup">
+          <div class="decision-header">
+            <h3>&#x1F3AF; Bloom Filter vs HashSet for Dedup</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>Bloom Filter</h4>
+                <ul>
+                  <li>O(1) lookup, extremely space-efficient</li>
+                  <li>~1 byte per URL at 1% false positive rate</li>
+                  <li>Cannot enumerate or delete entries</li>
+                  <li>False positives mean some URLs skipped</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>HashSet</h4>
+                <ul>
+                  <li>Exact membership test (no false positives)</li>
+                  <li>~40-100 bytes per URL (full string stored)</li>
+                  <li>Can enumerate and delete entries</li>
+                  <li>Does not scale to billions of URLs in memory</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Use a <strong>Bloom filter for in-memory fast checks</strong> backed by a persistent set (RocksDB/LevelDB) for exact verification when needed.</div>
+          </div>
+        </div>
+
+        <div class="decision-card" data-decision="render">
+          <div class="decision-header">
+            <h3>&#x1F4F1; Render JavaScript or Not</h3>
+            <span class="decision-toggle">&#x25BC;</span>
+          </div>
+          <div class="decision-body">
+            <div class="tradeoff-row">
+              <div class="tradeoff-side pro">
+                <h4>Render JS (Headless Browser)</h4>
+                <ul>
+                  <li>See content loaded dynamically (SPAs)</li>
+                  <li>More accurate link discovery</li>
+                  <li>10-100x more expensive per page</li>
+                  <li>Complex infrastructure (Chrome pool)</li>
+                </ul>
+              </div>
+              <div class="tradeoff-side con">
+                <h4>Static HTML Only</h4>
+                <ul>
+                  <li>Fast and lightweight</li>
+                  <li>Simple infrastructure</li>
+                  <li>Misses JS-rendered content</li>
+                  <li>Good enough for most pages</li>
+                </ul>
+              </div>
+            </div>
+            <div class="verdict">&#x2705; Two-tier approach: <strong>static crawl first</strong>, then selectively render important/JS-heavy domains with a headless browser pool.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</BaseLayout>
+
+<style>
+  /* ======================================= */
+  /* BASE STYLES                             */
+  /* ======================================= */
+  .viz-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    color: #e0e0e0;
+  }
+
+  .viz-header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  .viz-header h1 {
+    font-size: 2.4rem;
+    margin: 0;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: #94a3b8;
+    font-size: 1.1rem;
+    margin-top: 0.5rem;
+  }
+
+  .overview-section {
+    margin-bottom: 2.5rem;
+  }
+
+  .overview-card {
+    background: linear-gradient(135deg, rgba(96,165,250,0.1), rgba(167,139,250,0.1));
+    border: 1px solid rgba(96,165,250,0.3);
+    border-radius: 12px;
+    padding: 1.5rem;
+    font-size: 1.05rem;
+    line-height: 1.7;
+  }
+
+  .overview-card p {
+    margin: 0;
+  }
+
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.6rem;
+    margin-bottom: 0.5rem;
+    color: #f1f5f9;
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    color: #cbd5e1;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .section-desc {
+    color: #94a3b8;
+    margin-bottom: 1.25rem;
+    line-height: 1.6;
+  }
+
+  code {
+    background: rgba(96,165,250,0.15);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: #60a5fa;
+  }
+
+  /* ======================================= */
+  /* CONTROLS                                */
+  /* ======================================= */
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .crawl-controls, .frontier-controls, .bloom-controls, .dist-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.25rem;
+    padding: 1rem;
+    background: rgba(30,41,59,0.5);
+    border-radius: 10px;
+    border: 1px solid rgba(71,85,105,0.5);
+  }
+
+  label {
+    color: #94a3b8;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .text-input {
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    color: #e2e8f0;
+    font-size: 0.9rem;
+    min-width: 160px;
+  }
+
+  .text-input.wide {
+    min-width: 260px;
+  }
+
+  .text-input:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 2px rgba(96,165,250,0.2);
+  }
+
+  .select-input {
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    color: #e2e8f0;
+    font-size: 0.9rem;
+  }
+
+  input[type="range"] {
+    accent-color: #60a5fa;
+    width: 100px;
+  }
+
+  .pattern-buttons {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .pattern-btn {
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid #475569;
+    background: #1e293b;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+
+  .pattern-btn.active {
+    background: rgba(96,165,250,0.2);
+    border-color: #60a5fa;
+    color: #60a5fa;
+  }
+
+  .action-btn {
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+
+  .primary-btn {
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    color: white;
+  }
+
+  .primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37,99,235,0.4);
+  }
+
+  .primary-btn-secondary {
+    background: rgba(96,165,250,0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(96,165,250,0.3);
+  }
+
+  .primary-btn-secondary:hover {
+    background: rgba(96,165,250,0.25);
+  }
+
+  .reset-btn {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+
+  .reset-btn:hover {
+    background: rgba(239,68,68,0.25);
+  }
+
+  /* ======================================= */
+  /* STATS                                   */
+  /* ======================================= */
+  .crawl-stats, .frontier-metrics, .bloom-stats, .dist-stats {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+  }
+
+  .stat {
+    background: rgba(30,41,59,0.6);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100px;
+  }
+
+  .stat-l {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .stat-v {
+    font-size: 1.3rem;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .stat-v.green { color: #4ade80; }
+  .stat-v.yellow { color: #fbbf24; }
+  .stat-v.blue { color: #60a5fa; }
+  .stat-v.red { color: #f87171; }
+
+  /* ======================================= */
+  /* SECTION 1: BFS/DFS CRAWL                */
+  /* ======================================= */
+  .crawl-viz-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 1.5rem;
+  }
+
+  .graph-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .graph-panel canvas {
+    width: 100%;
+    border-radius: 8px;
+    background: rgba(15,23,42,0.5);
+  }
+
+  .legend {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #94a3b8;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot.unvisited { background: #475569; }
+  .dot.frontier-dot { background: #fbbf24; }
+  .dot.crawling { background: #f97316; animation: pulse-dot 0.8s infinite; }
+  .dot.visited { background: #4ade80; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  .frontier-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .frontier-list {
+    flex: 1;
+    max-height: 180px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 0.75rem;
+  }
+
+  .frontier-item {
+    padding: 0.3rem 0.6rem;
+    background: rgba(251,191,36,0.1);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 5px;
+    font-size: 0.8rem;
+    color: #fbbf24;
+    font-family: 'JetBrains Mono', monospace;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .crawl-log {
+    margin-bottom: 0.75rem;
+  }
+
+  .crawl-log h4 {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin: 0 0 0.4rem 0;
+  }
+
+  .log-entries {
+    max-height: 120px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: #64748b;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .log-entry {
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    animation: fadeIn 0.3s;
+  }
+
+  .log-entry.fetch { background: rgba(96,165,250,0.1); color: #60a5fa; }
+  .log-entry.discover { background: rgba(74,222,128,0.1); color: #4ade80; }
+  .log-entry.skip { background: rgba(248,113,113,0.1); color: #f87171; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* ======================================= */
+  /* SECTION 2: URL FRONTIER                 */
+  /* ======================================= */
+  .frontier-viz-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 40px 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .front-queues-panel, .back-queues-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .arrow-col {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    padding-top: 3rem;
+  }
+
+  .priority-queues {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .pq-lane {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .pq-label {
+    padding: 0.25rem 0.5rem;
+    border-radius: 5px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    min-width: 60px;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+
+  .pq-label.high { background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+  .pq-label.medium { background: rgba(251,191,36,0.2); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+  .pq-label.low { background: rgba(96,165,250,0.2); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+
+  .pq-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1;
+    min-height: 30px;
+  }
+
+  .pq-item {
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(71,85,105,0.3);
+    border: 1px solid rgba(71,85,105,0.5);
+    color: #cbd5e1;
+    animation: slideIn 0.3s ease-out;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .domain-queues {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 150px;
+  }
+
+  .domain-queue {
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: rgba(30,41,59,0.3);
+  }
+
+  .domain-queue-header {
+    font-size: 0.75rem;
+    color: #60a5fa;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .domain-queue-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .dq-item {
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(96,165,250,0.1);
+    border: 1px solid rgba(96,165,250,0.2);
+    color: #94a3b8;
+    animation: slideIn 0.2s;
+  }
+
+  /* ======================================= */
+  /* SECTION 3: POLITENESS                   */
+  /* ======================================= */
+  .politeness-wrapper {
+    display: grid;
+    grid-template-columns: 300px 1fr 1fr;
+    gap: 1.25rem;
+  }
+
+  .robots-panel, .filter-panel, .delay-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .robots-file {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-size: 0.75rem;
+    color: #4ade80;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .robots-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .url-test-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .url-test-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace;
+    animation: slideIn 0.3s;
+  }
+
+  .url-test-item.allowed {
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.3);
+    color: #4ade80;
+  }
+
+  .url-test-item.disallowed {
+    background: rgba(248,113,113,0.1);
+    border: 1px solid rgba(248,113,113,0.3);
+    color: #f87171;
+  }
+
+  .url-test-status {
+    font-weight: 700;
+    min-width: 18px;
+  }
+
+  .timeline-viz {
+    min-height: 120px;
+    background: rgba(15,23,42,0.5);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .timeline-bar {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 4px;
+  }
+
+  .timeline-label {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    min-width: 100px;
+  }
+
+  .timeline-track {
+    flex: 1;
+    height: 24px;
+    background: rgba(30,41,59,0.5);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .timeline-request {
+    position: absolute;
+    height: 100%;
+    width: 20px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: white;
+    font-weight: 700;
+    transition: left 0.3s;
+  }
+
+  .timeline-request.allowed-req { background: rgba(74,222,128,0.6); }
+  .timeline-request.delayed-req { background: rgba(251,191,36,0.6); }
+  .timeline-request.blocked-req { background: rgba(248,113,113,0.6); }
+
+  .delay-info {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-top: 0.5rem;
+  }
+
+  /* ======================================= */
+  /* SECTION 4: BLOOM FILTER                 */
+  /* ======================================= */
+  .bloom-viz-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .bloom-array-panel, .bloom-results-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .bit-array {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 3px;
+    margin-bottom: 1rem;
+  }
+
+  .bit-cell {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    background: rgba(30,41,59,0.6);
+    border: 1px solid rgba(71,85,105,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: #475569;
+    transition: all 0.3s;
+    cursor: default;
+  }
+
+  .bit-cell.set {
+    background: rgba(96,165,250,0.3);
+    border-color: rgba(96,165,250,0.6);
+    color: #60a5fa;
+  }
+
+  .bit-cell.highlight {
+    background: rgba(74,222,128,0.3);
+    border-color: rgba(74,222,128,0.6);
+    color: #4ade80;
+    animation: pulse-bit 0.6s;
+  }
+
+  .bit-cell.false-pos {
+    background: rgba(248,113,113,0.3);
+    border-color: rgba(248,113,113,0.6);
+    color: #f87171;
+    animation: pulse-bit 0.6s;
+  }
+
+  @keyframes pulse-bit {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+
+  .bloom-hash-info {
+    font-size: 0.8rem;
+    color: #64748b;
+    min-height: 2em;
+  }
+
+  .bloom-log {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 1rem;
+  }
+
+  .bloom-log-entry {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    animation: slideIn 0.3s;
+  }
+
+  .bloom-log-entry.added { background: rgba(74,222,128,0.1); color: #4ade80; }
+  .bloom-log-entry.found { background: rgba(96,165,250,0.1); color: #60a5fa; }
+  .bloom-log-entry.not-found { background: rgba(251,191,36,0.1); color: #fbbf24; }
+  .bloom-log-entry.false-positive { background: rgba(248,113,113,0.1); color: #f87171; }
+
+  .bloom-comparison {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .comparison-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .comp-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .comp-label {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    min-width: 220px;
+  }
+
+  .comp-bar-track {
+    flex: 1;
+    height: 20px;
+    background: rgba(30,41,59,0.5);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .comp-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease-out;
+  }
+
+  .comp-bar.bloom-bar { background: linear-gradient(90deg, #60a5fa, #7c3aed); }
+  .comp-bar.hashset-bar { background: linear-gradient(90deg, #f87171, #f97316); }
+
+  .comp-value {
+    font-size: 0.8rem;
+    color: #cbd5e1;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 80px;
+    text-align: right;
+  }
+
+  /* ======================================= */
+  /* SECTION 5: DISTRIBUTED CRAWLING         */
+  /* ======================================= */
+  .dist-viz-wrapper {
+    display: grid;
+    grid-template-columns: 250px 300px 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .coordinator-panel, .hash-ring-panel, .workers-panel {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .coordinator-box {
+    text-align: center;
+  }
+
+  .coord-info {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-bottom: 0.75rem;
+  }
+
+  .coord-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .coord-item {
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(167,139,250,0.1);
+    border: 1px solid rgba(167,139,250,0.3);
+    color: #a78bfa;
+    animation: slideIn 0.3s;
+  }
+
+  .hash-ring-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .hash-ring-panel canvas {
+    border-radius: 8px;
+  }
+
+  .workers-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  .worker-card {
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 8px;
+    padding: 0.6rem;
+    background: rgba(30,41,59,0.3);
+    transition: all 0.3s;
+  }
+
+  .worker-card.active {
+    border-color: rgba(74,222,128,0.4);
+    background: rgba(74,222,128,0.05);
+  }
+
+  .worker-card.crawling-now {
+    border-color: rgba(249,115,22,0.5);
+    background: rgba(249,115,22,0.08);
+    animation: worker-pulse 1s infinite;
+  }
+
+  @keyframes worker-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(249,115,22,0); }
+    50% { box-shadow: 0 0 10px 2px rgba(249,115,22,0.2); }
+  }
+
+  .worker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+
+  .worker-name {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #cbd5e1;
+  }
+
+  .worker-status {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  .worker-status.idle { background: rgba(71,85,105,0.3); color: #64748b; }
+  .worker-status.busy { background: rgba(74,222,128,0.2); color: #4ade80; }
+
+  .worker-domains {
+    font-size: 0.7rem;
+    color: #64748b;
+    margin-bottom: 0.3rem;
+  }
+
+  .worker-progress {
+    height: 4px;
+    background: rgba(71,85,105,0.3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .worker-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #60a5fa, #4ade80);
+    border-radius: 2px;
+    transition: width 0.5s;
+    width: 0%;
+  }
+
+  .worker-count {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    margin-top: 0.25rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ======================================= */
+  /* SECTION 6: ARCHITECTURE                 */
+  /* ======================================= */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 1.25rem;
+  }
+
+  .arch-card {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    padding: 1.25rem;
+    transition: border-color 0.3s;
+  }
+
+  .arch-card:hover {
+    border-color: rgba(96,165,250,0.4);
+  }
+
+  .arch-card p {
+    font-size: 0.9rem;
+    color: #94a3b8;
+    line-height: 1.6;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .arch-card ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    line-height: 1.8;
+  }
+
+  .arch-diagram {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(30,41,59,0.4);
+    border-radius: 6px;
+  }
+
+  .arch-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .arch-node {
+    padding: 0.3rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    background: rgba(71,85,105,0.3);
+    border: 1px solid rgba(71,85,105,0.5);
+    color: #cbd5e1;
+  }
+
+  .arch-node.highlight {
+    background: rgba(96,165,250,0.2);
+    border-color: rgba(96,165,250,0.5);
+    color: #60a5fa;
+  }
+
+  .arch-arrow {
+    color: #475569;
+    font-size: 1.1rem;
+  }
+
+  /* ======================================= */
+  /* SECTION 7: DECISIONS                    */
+  /* ======================================= */
+  .decision-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .decision-card {
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(71,85,105,0.4);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+
+  .decision-card:hover {
+    border-color: rgba(96,165,250,0.3);
+  }
+
+  .decision-header {
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+  }
+
+  .decision-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+  }
+
+  .decision-toggle {
+    color: #64748b;
+    transition: transform 0.3s;
+    font-size: 0.9rem;
+  }
+
+  .decision-card.open .decision-toggle {
+    transform: rotate(180deg);
+  }
+
+  .decision-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease-out;
+    padding: 0 1.25rem;
+  }
+
+  .decision-card.open .decision-body {
+    max-height: 500px;
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  .tradeoff-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .tradeoff-side {
+    padding: 0.75rem;
+    border-radius: 8px;
+  }
+
+  .tradeoff-side.pro {
+    background: rgba(74,222,128,0.05);
+    border: 1px solid rgba(74,222,128,0.2);
+  }
+
+  .tradeoff-side.con {
+    background: rgba(251,191,36,0.05);
+    border: 1px solid rgba(251,191,36,0.2);
+  }
+
+  .tradeoff-side h4 {
+    font-size: 0.9rem;
+    margin: 0 0 0.5rem 0;
+    color: #e2e8f0;
+  }
+
+  .tradeoff-side ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    line-height: 1.7;
+  }
+
+  .verdict {
+    padding: 0.75rem;
+    background: rgba(96,165,250,0.08);
+    border: 1px solid rgba(96,165,250,0.2);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    line-height: 1.5;
+  }
+
+  /* ======================================= */
+  /* RESPONSIVE                              */
+  /* ======================================= */
+  @media (max-width: 900px) {
+    .crawl-viz-wrapper { grid-template-columns: 1fr; }
+    .frontier-viz-wrapper { grid-template-columns: 1fr; }
+    .arrow-col { display: none; }
+    .politeness-wrapper { grid-template-columns: 1fr; }
+    .bloom-viz-wrapper { grid-template-columns: 1fr; }
+    .dist-viz-wrapper { grid-template-columns: 1fr; }
+    .tradeoff-row { grid-template-columns: 1fr; }
+    .arch-grid { grid-template-columns: 1fr; }
+    .workers-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: rgba(30,41,59,0.3); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+</style>
+
+<script>
+  // =============================================
+  // SECTION 1: BFS / DFS GRAPH CRAWL
+  // =============================================
+  (function() {
+    const canvas = document.getElementById('graphCanvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = 700 * dpr;
+    canvas.height = 450 * dpr;
+    ctx.scale(dpr, dpr);
+
+    const STATES = { UNVISITED: 0, FRONTIER: 1, CRAWLING: 2, VISITED: 3 };
+    const COLORS = { 0: '#475569', 1: '#fbbf24', 2: '#f97316', 3: '#4ade80' };
+
+    // Generate a web graph
+    let nodes = [];
+    let edges = [];
+    let nodeStates = [];
+    let frontier = [];
+    let visited = new Set();
+    let crawlStrategy = 'bfs';
+    let crawlInterval = null;
+    let crawlRunning = false;
+    let totalDiscovered = 0;
+
+    function generateGraph() {
+      const seedUrl = document.getElementById('seedUrlInput').value || 'example.com';
+      const pages = [
+        seedUrl,
+        seedUrl + '/about',
+        seedUrl + '/blog',
+        seedUrl + '/blog/post-1',
+        seedUrl + '/blog/post-2',
+        seedUrl + '/products',
+        seedUrl + '/products/item-a',
+        seedUrl + '/products/item-b',
+        seedUrl + '/contact',
+        seedUrl + '/faq',
+        seedUrl + '/blog/post-3',
+        seedUrl + '/products/item-c',
+        'docs.' + seedUrl,
+        'docs.' + seedUrl + '/api',
+        'shop.' + seedUrl,
+      ];
+
+      const positions = [
+        [350,40],[180,120],[520,120],[100,220],[260,220],
+        [440,220],[360,320],[520,320],[180,340],[60,340],
+        [420,130],[600,230],[150,50],[80,130],[600,40]
+      ];
+
+      nodes = pages.map((url, i) => ({
+        id: i, url: url, x: positions[i][0], y: positions[i][1], radius: 18
+      }));
+
+      edges = [
+        [0,1],[0,2],[0,8],[1,3],[1,4],[2,5],[2,10],
+        [5,6],[5,7],[3,9],[4,10],[6,11],[0,12],[12,13],[2,14]
+      ];
+
+      nodeStates = new Array(nodes.length).fill(STATES.UNVISITED);
+    }
+
+    function drawGraph() {
+      ctx.clearRect(0, 0, 700, 450);
+
+      // Draw edges
+      edges.forEach(([a, b]) => {
+        ctx.beginPath();
+        ctx.moveTo(nodes[a].x, nodes[a].y);
+        ctx.lineTo(nodes[b].x, nodes[b].y);
+        ctx.strokeStyle = 'rgba(71,85,105,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Arrow
+        const dx = nodes[b].x - nodes[a].x;
+        const dy = nodes[b].y - nodes[a].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const nx = dx/dist, ny = dy/dist;
+        const ax = nodes[b].x - nx * nodes[b].radius;
+        const ay = nodes[b].y - ny * nodes[b].radius;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - nx*8 - ny*4, ay - ny*8 + nx*4);
+        ctx.lineTo(ax - nx*8 + ny*4, ay - ny*8 - nx*4);
+        ctx.fillStyle = 'rgba(71,85,105,0.5)';
+        ctx.fill();
+      });
+
+      // Draw nodes
+      nodes.forEach((node, i) => {
+        const state = nodeStates[i];
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI*2);
+
+        if (state === STATES.CRAWLING) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = '#f97316';
+        } else {
+          ctx.shadowBlur = 0;
+        }
+
+        ctx.fillStyle = state === STATES.CRAWLING
+          ? 'rgba(249,115,22,0.3)'
+          : state === STATES.VISITED
+            ? 'rgba(74,222,128,0.15)'
+            : state === STATES.FRONTIER
+              ? 'rgba(251,191,36,0.15)'
+              : 'rgba(71,85,105,0.2)';
+        ctx.fill();
+
+        ctx.strokeStyle = COLORS[state];
+        ctx.lineWidth = state === STATES.CRAWLING ? 3 : 2;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Label
+        const label = node.url.split('/').pop() || node.url.replace(/https?:\/\//, '').split('/')[0];
+        ctx.fillStyle = COLORS[state];
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label.slice(0, 12), node.x, node.y + 4);
+      });
+    }
+
+    function getNeighbors(nodeId) {
+      const neighbors = [];
+      edges.forEach(([a, b]) => {
+        if (a === nodeId && !visited.has(b)) neighbors.push(b);
+      });
+      return neighbors;
+    }
+
+    function updateFrontierUI() {
+      const list = document.getElementById('frontierList');
+      const title = document.getElementById('frontierTitle');
+      title.textContent = crawlStrategy === 'bfs'
+        ? '\u{1F4E5} URL Frontier (Queue - BFS)'
+        : '\u{1F4E5} URL Frontier (Stack - DFS)';
+      list.innerHTML = '';
+      frontier.forEach(id => {
+        const el = document.createElement('div');
+        el.className = 'frontier-item';
+        el.textContent = nodes[id].url;
+        list.appendChild(el);
+      });
+      document.getElementById('visitedCount').textContent = visited.size;
+      document.getElementById('frontierCount').textContent = frontier.length;
+      document.getElementById('totalFound').textContent = totalDiscovered;
+    }
+
+    function addLog(msg, type) {
+      const log = document.getElementById('crawlLog');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      entry.textContent = msg;
+      log.insertBefore(entry, log.firstChild);
+      if (log.children.length > 50) log.removeChild(log.lastChild);
+    }
+
+    function crawlStep() {
+      // Finish current crawling
+      nodes.forEach((_, i) => {
+        if (nodeStates[i] === STATES.CRAWLING) nodeStates[i] = STATES.VISITED;
+      });
+
+      if (frontier.length === 0) {
+        stopCrawl();
+        addLog('Crawl complete!', 'discover');
+        return;
+      }
+
+      const current = crawlStrategy === 'bfs' ? frontier.shift() : frontier.pop();
+      if (visited.has(current)) { drawGraph(); updateFrontierUI(); return; }
+
+      visited.add(current);
+      nodeStates[current] = STATES.CRAWLING;
+      addLog('FETCH ' + nodes[current].url, 'fetch');
+
+      const neighbors = getNeighbors(current);
+      neighbors.forEach(n => {
+        if (!visited.has(n) && !frontier.includes(n)) {
+          frontier.push(n);
+          nodeStates[n] = STATES.FRONTIER;
+          totalDiscovered++;
+          addLog('  Found link: ' + nodes[n].url, 'discover');
+        } else if (visited.has(n)) {
+          addLog('  Already visited: ' + nodes[n].url, 'skip');
+        }
+      });
+
+      drawGraph();
+      updateFrontierUI();
+    }
+
+    function startCrawl() {
+      if (crawlRunning) return;
+      if (frontier.length === 0 && visited.size === 0) {
+        frontier.push(0);
+        nodeStates[0] = STATES.FRONTIER;
+        totalDiscovered = 1;
+      }
+      crawlRunning = true;
+      const speed = 1100 - document.getElementById('crawlSpeed').value * 100;
+      crawlInterval = setInterval(crawlStep, speed);
+      document.getElementById('startCrawlBtn').textContent = '\u23F8\uFE0F Pause';
+    }
+
+    function stopCrawl() {
+      crawlRunning = false;
+      clearInterval(crawlInterval);
+      document.getElementById('startCrawlBtn').textContent = '\u25B6\uFE0F Start Crawl';
+    }
+
+    function resetCrawl() {
+      stopCrawl();
+      frontier = [];
+      visited = new Set();
+      totalDiscovered = 0;
+      generateGraph();
+      drawGraph();
+      updateFrontierUI();
+      document.getElementById('crawlLog').innerHTML = '';
+    }
+
+    document.getElementById('startCrawlBtn').addEventListener('click', () => {
+      crawlRunning ? stopCrawl() : startCrawl();
+    });
+
+    document.getElementById('resetCrawlBtn').addEventListener('click', resetCrawl);
+
+    document.getElementById('stepCrawlBtn').addEventListener('click', () => {
+      if (crawlRunning) stopCrawl();
+      if (frontier.length === 0 && visited.size === 0) {
+        frontier.push(0);
+        nodeStates[0] = STATES.FRONTIER;
+        totalDiscovered = 1;
+        updateFrontierUI();
+      }
+      crawlStep();
+    });
+
+    document.querySelectorAll('[data-strategy]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-strategy]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        crawlStrategy = btn.dataset.strategy;
+        updateFrontierUI();
+      });
+    });
+
+    document.getElementById('crawlSpeed').addEventListener('input', (e) => {
+      document.getElementById('speedLabel').textContent = e.target.value;
+      if (crawlRunning) {
+        stopCrawl();
+        startCrawl();
+      }
+    });
+
+    generateGraph();
+    drawGraph();
+    updateFrontierUI();
+  })();
+
+  // =============================================
+  // SECTION 2: URL FRONTIER & PRIORITY QUEUE
+  // =============================================
+  (function() {
+    const frontQueues = { high: [], medium: [], low: [] };
+    const backQueues = {};
+    let totalEnqueued = 0, totalDequeued = 0;
+    let autoInterval = null;
+
+    const sampleUrls = [
+      { url: 'https://google.com/search', priority: 'high' },
+      { url: 'https://wikipedia.org/wiki/Main', priority: 'high' },
+      { url: 'https://news.ycombinator.com/', priority: 'high' },
+      { url: 'https://github.com/trending', priority: 'medium' },
+      { url: 'https://stackoverflow.com/questions', priority: 'medium' },
+      { url: 'https://reddit.com/r/programming', priority: 'medium' },
+      { url: 'https://blog.example.com/post-1', priority: 'low' },
+      { url: 'https://docs.example.com/api/v2', priority: 'low' },
+      { url: 'https://shop.example.com/items', priority: 'low' },
+      { url: 'https://google.com/maps', priority: 'high' },
+      { url: 'https://github.com/explore', priority: 'medium' },
+      { url: 'https://blog.example.com/post-2', priority: 'low' },
+    ];
+
+    function getDomain(url) {
+      try {
+        return url.replace(/https?:\/\//, '').split('/')[0];
+      } catch { return 'unknown'; }
+    }
+
+    function enqueueUrl(url, priority) {
+      frontQueues[priority].push(url);
+      const domain = getDomain(url);
+      if (!backQueues[domain]) backQueues[domain] = [];
+      backQueues[domain].push(url);
+      totalEnqueued++;
+      renderFrontier();
+    }
+
+    function dequeueUrl() {
+      let url = null;
+      for (const p of ['high', 'medium', 'low']) {
+        if (frontQueues[p].length > 0) {
+          url = frontQueues[p].shift();
+          break;
+        }
+      }
+      if (!url) return;
+
+      const domain = getDomain(url);
+      if (backQueues[domain]) {
+        const idx = backQueues[domain].indexOf(url);
+        if (idx !== -1) backQueues[domain].splice(idx, 1);
+        if (backQueues[domain].length === 0) delete backQueues[domain];
+      }
+      totalDequeued++;
+      renderFrontier();
+    }
+
+    function renderFrontier() {
+      ['high', 'medium', 'low'].forEach(p => {
+        const container = document.getElementById('pq' + p.charAt(0).toUpperCase() + p.slice(1) + 'Items');
+        container.innerHTML = '';
+        frontQueues[p].forEach(url => {
+          const el = document.createElement('div');
+          el.className = 'pq-item';
+          el.textContent = url.replace(/https?:\/\//, '');
+          el.title = url;
+          container.appendChild(el);
+        });
+      });
+
+      const dqContainer = document.getElementById('domainQueues');
+      dqContainer.innerHTML = '';
+      Object.keys(backQueues).sort().forEach(domain => {
+        const dq = document.createElement('div');
+        dq.className = 'domain-queue';
+        dq.innerHTML = '<div class="domain-queue-header"><span>' + domain + '</span><span>' + backQueues[domain].length + ' URLs</span></div>';
+        const items = document.createElement('div');
+        items.className = 'domain-queue-items';
+        backQueues[domain].forEach(url => {
+          const el = document.createElement('div');
+          el.className = 'dq-item';
+          el.textContent = url.replace(/https?:\/\//, '').replace(domain, '').slice(1) || '/';
+          items.appendChild(el);
+        });
+        dq.appendChild(items);
+        dqContainer.appendChild(dq);
+      });
+
+      document.getElementById('totalEnqueued').textContent = totalEnqueued;
+      document.getElementById('totalDequeued').textContent = totalDequeued;
+      document.getElementById('domainCount').textContent = Object.keys(backQueues).length;
+    }
+
+    document.getElementById('enqueueBtn').addEventListener('click', () => {
+      const url = document.getElementById('newUrlInput').value.trim();
+      const priority = document.getElementById('prioritySelect').value;
+      if (url) enqueueUrl(url, priority);
+    });
+
+    document.getElementById('dequeueBtn').addEventListener('click', dequeueUrl);
+
+    document.getElementById('autoFrontierBtn').addEventListener('click', () => {
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        document.getElementById('autoFrontierBtn').textContent = '\u25B6\uFE0F Auto Demo';
+        return;
+      }
+      let idx = 0;
+      document.getElementById('autoFrontierBtn').textContent = '\u23F9\uFE0F Stop';
+      autoInterval = setInterval(() => {
+        if (idx < sampleUrls.length) {
+          enqueueUrl(sampleUrls[idx].url, sampleUrls[idx].priority);
+          idx++;
+        } else {
+          if (Object.keys(backQueues).length > 0) {
+            dequeueUrl();
+          } else {
+            clearInterval(autoInterval);
+            autoInterval = null;
+            document.getElementById('autoFrontierBtn').textContent = '\u25B6\uFE0F Auto Demo';
+          }
+        }
+      }, 600);
+    });
+
+    renderFrontier();
+  })();
+
+  // =============================================
+  // SECTION 3: POLITENESS & ROBOTS.TXT
+  // =============================================
+  (function() {
+    const genericRules = {
+      disallow: ['/admin/', '/private/', '/api/internal/'],
+      allow: ['/api/public/'],
+      crawlDelay: 2
+    };
+    const mybotRules = {
+      disallow: ['/secret/'],
+      allow: ['/'],
+      crawlDelay: 1
+    };
+
+    const testUrls = [
+      '/about', '/admin/settings', '/blog/post-1', '/private/data',
+      '/api/internal/users', '/api/public/docs', '/products/shoes',
+      '/secret/keys', '/contact', '/admin/login'
+    ];
+
+    function getRules() {
+      return document.getElementById('userAgentSelect').value === 'mybot' ? mybotRules : genericRules;
+    }
+
+    function isAllowed(path) {
+      const rules = getRules();
+      // Check allow first (more specific)
+      for (const a of rules.allow) {
+        if (path.startsWith(a)) return true;
+      }
+      for (const d of rules.disallow) {
+        if (path.startsWith(d)) return false;
+      }
+      return true;
+    }
+
+    function renderUrlTests() {
+      const list = document.getElementById('urlTestList');
+      list.innerHTML = '';
+      testUrls.forEach(url => {
+        const allowed = isAllowed(url);
+        const el = document.createElement('div');
+        el.className = 'url-test-item ' + (allowed ? 'allowed' : 'disallowed');
+        el.innerHTML = '<span class="url-test-status">' + (allowed ? '\u2705' : '\u274C') + '</span><span>' + url + '</span>';
+        list.appendChild(el);
+      });
+      document.getElementById('currentDelay').textContent = getRules().crawlDelay;
+    }
+
+    document.getElementById('testUrlBtn').addEventListener('click', () => {
+      const path = document.getElementById('testUrlInput').value.trim();
+      if (!path) return;
+      if (!testUrls.includes(path)) testUrls.push(path);
+      renderUrlTests();
+    });
+
+    document.getElementById('userAgentSelect').addEventListener('change', renderUrlTests);
+
+    // Timeline visualization
+    let timelineRunning = false;
+    document.getElementById('startTimelineBtn').addEventListener('click', () => {
+      if (timelineRunning) return;
+      timelineRunning = true;
+      const viz = document.getElementById('timelineViz');
+      viz.innerHTML = '';
+      const rules = getRules();
+      const delay = rules.crawlDelay;
+      const requests = ['/page1', '/page2', '/page3', '/page4', '/page5'];
+
+      const bar = document.createElement('div');
+      bar.className = 'timeline-bar';
+      bar.innerHTML = '<span class="timeline-label">host: example.com</span>';
+      const track = document.createElement('div');
+      track.className = 'timeline-track';
+      bar.appendChild(track);
+      viz.appendChild(bar);
+
+      const label = document.createElement('div');
+      label.style.cssText = 'font-size:0.75rem;color:#64748b;margin-top:4px;';
+      viz.appendChild(label);
+
+      let i = 0;
+      const interval = setInterval(() => {
+        if (i >= requests.length) {
+          clearInterval(interval);
+          timelineRunning = false;
+          label.textContent = 'All requests sent with ' + delay + 's delay between each.';
+          return;
+        }
+        const req = document.createElement('div');
+        req.className = 'timeline-request allowed-req';
+        req.style.left = (i * (delay * 40 + 20)) + 'px';
+        req.textContent = (i + 1);
+        req.title = requests[i];
+        track.appendChild(req);
+        label.textContent = 'Request ' + (i+1) + ': ' + requests[i] + ' (t=' + (i*delay) + 's)';
+        i++;
+      }, delay * 500);
+    });
+
+    renderUrlTests();
+  })();
+
+  // =============================================
+  // SECTION 4: BLOOM FILTER
+  // =============================================
+  (function() {
+    const BLOOM_SIZE = 64;
+    const NUM_HASHES = 3;
+    let bitArray = new Array(BLOOM_SIZE).fill(0);
+    let addedUrls = new Set();
+    let urlsAdded = 0;
+    let falsePositiveCount = 0;
+    let autoBloomInterval = null;
+
+    function hashStr(str, seed) {
+      let h = seed;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+        h = (h * 2654435761) | 0;
+      }
+      return Math.abs(h) % BLOOM_SIZE;
+    }
+
+    function getHashes(url) {
+      return [hashStr(url, 0x9e3779b9), hashStr(url, 0x517cc1b7), hashStr(url, 0x6a09e667)];
+    }
+
+    function renderBitArray(highlights, isFalsePos) {
+      const container = document.getElementById('bitArray');
+      container.innerHTML = '';
+      for (let i = 0; i < BLOOM_SIZE; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'bit-cell';
+        if (bitArray[i]) cell.classList.add('set');
+        if (highlights && highlights.includes(i)) {
+          cell.classList.add(isFalsePos ? 'false-pos' : 'highlight');
+        }
+        cell.textContent = bitArray[i];
+        container.appendChild(cell);
+      }
+
+      const bitsSetCount = bitArray.filter(b => b).length;
+      document.getElementById('bloomAdded').textContent = urlsAdded;
+      document.getElementById('bitsSet').textContent = bitsSetCount;
+      document.getElementById('fillRatio').textContent = Math.round(bitsSetCount / BLOOM_SIZE * 100) + '%';
+      document.getElementById('falsePositives').textContent = falsePositiveCount;
+
+      // Space comparison
+      const bloomBytes = BLOOM_SIZE / 8;
+      const hashsetBytes = urlsAdded * 40;
+      document.getElementById('bloomSpaceVal').textContent = bloomBytes + ' bytes';
+      document.getElementById('hashsetSpaceVal').textContent = hashsetBytes + ' bytes';
+      const maxBytes = Math.max(bloomBytes, hashsetBytes, 1);
+      document.getElementById('bloomSpaceBar').style.width = Math.max(5, (bloomBytes / maxBytes) * 100) + '%';
+      document.getElementById('hashsetSpaceBar').style.width = Math.max(urlsAdded ? 5 : 0, (hashsetBytes / maxBytes) * 100) + '%';
+    }
+
+    function addUrl(url) {
+      const hashes = getHashes(url);
+      hashes.forEach(h => { bitArray[h] = 1; });
+      addedUrls.add(url);
+      urlsAdded++;
+      document.getElementById('bloomHashInfo').textContent =
+        'ADD "' + url.slice(0, 40) + '" \u2192 bits [' + hashes.join(', ') + ']';
+      addBloomLog('ADD: ' + url + ' \u2192 bits [' + hashes.join(', ') + ']', 'added');
+      renderBitArray(hashes, false);
+    }
+
+    function checkUrl(url) {
+      const hashes = getHashes(url);
+      const mightExist = hashes.every(h => bitArray[h] === 1);
+      const actuallyExists = addedUrls.has(url);
+
+      if (mightExist && !actuallyExists) {
+        falsePositiveCount++;
+        document.getElementById('bloomHashInfo').textContent =
+          'FALSE POSITIVE! "' + url.slice(0, 30) + '" bits [' + hashes.join(', ') + '] all set but URL was never added';
+        addBloomLog('FALSE POSITIVE: ' + url, 'false-positive');
+        renderBitArray(hashes, true);
+      } else if (mightExist) {
+        document.getElementById('bloomHashInfo').textContent =
+          'FOUND: "' + url.slice(0, 35) + '" bits [' + hashes.join(', ') + '] all set (true positive)';
+        addBloomLog('FOUND: ' + url, 'found');
+        renderBitArray(hashes, false);
+      } else {
+        document.getElementById('bloomHashInfo').textContent =
+          'NOT FOUND: "' + url.slice(0, 35) + '" some bits not set (definitely not in set)';
+        addBloomLog('NOT FOUND: ' + url + ' (definite negative)', 'not-found');
+        renderBitArray(hashes, false);
+      }
+    }
+
+    function addBloomLog(msg, type) {
+      const log = document.getElementById('bloomLog');
+      const entry = document.createElement('div');
+      entry.className = 'bloom-log-entry ' + type;
+      entry.textContent = msg;
+      log.insertBefore(entry, log.firstChild);
+      if (log.children.length > 30) log.removeChild(log.lastChild);
+    }
+
+    document.getElementById('bloomAddBtn').addEventListener('click', () => {
+      const url = document.getElementById('bloomUrlInput').value.trim();
+      if (url) addUrl(url);
+    });
+
+    document.getElementById('bloomCheckBtn').addEventListener('click', () => {
+      const url = document.getElementById('bloomUrlInput').value.trim();
+      if (url) checkUrl(url);
+    });
+
+    document.getElementById('bloomResetBtn').addEventListener('click', () => {
+      bitArray = new Array(BLOOM_SIZE).fill(0);
+      addedUrls = new Set();
+      urlsAdded = 0;
+      falsePositiveCount = 0;
+      document.getElementById('bloomLog').innerHTML = '';
+      document.getElementById('bloomHashInfo').textContent = 'Add a URL to see which bits get set';
+      renderBitArray();
+    });
+
+    document.getElementById('bloomDemoBtn').addEventListener('click', () => {
+      if (autoBloomInterval) {
+        clearInterval(autoBloomInterval);
+        autoBloomInterval = null;
+        document.getElementById('bloomDemoBtn').textContent = '\u25B6\uFE0F Auto Demo';
+        return;
+      }
+
+      const demoUrls = [
+        'https://example.com/page1', 'https://example.com/page2',
+        'https://example.com/page3', 'https://news.com/article',
+        'https://blog.com/post', 'https://shop.com/item',
+      ];
+      const checkUrls = [
+        'https://example.com/page1', 'https://never-added.com/xyz',
+        'https://false-positive-test.com/abc', 'https://blog.com/post',
+        'https://unknown.com/page', 'https://example.com/page2',
+      ];
+
+      let idx = 0;
+      document.getElementById('bloomDemoBtn').textContent = '\u23F9\uFE0F Stop';
+      autoBloomInterval = setInterval(() => {
+        if (idx < demoUrls.length) {
+          addUrl(demoUrls[idx]);
+        } else if (idx < demoUrls.length + checkUrls.length) {
+          checkUrl(checkUrls[idx - demoUrls.length]);
+        } else {
+          clearInterval(autoBloomInterval);
+          autoBloomInterval = null;
+          document.getElementById('bloomDemoBtn').textContent = '\u25B6\uFE0F Auto Demo';
+        }
+        idx++;
+      }, 700);
+    });
+
+    renderBitArray();
+  })();
+
+  // =============================================
+  // SECTION 5: DISTRIBUTED CRAWLING
+  // =============================================
+  (function() {
+    const hashCanvas = document.getElementById('hashRingCanvas');
+    const hctx = hashCanvas.getContext('2d');
+    const hdpr = window.devicePixelRatio || 1;
+    hashCanvas.width = 300 * hdpr;
+    hashCanvas.height = 300 * hdpr;
+    hctx.scale(hdpr, hdpr);
+
+    let workerNum = 4;
+    let workers = [];
+    let domains = [
+      'google.com', 'wikipedia.org', 'github.com', 'stackoverflow.com',
+      'reddit.com', 'amazon.com', 'nytimes.com', 'bbc.co.uk'
+    ];
+    let domainAssignments = {};
+    let distRunning = false;
+    let distInterval = null;
+    let totalCrawledCount = 0;
+
+    const workerColors = ['#60a5fa', '#4ade80', '#fbbf24', '#f87171', '#a78bfa', '#f97316', '#06b6d4', '#e879f9'];
+
+    function simpleHash(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      }
+      return Math.abs(h);
+    }
+
+    function assignDomains() {
+      domainAssignments = {};
+      workers.forEach(w => { w.domains = []; w.crawled = 0; w.status = 'idle'; });
+      domains.forEach(domain => {
+        const hash = simpleHash(domain);
+        const workerIdx = hash % workerNum;
+        domainAssignments[domain] = workerIdx;
+        workers[workerIdx].domains.push(domain);
+      });
+    }
+
+    function initWorkers() {
+      workerNum = parseInt(document.getElementById('workerCount').value);
+      workers = [];
+      for (let i = 0; i < workerNum; i++) {
+        workers.push({
+          id: i,
+          name: 'Worker-' + (i + 1),
+          color: workerColors[i % workerColors.length],
+          domains: [],
+          crawled: 0,
+          status: 'idle'
+        });
+      }
+      totalCrawledCount = 0;
+      assignDomains();
+      renderWorkers();
+      renderHashRing();
+      renderCoordQueue();
+      updateDistStats();
+    }
+
+    function renderHashRing() {
+      hctx.clearRect(0, 0, 300, 300);
+      const cx = 150, cy = 150, r = 110;
+
+      // Ring
+      hctx.beginPath();
+      hctx.arc(cx, cy, r, 0, Math.PI * 2);
+      hctx.strokeStyle = 'rgba(71,85,105,0.5)';
+      hctx.lineWidth = 3;
+      hctx.stroke();
+
+      // Worker positions on ring
+      workers.forEach((w, i) => {
+        const angle = (i / workerNum) * Math.PI * 2 - Math.PI / 2;
+        const wx = cx + r * Math.cos(angle);
+        const wy = cy + r * Math.sin(angle);
+
+        hctx.beginPath();
+        hctx.arc(wx, wy, 12, 0, Math.PI * 2);
+        hctx.fillStyle = w.color;
+        hctx.globalAlpha = 0.3;
+        hctx.fill();
+        hctx.globalAlpha = 1;
+        hctx.strokeStyle = w.color;
+        hctx.lineWidth = 2;
+        hctx.stroke();
+
+        hctx.fillStyle = w.color;
+        hctx.font = '10px sans-serif';
+        hctx.textAlign = 'center';
+        hctx.fillText('W' + (i + 1), wx, wy + 4);
+      });
+
+      // Domain positions
+      domains.forEach(domain => {
+        const hash = simpleHash(domain);
+        const angle = ((hash % 360) / 360) * Math.PI * 2 - Math.PI / 2;
+        const dx = cx + (r - 30) * Math.cos(angle);
+        const dy = cy + (r - 30) * Math.sin(angle);
+        const workerIdx = domainAssignments[domain];
+        const color = workerIdx !== undefined ? workers[workerIdx].color : '#64748b';
+
+        hctx.beginPath();
+        hctx.arc(dx, dy, 4, 0, Math.PI * 2);
+        hctx.fillStyle = color;
+        hctx.fill();
+
+        hctx.fillStyle = '#94a3b8';
+        hctx.font = '8px sans-serif';
+        hctx.textAlign = 'center';
+        const short = domain.split('.')[0].slice(0, 6);
+        hctx.fillText(short, dx, dy - 8);
+      });
+
+      // Center label
+      hctx.fillStyle = '#64748b';
+      hctx.font = '11px sans-serif';
+      hctx.textAlign = 'center';
+      hctx.fillText('Hash Ring', cx, cy - 5);
+      hctx.fillText(domains.length + ' domains', cx, cy + 10);
+    }
+
+    function renderWorkers() {
+      const grid = document.getElementById('workersGrid');
+      grid.innerHTML = '';
+      workers.forEach(w => {
+        const card = document.createElement('div');
+        card.className = 'worker-card' + (w.status === 'busy' ? ' active crawling-now' : '');
+        card.innerHTML =
+          '<div class="worker-header">' +
+            '<span class="worker-name" style="color:' + w.color + '">' + w.name + '</span>' +
+            '<span class="worker-status ' + w.status + '">' + w.status + '</span>' +
+          '</div>' +
+          '<div class="worker-domains">Domains: ' + (w.domains.length > 0 ? w.domains.join(', ') : 'none') + '</div>' +
+          '<div class="worker-progress"><div class="worker-progress-bar" style="width:' + Math.min(100, w.crawled * 5) + '%"></div></div>' +
+          '<div class="worker-count">Crawled: ' + w.crawled + ' pages</div>';
+        grid.appendChild(card);
+      });
+    }
+
+    function renderCoordQueue() {
+      const queue = document.getElementById('coordQueue');
+      queue.innerHTML = '';
+      domains.slice(0, 6).forEach(d => {
+        const el = document.createElement('div');
+        el.className = 'coord-item';
+        const wIdx = domainAssignments[d];
+        el.textContent = d + ' \u2192 W' + (wIdx + 1);
+        queue.appendChild(el);
+      });
+    }
+
+    function updateDistStats() {
+      document.getElementById('activeWorkers').textContent = workerNum;
+      document.getElementById('domainsAssigned').textContent = domains.length;
+      document.getElementById('totalCrawled').textContent = totalCrawledCount;
+      const rate = distRunning ? Math.round(workerNum * 2.5) : 0;
+      document.getElementById('crawlRate').textContent = rate;
+    }
+
+    function distStep() {
+      workers.forEach(w => {
+        if (w.domains.length > 0) {
+          w.status = 'busy';
+          w.crawled += Math.floor(Math.random() * 3) + 1;
+          totalCrawledCount += Math.floor(Math.random() * 3) + 1;
+        }
+      });
+      renderWorkers();
+      renderHashRing();
+      updateDistStats();
+    }
+
+    document.getElementById('workerCount').addEventListener('input', (e) => {
+      document.getElementById('workerLabel').textContent = e.target.value;
+    });
+
+    document.getElementById('startDistBtn').addEventListener('click', () => {
+      if (distRunning) {
+        distRunning = false;
+        clearInterval(distInterval);
+        workers.forEach(w => { w.status = 'idle'; });
+        renderWorkers();
+        updateDistStats();
+        document.getElementById('startDistBtn').textContent = '\u25B6\uFE0F Start Distributed Crawl';
+        return;
+      }
+      initWorkers();
+      distRunning = true;
+      distInterval = setInterval(distStep, 800);
+      document.getElementById('startDistBtn').textContent = '\u23F9\uFE0F Stop';
+    });
+
+    document.getElementById('resetDistBtn').addEventListener('click', () => {
+      distRunning = false;
+      clearInterval(distInterval);
+      initWorkers();
+      document.getElementById('startDistBtn').textContent = '\u25B6\uFE0F Start Distributed Crawl';
+    });
+
+    document.getElementById('addDomainBtn').addEventListener('click', () => {
+      const newDomains = ['medium.com', 'dev.to', 'hackernews.com', 'lobste.rs', 'techcrunch.com', 'wired.com', 'arstechnica.com'];
+      const available = newDomains.filter(d => !domains.includes(d));
+      if (available.length > 0) {
+        domains.push(available[0]);
+        assignDomains();
+        renderWorkers();
+        renderHashRing();
+        renderCoordQueue();
+        updateDistStats();
+      }
+    });
+
+    initWorkers();
+  })();
+
+  // =============================================
+  // SECTION 6: DECISION CARDS TOGGLE
+  // =============================================
+  (function() {
+    document.querySelectorAll('.decision-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const card = header.parentElement;
+        card.classList.toggle('open');
+      });
+    });
+    // Open first card by default
+    const firstCard = document.querySelector('.decision-card');
+    if (firstCard) firstCard.classList.add('open');
+  })();
+</script>
